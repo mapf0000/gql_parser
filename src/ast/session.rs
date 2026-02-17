@@ -1,10 +1,11 @@
-//! Session statement AST nodes for Sprint 4.
+//! Session statement AST nodes.
 //!
 //! This module defines AST nodes for session management commands including:
 //! - SESSION SET (schema, graph, time zone, parameters)
 //! - SESSION RESET
 //! - SESSION CLOSE
 
+use crate::ast::references::{GraphReference, SchemaReference};
 use crate::ast::{Expression, Span};
 use smol_str::SmolStr;
 
@@ -35,8 +36,8 @@ pub enum SessionSetCommand {
 /// SESSION SET SCHEMA clause.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionSetSchemaClause {
-    /// The schema reference (deferred - placeholder for now)
-    pub schema_reference: SchemaReferencePlaceholder,
+    /// Parsed schema reference
+    pub schema_reference: SchemaReference,
     pub span: Span,
 }
 
@@ -45,8 +46,8 @@ pub struct SessionSetSchemaClause {
 pub struct SessionSetGraphClause {
     /// Whether PROPERTY keyword was present
     pub property: bool,
-    /// The graph reference (deferred - placeholder for now)
-    pub graph_reference: GraphReferencePlaceholder,
+    /// Parsed graph reference
+    pub graph_reference: GraphReference,
     pub span: Span,
 }
 
@@ -112,26 +113,6 @@ pub struct SessionCloseCommand {
     pub span: Span,
 }
 
-// Placeholders for future sprints
-
-/// Placeholder for schema references (Sprint 4 Task 8).
-#[derive(Debug, Clone, PartialEq)]
-pub struct SchemaReferencePlaceholder {
-    pub span: Span,
-}
-
-/// Placeholder for graph references (Sprint 4 Task 8).
-#[derive(Debug, Clone, PartialEq)]
-pub struct GraphReferencePlaceholder {
-    pub span: Span,
-}
-
-/// Placeholder for expressions (Sprint 5).
-#[derive(Debug, Clone, PartialEq)]
-pub struct ExpressionPlaceholder {
-    pub span: Span,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,7 +120,7 @@ mod tests {
     #[test]
     fn test_session_command_variants() {
         let schema_cmd = SessionCommand::Set(SessionSetCommand::Schema(SessionSetSchemaClause {
-            schema_reference: SchemaReferencePlaceholder { span: 0..10 },
+            schema_reference: SchemaReference::HomeSchema { span: 0..11 },
             span: 0..20,
         }));
         assert!(matches!(schema_cmd, SessionCommand::Set(_)));

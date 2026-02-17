@@ -4,10 +4,12 @@ mod catalog;
 pub mod expression;
 mod mutation;
 pub mod program;
-mod query;
+pub mod query;
+pub mod references;
 mod session;
 mod span;
 mod transaction;
+pub mod types;
 
 // Re-export span types
 pub use span::{Span, Spanned};
@@ -20,7 +22,6 @@ pub use program::{
 
 // Re-export session types
 pub use session::{
-    ExpressionPlaceholder, GraphReferencePlaceholder, SchemaReferencePlaceholder,
     SessionCloseCommand, SessionCommand, SessionResetCommand, SessionResetTarget,
     SessionSetCommand, SessionSetGraphClause, SessionSetParameterClause, SessionSetSchemaClause,
     SessionSetTimeZoneClause,
@@ -36,8 +37,7 @@ pub use transaction::{
 pub use catalog::{
     CallCatalogModifyingProcedureStatement, CatalogStatementKind, CreateGraphStatement,
     CreateGraphTypeStatement, CreateSchemaStatement, DropGraphStatement, DropGraphTypeStatement,
-    DropSchemaStatement, GraphReference, GraphTypeReference, GraphTypeSource, GraphTypeSpec,
-    SchemaReference,
+    DropSchemaStatement, GraphTypeSource, GraphTypeSpec,
 };
 
 // Re-export expression types
@@ -46,5 +46,37 @@ pub use expression::{
     ExistsExpression, ExistsVariant, Expression, FunctionCall, FunctionName,
     GraphPatternPlaceholder, LabelExpression, Literal, LogicalOperator, Predicate, RecordField,
     SearchedCaseExpression, SearchedWhenClause, SimpleCaseExpression, SimpleWhenClause,
-    TrimSpecification, TruthValue, TypeReference, UnaryOperator,
+    TrimSpecification, TruthValue, UnaryOperator,
+};
+
+// Re-export type system types
+pub use types::{
+    ApproximateNumericType, BindingTableReferenceValueType, BooleanType, ByteStringType,
+    CharacterStringType, DecimalExactNumericType, DecimalKind, EdgeReferenceValueType,
+    EdgeTypeSpecification, ExactNumericType, FieldType, FieldTypesSpecification,
+    GraphReferenceValueType, ImmaterialValueType, ListSyntaxForm, ListValueType,
+    NestedGraphTypeSpecification, NodeReferenceValueType, NodeTypeSpecification, NotNullConstraint,
+    NumericType, PathValueType, PredefinedType, RecordType, ReferenceValueType,
+    SignedBinaryExactNumericType, TemporalDurationType, TemporalInstantType, TemporalType,
+    TypeAnnotation, TypeAnnotationOperator, UnsignedBinaryExactNumericType, ValueType,
+};
+
+// Re-export reference types
+pub use references::{
+    BindingTableReference, BindingVariable, CatalogObjectParentReference, CatalogQualifiedName,
+    GraphReference, GraphReference as GraphRef, GraphTypeReference,
+    GraphTypeReference as GraphTypeRef, ProcedureReference, SchemaReference,
+    SchemaReference as SchemaRef,
+};
+
+// Re-export query types
+pub use query::{
+    AmbientLinearQuery, CompositeQuery, FilterStatement, FocusedLinearQuery, ForItem,
+    ForOrdinalityOrOffset, ForStatement, GraphPattern, GroupByClause, GroupingElement,
+    HavingClause, LetStatement, LetVariableDefinition, LimitClause, LinearQuery, MatchStatement,
+    NullOrdering, OffsetClause, OptionalMatchStatement, OptionalOperand, OrderByAndPageStatement,
+    OrderByClause, OrderingSpecification, PrimitiveQueryStatement, PrimitiveResultStatement,
+    Query, ReturnItem, ReturnItemList, ReturnStatement, SelectFromClause, SelectItem,
+    SelectItemList, SelectStatement, SetOperator, SetQuantifier, SimpleMatchStatement,
+    SortSpecification, UseGraphClause, WhereClause,
 };

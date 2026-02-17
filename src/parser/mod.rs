@@ -5,6 +5,9 @@
 
 pub mod expression;
 mod program;
+pub mod query;
+pub mod references;
+pub mod types;
 
 use crate::ast::Program;
 use crate::diag::{Diag, SourceFile, convert_diagnostics_to_reports};

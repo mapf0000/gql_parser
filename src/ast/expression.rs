@@ -9,6 +9,7 @@
 //! Expressions form the computational backbone of GQL queries.
 
 use crate::ast::Span;
+use crate::ast::types::{TypeAnnotation, ValueType};
 use smol_str::SmolStr;
 
 // ============================================================================
@@ -57,6 +58,9 @@ pub enum Expression {
     /// CAST expression
     Cast(CastExpression),
 
+    /// Type annotation expression (expr :: type, expr TYPED type)
+    TypeAnnotation(Box<Expression>, TypeAnnotation, Span),
+
     /// List constructor [expr1, expr2, ...]
     ListConstructor(Vec<Expression>, Span),
 
@@ -98,6 +102,7 @@ impl Expression {
             Expression::FunctionCall(fc) => fc.span.clone(),
             Expression::Case(ce) => ce.span(),
             Expression::Cast(ce) => ce.span.clone(),
+            Expression::TypeAnnotation(_, _, span) => span.clone(),
             Expression::ListConstructor(_, span) => span.clone(),
             Expression::RecordConstructor(_, span) => span.clone(),
             Expression::PathConstructor(_, span) => span.clone(),
@@ -249,7 +254,7 @@ pub enum Predicate {
     IsNull(Box<Expression>, bool, Span),
 
     /// IS [NOT] TYPED type predicate
-    IsTyped(Box<Expression>, TypeReference, bool, Span),
+    IsTyped(Box<Expression>, ValueType, bool, Span),
 
     /// IS [NOT] NORMALIZED predicate
     IsNormalized(Box<Expression>, bool, Span),
@@ -310,13 +315,6 @@ pub enum TruthValue {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LabelExpression {
     pub label: SmolStr,
-    pub span: Span,
-}
-
-/// Type reference (placeholder for Sprint 6 - Type System)
-#[derive(Debug, Clone, PartialEq)]
-pub struct TypeReference {
-    pub type_name: SmolStr,
     pub span: Span,
 }
 
@@ -526,8 +524,8 @@ pub struct SearchedWhenClause {
 pub struct CastExpression {
     /// Expression to cast
     pub operand: Box<Expression>,
-    /// Target type (will be fully implemented in Sprint 6)
-    pub target_type: TypeReference,
+    /// Target type
+    pub target_type: ValueType,
     /// Span covering the entire CAST expression
     pub span: Span,
 }

@@ -126,20 +126,89 @@ pub enum TokenKind {
     Null,
     Unknown,
 
-    // Type names
-    String,
-    Integer,
-    Float,
+    // Type names - Boolean
+    Bool,
     Boolean,
+
+    // Type names - String
+    String,
+    Char,
+    Varchar,
+
+    // Type names - Bytes
+    Bytes,
+    Binary,
+    Varbinary,
+
+    // Type names - Numeric (Signed)
+    Int,
+    Integer,
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    Int128,
+    Int256,
+    Smallint,
+    Bigint,
+    Signed,
+
+    // Type names - Numeric (Unsigned)
+    Uint,
+    Uint8,
+    Uint16,
+    Uint32,
+    Uint64,
+    Uint128,
+    Uint256,
+    Usmallint,
+    Ubigint,
+    Unsigned,
+
+    // Type names - Numeric (Decimal/Float)
+    Decimal,
+    Dec,
+    Float,
+    Float16,
+    Float32,
+    Float64,
+    Float128,
+    Float256,
+    Real,
+    Double,
+    Precision,
+
+    // Type names - Temporal
+    Zoned,
+    Local,
+    Datetime,
+    Without,
+    Year,
+    Month,
+    Day,
+    Second,
+    To,
+
+    // Type names - Other
+    Nothing,
     List,
+    Array,
     Record,
+    Vertex,
 
     // Additional expression and function keywords
     Value,
     Table,
     Binding,
     Variable,
-    Datetime,
+
+    // Null ordering keywords
+    Nulls,
+    First,
+    Last,
+
+    // For statement keywords
+    Ordinality,
 
     // Predicate keywords
     Typed,
@@ -350,12 +419,60 @@ impl TokenKind {
                 | TokenKind::Time
                 | TokenKind::Timestamp
                 | TokenKind::Duration
-                | TokenKind::String
-                | TokenKind::Integer
-                | TokenKind::Float
+                // Type keywords
+                | TokenKind::Bool
                 | TokenKind::Boolean
+                | TokenKind::String
+                | TokenKind::Char
+                | TokenKind::Varchar
+                | TokenKind::Bytes
+                | TokenKind::Binary
+                | TokenKind::Varbinary
+                | TokenKind::Int
+                | TokenKind::Integer
+                | TokenKind::Int8
+                | TokenKind::Int16
+                | TokenKind::Int32
+                | TokenKind::Int64
+                | TokenKind::Int128
+                | TokenKind::Int256
+                | TokenKind::Smallint
+                | TokenKind::Bigint
+                | TokenKind::Signed
+                | TokenKind::Uint
+                | TokenKind::Uint8
+                | TokenKind::Uint16
+                | TokenKind::Uint32
+                | TokenKind::Uint64
+                | TokenKind::Uint128
+                | TokenKind::Uint256
+                | TokenKind::Usmallint
+                | TokenKind::Ubigint
+                | TokenKind::Unsigned
+                | TokenKind::Decimal
+                | TokenKind::Dec
+                | TokenKind::Float
+                | TokenKind::Float16
+                | TokenKind::Float32
+                | TokenKind::Float64
+                | TokenKind::Float128
+                | TokenKind::Float256
+                | TokenKind::Real
+                | TokenKind::Double
+                | TokenKind::Precision
+                | TokenKind::Zoned
+                | TokenKind::Local
+                | TokenKind::Without
+                | TokenKind::Year
+                | TokenKind::Month
+                | TokenKind::Day
+                | TokenKind::Second
+                | TokenKind::To
+                | TokenKind::Nothing
                 | TokenKind::List
+                | TokenKind::Array
                 | TokenKind::Record
+                | TokenKind::Vertex
                 | TokenKind::True
                 | TokenKind::False
                 | TokenKind::Null
@@ -365,6 +482,10 @@ impl TokenKind {
                 | TokenKind::Binding
                 | TokenKind::Variable
                 | TokenKind::Datetime
+                | TokenKind::Nulls
+                | TokenKind::First
+                | TokenKind::Last
+                | TokenKind::Ordinality
                 | TokenKind::Typed
                 | TokenKind::Normalized
                 | TokenKind::Directed
@@ -553,17 +674,69 @@ impl fmt::Display for TokenKind {
             TokenKind::False => write!(f, "FALSE"),
             TokenKind::Null => write!(f, "NULL"),
             TokenKind::Unknown => write!(f, "UNKNOWN"),
-            TokenKind::String => write!(f, "STRING"),
-            TokenKind::Integer => write!(f, "INTEGER"),
-            TokenKind::Float => write!(f, "FLOAT"),
+            // Type keywords
+            TokenKind::Bool => write!(f, "BOOL"),
             TokenKind::Boolean => write!(f, "BOOLEAN"),
+            TokenKind::String => write!(f, "STRING"),
+            TokenKind::Char => write!(f, "CHAR"),
+            TokenKind::Varchar => write!(f, "VARCHAR"),
+            TokenKind::Bytes => write!(f, "BYTES"),
+            TokenKind::Binary => write!(f, "BINARY"),
+            TokenKind::Varbinary => write!(f, "VARBINARY"),
+            TokenKind::Int => write!(f, "INT"),
+            TokenKind::Integer => write!(f, "INTEGER"),
+            TokenKind::Int8 => write!(f, "INT8"),
+            TokenKind::Int16 => write!(f, "INT16"),
+            TokenKind::Int32 => write!(f, "INT32"),
+            TokenKind::Int64 => write!(f, "INT64"),
+            TokenKind::Int128 => write!(f, "INT128"),
+            TokenKind::Int256 => write!(f, "INT256"),
+            TokenKind::Smallint => write!(f, "SMALLINT"),
+            TokenKind::Bigint => write!(f, "BIGINT"),
+            TokenKind::Signed => write!(f, "SIGNED"),
+            TokenKind::Uint => write!(f, "UINT"),
+            TokenKind::Uint8 => write!(f, "UINT8"),
+            TokenKind::Uint16 => write!(f, "UINT16"),
+            TokenKind::Uint32 => write!(f, "UINT32"),
+            TokenKind::Uint64 => write!(f, "UINT64"),
+            TokenKind::Uint128 => write!(f, "UINT128"),
+            TokenKind::Uint256 => write!(f, "UINT256"),
+            TokenKind::Usmallint => write!(f, "USMALLINT"),
+            TokenKind::Ubigint => write!(f, "UBIGINT"),
+            TokenKind::Unsigned => write!(f, "UNSIGNED"),
+            TokenKind::Decimal => write!(f, "DECIMAL"),
+            TokenKind::Dec => write!(f, "DEC"),
+            TokenKind::Float => write!(f, "FLOAT"),
+            TokenKind::Float16 => write!(f, "FLOAT16"),
+            TokenKind::Float32 => write!(f, "FLOAT32"),
+            TokenKind::Float64 => write!(f, "FLOAT64"),
+            TokenKind::Float128 => write!(f, "FLOAT128"),
+            TokenKind::Float256 => write!(f, "FLOAT256"),
+            TokenKind::Real => write!(f, "REAL"),
+            TokenKind::Double => write!(f, "DOUBLE"),
+            TokenKind::Precision => write!(f, "PRECISION"),
+            TokenKind::Zoned => write!(f, "ZONED"),
+            TokenKind::Local => write!(f, "LOCAL"),
+            TokenKind::Datetime => write!(f, "DATETIME"),
+            TokenKind::Without => write!(f, "WITHOUT"),
+            TokenKind::Year => write!(f, "YEAR"),
+            TokenKind::Month => write!(f, "MONTH"),
+            TokenKind::Day => write!(f, "DAY"),
+            TokenKind::Second => write!(f, "SECOND"),
+            TokenKind::To => write!(f, "TO"),
+            TokenKind::Nothing => write!(f, "NOTHING"),
             TokenKind::List => write!(f, "LIST"),
+            TokenKind::Array => write!(f, "ARRAY"),
             TokenKind::Record => write!(f, "RECORD"),
+            TokenKind::Vertex => write!(f, "VERTEX"),
             TokenKind::Value => write!(f, "VALUE"),
             TokenKind::Table => write!(f, "TABLE"),
             TokenKind::Binding => write!(f, "BINDING"),
             TokenKind::Variable => write!(f, "VARIABLE"),
-            TokenKind::Datetime => write!(f, "DATETIME"),
+            TokenKind::Nulls => write!(f, "NULLS"),
+            TokenKind::First => write!(f, "FIRST"),
+            TokenKind::Last => write!(f, "LAST"),
+            TokenKind::Ordinality => write!(f, "ORDINALITY"),
             TokenKind::Typed => write!(f, "TYPED"),
             TokenKind::Normalized => write!(f, "NORMALIZED"),
             TokenKind::Directed => write!(f, "DIRECTED"),

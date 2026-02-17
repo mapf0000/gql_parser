@@ -8,10 +8,12 @@ use crate::ast::{
     ExistsExpression, ExistsVariant, Expression, FunctionCall, FunctionName,
     GraphPatternPlaceholder, LabelExpression, Literal, LogicalOperator, Predicate, RecordField,
     SearchedCaseExpression, SearchedWhenClause, SimpleCaseExpression, SimpleWhenClause, Span,
-    TrimSpecification, TruthValue, TypeReference, UnaryOperator,
+    TrimSpecification, TruthValue, TypeAnnotation, TypeAnnotationOperator, UnaryOperator,
+    ValueType,
 };
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
+use crate::parser::types::parse_value_type_prefix;
 use smol_str::SmolStr;
 
 type ParseError = Box<Diag>;
@@ -156,8 +158,8 @@ impl<'a> ExpressionParser<'a> {
                 }
                 TokenKind::Typed => {
                     self.advance();
-                    let type_ref = self.parse_type_reference()?;
-                    let span = expr.span().start..type_ref.span.end;
+                    let type_ref = self.parse_value_type_inline()?;
+                    let span = expr.span().start..type_ref.span().end;
                     Expression::Predicate(Predicate::IsTyped(
                         Box::new(expr),
                         type_ref,
@@ -371,23 +373,52 @@ impl<'a> ExpressionParser<'a> {
     fn parse_postfix_expression(&mut self) -> ParseResult<Expression> {
         let mut expr = self.parse_primary_expression()?;
 
-        while matches!(self.current().kind, TokenKind::Dot) {
-            self.advance();
-            let name = match &self.current().kind {
-                TokenKind::Identifier(n) | TokenKind::DelimitedIdentifier(n) => {
-                    let name = n.clone();
+        loop {
+            if matches!(self.current().kind, TokenKind::Dot) {
+                self.advance();
+                let name = match &self.current().kind {
+                    TokenKind::Identifier(n) | TokenKind::DelimitedIdentifier(n) => {
+                        let name = n.clone();
+                        self.advance();
+                        name
+                    }
+                    _ => {
+                        return Err(self.error_here(format!(
+                            "expected property name, found {}",
+                            self.current().kind
+                        )));
+                    }
+                };
+                let span = expr.span().start..self.tokens[self.pos - 1].span.end;
+                expr = Expression::PropertyReference(Box::new(expr), name, span);
+                continue;
+            }
+
+            if matches!(
+                self.current().kind,
+                TokenKind::DoubleColon | TokenKind::Typed
+            ) {
+                let annotation_start = self.current().span.start;
+                let operator = if self.check(&TokenKind::DoubleColon) {
                     self.advance();
-                    name
-                }
-                _ => {
-                    return Err(self.error_here(format!(
-                        "expected property name, found {}",
-                        self.current().kind
-                    )));
-                }
-            };
-            let span = expr.span().start..self.tokens[self.pos - 1].span.end;
-            expr = Expression::PropertyReference(Box::new(expr), name, span);
+                    TypeAnnotationOperator::DoubleColon
+                } else {
+                    self.advance();
+                    TypeAnnotationOperator::Typed
+                };
+                let type_ref = Box::new(self.parse_value_type_inline()?);
+                let annotation_end = type_ref.span().end;
+                let annotation = TypeAnnotation {
+                    operator,
+                    type_ref,
+                    span: annotation_start..annotation_end,
+                };
+                let span = expr.span().start..annotation_end;
+                expr = Expression::TypeAnnotation(Box::new(expr), annotation, span);
+                continue;
+            }
+
+            break;
         }
 
         Ok(expr)
@@ -990,7 +1021,7 @@ impl<'a> ExpressionParser<'a> {
         self.expect(TokenKind::LParen)?;
         let operand = Box::new(self.parse_expression()?);
         self.expect(TokenKind::As)?;
-        let target_type = self.parse_type_reference()?;
+        let target_type = self.parse_value_type_inline()?;
         let end = self.expect(TokenKind::RParen)?.end;
 
         Ok(CastExpression {
@@ -1103,30 +1134,15 @@ impl<'a> ExpressionParser<'a> {
         )))
     }
 
-    fn parse_type_reference(&mut self) -> ParseResult<TypeReference> {
-        let type_name = match &self.current().kind {
-            TokenKind::Identifier(name) | TokenKind::DelimitedIdentifier(name) => name.clone(),
-            TokenKind::String => SmolStr::new("STRING"),
-            TokenKind::Integer => SmolStr::new("INTEGER"),
-            TokenKind::Float => SmolStr::new("FLOAT"),
-            TokenKind::Boolean => SmolStr::new("BOOLEAN"),
-            TokenKind::List => SmolStr::new("LIST"),
-            TokenKind::Record => SmolStr::new("RECORD"),
-            TokenKind::Date => SmolStr::new("DATE"),
-            TokenKind::Time => SmolStr::new("TIME"),
-            TokenKind::Timestamp => SmolStr::new("TIMESTAMP"),
-            TokenKind::Datetime => SmolStr::new("DATETIME"),
-            TokenKind::Duration => SmolStr::new("DURATION"),
-            _ => {
-                return Err(
-                    self.error_here(format!("expected type name, found {}", self.current().kind))
-                );
-            }
-        };
-        let span = self.current().span.clone();
-        self.advance();
-
-        Ok(TypeReference { type_name, span })
+    fn parse_value_type_inline(&mut self) -> ParseResult<ValueType> {
+        let (value_type, consumed) = parse_value_type_prefix(&self.tokens[self.pos..])?;
+        if consumed == 0 {
+            return Err(self.error_here("expected type"));
+        }
+        for _ in 0..consumed {
+            self.advance();
+        }
+        Ok(value_type)
     }
 
     fn parse_label_expression(&mut self) -> ParseResult<LabelExpression> {
@@ -1313,6 +1329,10 @@ mod tests {
             parse_expr("CAST(a AS STRING)").unwrap(),
             Expression::Cast(_)
         ));
+        assert!(matches!(
+            parse_expr("CAST(a AS INT)").unwrap(),
+            Expression::Cast(_)
+        ));
     }
 
     #[test]
@@ -1322,8 +1342,24 @@ mod tests {
             Expression::Predicate(Predicate::IsNull(_, true, _))
         ));
         assert!(matches!(
+            parse_expr("a IS TYPED INT").unwrap(),
+            Expression::Predicate(Predicate::IsTyped(_, _, false, _))
+        ));
+        assert!(matches!(
             parse_expr("ALL_DIFFERENT(a, b)").unwrap(),
             Expression::Predicate(Predicate::AllDifferent(_, _))
+        ));
+    }
+
+    #[test]
+    fn parses_type_annotation_forms() {
+        assert!(matches!(
+            parse_expr("a::INT").unwrap(),
+            Expression::TypeAnnotation(_, _, _)
+        ));
+        assert!(matches!(
+            parse_expr("a TYPED STRING").unwrap(),
+            Expression::TypeAnnotation(_, _, _)
         ));
     }
 

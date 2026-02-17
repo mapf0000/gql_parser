@@ -3,10 +3,9 @@
 use crate::ast::{
     CallCatalogModifyingProcedureStatement, CatalogStatement, CatalogStatementKind, CommitCommand,
     CreateGraphStatement, CreateGraphTypeStatement, CreateSchemaStatement, DropGraphStatement,
-    DropGraphTypeStatement, DropSchemaStatement, Expression, GraphReference,
-    GraphReferencePlaceholder, GraphTypeReference, GraphTypeSource, GraphTypeSpec,
-    MutationStatement, Program, QueryStatement, RollbackCommand, SchemaReference,
-    SchemaReferencePlaceholder, SessionCloseCommand, SessionCommand, SessionResetCommand,
+    DropGraphTypeStatement, DropSchemaStatement, Expression, GraphReference, GraphTypeReference,
+    GraphTypeSource, GraphTypeSpec, MutationStatement, ProcedureReference, Program, QueryStatement,
+    RollbackCommand, SchemaReference, SessionCloseCommand, SessionCommand, SessionResetCommand,
     SessionResetTarget, SessionSetCommand, SessionSetGraphClause, SessionSetParameterClause,
     SessionSetSchemaClause, SessionSetTimeZoneClause, SessionStatement, Span,
     StartTransactionCommand, Statement, TransactionAccessMode, TransactionCharacteristics,
@@ -14,6 +13,7 @@ use crate::ast::{
 };
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
+use crate::parser::references as reference_parser;
 use smol_str::SmolStr;
 
 type ParseError = Box<Diag>;
@@ -193,20 +193,18 @@ fn parse_session_set_command(tokens: &[Token], mut cursor: usize) -> ParseOutcom
 
     if matches!(tokens[cursor].kind, TokenKind::Schema) {
         cursor += 1;
-        if cursor >= tokens.len() {
-            return Err(expected_token_diag(
+        let (schema_reference, next_cursor) =
+            parse_schema_reference_until(tokens, cursor, |_| false, "schema reference")?;
+        if next_cursor < tokens.len() {
+            return Err(unexpected_token_diag(
                 tokens,
-                cursor,
-                "schema reference",
+                next_cursor,
                 "SESSION SET SCHEMA",
             ));
         }
-        let schema_span = span_for_segment(tokens, cursor, tokens.len());
         return Ok(SessionCommand::Set(SessionSetCommand::Schema(
             SessionSetSchemaClause {
-                schema_reference: SchemaReferencePlaceholder {
-                    span: schema_span.clone(),
-                },
+                schema_reference,
                 span: stmt_span,
             },
         )));
@@ -307,11 +305,19 @@ fn parse_session_set_graph_or_graph_parameter(
         )));
     }
 
-    let graph_span = span_for_segment(tokens, cursor, tokens.len());
+    let (graph_reference, next_cursor) =
+        parse_graph_reference_until(tokens, cursor, |_| false, "graph reference")?;
+    if next_cursor < tokens.len() {
+        return Err(unexpected_token_diag(
+            tokens,
+            next_cursor,
+            "SESSION SET GRAPH",
+        ));
+    }
     Ok(SessionCommand::Set(SessionSetCommand::Graph(
         SessionSetGraphClause {
             property,
-            graph_reference: GraphReferencePlaceholder { span: graph_span },
+            graph_reference,
             span: stmt_span,
         },
     )))
@@ -870,7 +876,10 @@ fn parse_graph_type_spec(
 ) -> ParseOutcome<(GraphTypeSpec, usize)> {
     let start = cursor;
 
-    if cursor < tokens.len() && is_identifier_word(&tokens[cursor].kind, "TYPED") {
+    if cursor < tokens.len()
+        && (matches!(tokens[cursor].kind, TokenKind::Typed)
+            || is_identifier_word(&tokens[cursor].kind, "TYPED"))
+    {
         cursor += 1;
         if cursor >= tokens.len() {
             return Err(expected_token_diag(
@@ -1089,12 +1098,31 @@ fn parse_call_catalog_statement(tokens: &[Token]) -> ParseOutcome<CatalogStateme
         ));
     }
 
-    let procedure_name = token_name_value(&tokens[1].kind)
-        .ok_or_else(|| expected_token_diag(tokens, 1, "procedure name", "CALL statement"))?;
+    let (procedure, next_cursor) = parse_procedure_reference_until(
+        tokens,
+        1,
+        |kind| matches!(kind, TokenKind::LParen),
+        "procedure name",
+    )?;
+
+    // Procedure argument parsing is deferred; accept any trailing (...) payload.
+    if next_cursor < tokens.len() {
+        if !matches!(tokens[next_cursor].kind, TokenKind::LParen) {
+            return Err(unexpected_token_diag(tokens, next_cursor, "CALL"));
+        }
+        if !matches!(tokens.last().map(|t| &t.kind), Some(TokenKind::RParen)) {
+            return Err(expected_token_diag(
+                tokens,
+                tokens.len(),
+                ")",
+                "CALL argument list",
+            ));
+        }
+    }
 
     Ok(CatalogStatementKind::CallCatalogModifyingProcedure(
         CallCatalogModifyingProcedureStatement {
-            procedure_name,
+            procedure,
             span: slice_span(tokens),
         },
     ))
@@ -1109,65 +1137,13 @@ fn parse_schema_reference_until<F>(
 where
     F: Fn(&TokenKind) -> bool,
 {
-    if start >= tokens.len() {
-        return Err(expected_token_diag(tokens, start, context, context));
-    }
-
-    match &tokens[start].kind {
-        TokenKind::ReferenceParameter(name) => {
-            return Ok((
-                SchemaReference::Parameter {
-                    name: name.clone(),
-                    span: tokens[start].span.clone(),
-                },
-                start + 1,
-            ));
-        }
-        TokenKind::Dot => {
-            return Ok((SchemaReference::Dot(tokens[start].span.clone()), start + 1));
-        }
-        TokenKind::Identifier(name) if name.eq_ignore_ascii_case("HOME_SCHEMA") => {
-            return Ok((
-                SchemaReference::HomeSchema(tokens[start].span.clone()),
-                start + 1,
-            ));
-        }
-        TokenKind::Identifier(name) if name.eq_ignore_ascii_case("CURRENT_SCHEMA") => {
-            return Ok((
-                SchemaReference::CurrentSchema(tokens[start].span.clone()),
-                start + 1,
-            ));
-        }
-        TokenKind::Slash => {
-            let (parts, next_cursor, span, _) =
-                collect_reference_parts(tokens, start, &stop, context, true)?;
-            return Ok((
-                SchemaReference::AbsolutePath { path: parts, span },
-                next_cursor,
-            ));
-        }
-        TokenKind::DotDot => {
-            let (parts, next_cursor, span, _) =
-                collect_reference_parts(tokens, start, &stop, context, false)?;
-            return Ok((
-                SchemaReference::RelativePath { path: parts, span },
-                next_cursor,
-            ));
-        }
-        _ => {}
-    }
-
-    if let Some(name) = token_name_value(&tokens[start].kind) {
-        return Ok((
-            SchemaReference::RelativePath {
-                path: vec![name],
-                span: tokens[start].span.clone(),
-            },
-            start + 1,
-        ));
-    }
-
-    Err(expected_token_diag(tokens, start, context, context))
+    parse_reference_until(
+        tokens,
+        start,
+        stop,
+        context,
+        reference_parser::parse_schema_reference,
+    )
 }
 
 fn parse_graph_reference_until<F>(
@@ -1179,65 +1155,13 @@ fn parse_graph_reference_until<F>(
 where
     F: Fn(&TokenKind) -> bool,
 {
-    if start >= tokens.len() {
-        return Err(expected_token_diag(tokens, start, context, context));
-    }
-
-    if let TokenKind::ReferenceParameter(name) = &tokens[start].kind {
-        return Ok((
-            GraphReference::Parameter {
-                name: name.clone(),
-                span: tokens[start].span.clone(),
-            },
-            start + 1,
-        ));
-    }
-
-    let (parts, next_cursor, span, delimited_single) =
-        collect_reference_parts(tokens, start, &stop, context, false)?;
-
-    if parts.len() == 1 {
-        let name = parts[0].clone();
-        if name.eq_ignore_ascii_case("HOME_PROPERTY_GRAPH")
-            || name.eq_ignore_ascii_case("CURRENT_PROPERTY_GRAPH")
-        {
-            return Ok((GraphReference::HomePropertyGraph(span), next_cursor));
-        }
-        if name.eq_ignore_ascii_case("HOME_GRAPH") || name.eq_ignore_ascii_case("CURRENT_GRAPH") {
-            return Ok((GraphReference::HomeGraph(span), next_cursor));
-        }
-        if delimited_single {
-            return Ok((GraphReference::Delimited { name, span }, next_cursor));
-        }
-        return Ok((
-            GraphReference::CatalogQualified {
-                catalog: None,
-                schema: None,
-                name,
-                span,
-            },
-            next_cursor,
-        ));
-    }
-
-    let len = parts.len();
-    Ok((
-        GraphReference::CatalogQualified {
-            catalog: if len >= 3 {
-                Some(parts[len - 3].clone())
-            } else {
-                None
-            },
-            schema: if len >= 2 {
-                Some(parts[len - 2].clone())
-            } else {
-                None
-            },
-            name: parts[len - 1].clone(),
-            span,
-        },
-        next_cursor,
-    ))
+    parse_reference_until(
+        tokens,
+        start,
+        stop,
+        context,
+        reference_parser::parse_graph_reference,
+    )
 }
 
 fn parse_graph_type_reference_until<F>(
@@ -1249,118 +1173,58 @@ fn parse_graph_type_reference_until<F>(
 where
     F: Fn(&TokenKind) -> bool,
 {
+    parse_reference_until(
+        tokens,
+        start,
+        stop,
+        context,
+        reference_parser::parse_graph_type_reference,
+    )
+}
+
+fn parse_procedure_reference_until<F>(
+    tokens: &[Token],
+    start: usize,
+    stop: F,
+    context: &str,
+) -> ParseOutcome<(ProcedureReference, usize)>
+where
+    F: Fn(&TokenKind) -> bool,
+{
+    parse_reference_until(
+        tokens,
+        start,
+        stop,
+        context,
+        reference_parser::parse_procedure_reference,
+    )
+}
+
+fn parse_reference_until<T, F, P>(
+    tokens: &[Token],
+    start: usize,
+    stop: F,
+    context: &str,
+    parse: P,
+) -> ParseOutcome<(T, usize)>
+where
+    F: Fn(&TokenKind) -> bool,
+    P: Fn(&[Token]) -> Result<T, Box<Diag>>,
+{
     if start >= tokens.len() {
         return Err(expected_token_diag(tokens, start, context, context));
     }
 
-    if let TokenKind::ReferenceParameter(name) = &tokens[start].kind {
-        return Ok((
-            GraphTypeReference::Parameter {
-                name: name.clone(),
-                span: tokens[start].span.clone(),
-            },
-            start + 1,
-        ));
-    }
-
-    let (parts, next_cursor, span, _) =
-        collect_reference_parts(tokens, start, &stop, context, false)?;
-    let len = parts.len();
-    Ok((
-        GraphTypeReference::CatalogQualified {
-            catalog: if len >= 3 {
-                Some(parts[len - 3].clone())
-            } else {
-                None
-            },
-            schema: if len >= 2 {
-                Some(parts[len - 2].clone())
-            } else {
-                None
-            },
-            name: parts[len - 1].clone(),
-            span,
-        },
-        next_cursor,
-    ))
-}
-
-fn collect_reference_parts<F>(
-    tokens: &[Token],
-    start: usize,
-    stop: &F,
-    context: &str,
-    allow_empty_after_root: bool,
-) -> ParseOutcome<(Vec<SmolStr>, usize, Span, bool)>
-where
-    F: Fn(&TokenKind) -> bool,
-{
-    let mut cursor = start;
-    let mut parts = Vec::new();
-    let mut consumed_any = false;
-    let mut last_was_separator = false;
-    let mut last_end = tokens[start].span.end;
-    let mut delimited_single = false;
-
-    while cursor < tokens.len() && !stop(&tokens[cursor].kind) {
-        match &tokens[cursor].kind {
-            TokenKind::Identifier(name) => {
-                if consumed_any && !last_was_separator {
-                    break;
-                }
-                parts.push(name.clone());
-                consumed_any = true;
-                last_was_separator = false;
-                last_end = tokens[cursor].span.end;
-                cursor += 1;
-                delimited_single = false;
-            }
-            TokenKind::DelimitedIdentifier(name) => {
-                if consumed_any && !last_was_separator {
-                    break;
-                }
-                parts.push(name.clone());
-                consumed_any = true;
-                last_was_separator = false;
-                last_end = tokens[cursor].span.end;
-                cursor += 1;
-                delimited_single = parts.len() == 1;
-            }
-            TokenKind::Slash | TokenKind::Dot | TokenKind::DotDot => {
-                consumed_any = true;
-                last_was_separator = true;
-                last_end = tokens[cursor].span.end;
-                cursor += 1;
-                delimited_single = false;
-            }
-            _ => {
-                if parts.is_empty() {
-                    return Err(expected_token_diag(tokens, cursor, context, context));
-                }
-                break;
-            }
+    for end in (start + 1..=tokens.len()).rev() {
+        if end < tokens.len() && !stop(&tokens[end].kind) {
+            continue;
+        }
+        if let Ok(reference) = parse(&tokens[start..end]) {
+            return Ok((reference, end));
         }
     }
 
-    if parts.is_empty() {
-        if allow_empty_after_root && consumed_any {
-            let span = tokens[start].span.start..last_end;
-            return Ok((Vec::new(), cursor, span, false));
-        }
-        return Err(expected_token_diag(tokens, start, context, context));
-    }
-
-    if last_was_separator {
-        return Err(expected_token_diag(
-            tokens,
-            cursor,
-            "identifier after separator",
-            context,
-        ));
-    }
-
-    let span = tokens[start].span.start..last_end;
-    Ok((parts, cursor, span, delimited_single))
+    Err(expected_token_diag(tokens, start, context, context))
 }
 
 fn is_graph_type_spec_start(kind: &TokenKind) -> bool {
@@ -1372,6 +1236,7 @@ fn is_graph_type_spec_start(kind: &TokenKind) -> bool {
             | TokenKind::As
             | TokenKind::LBrace
             | TokenKind::DoubleColon
+            | TokenKind::Typed
     ) || is_identifier_word(kind, "TYPED")
 }
 
@@ -1408,15 +1273,6 @@ fn consume_if_exists(tokens: &[Token], cursor: &mut usize) -> bool {
         true
     } else {
         false
-    }
-}
-
-fn token_name_value(kind: &TokenKind) -> Option<SmolStr> {
-    match kind {
-        TokenKind::Identifier(name)
-        | TokenKind::DelimitedIdentifier(name)
-        | TokenKind::ReferenceParameter(name) => Some(name.clone()),
-        _ => None,
     }
 }
 
@@ -1730,6 +1586,9 @@ mod tests {
         let CatalogStatementKind::CallCatalogModifyingProcedure(call) = &stmt.kind else {
             panic!("expected CALL");
         };
-        assert_eq!(call.procedure_name, "doMaintenance");
+        let ProcedureReference::CatalogQualified { name, .. } = &call.procedure else {
+            panic!("expected parsed procedure reference");
+        };
+        assert_eq!(name.name, "doMaintenance");
     }
 }

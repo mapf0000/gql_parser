@@ -1,72 +1,18 @@
-//! Catalog statement AST nodes for Sprint 4.
+//! Catalog statement AST nodes.
 //!
 //! This module defines AST nodes for catalog management including:
-//! - Schema references, graph references, graph type references
 //! - CREATE/DROP SCHEMA statements
 //! - CREATE/DROP GRAPH statements
 //! - CREATE/DROP GRAPH TYPE statements
 //! - CALL catalog-modifying procedure statements
 
 use crate::ast::Span;
-use smol_str::SmolStr;
+use crate::ast::references::{
+    GraphReference, GraphTypeReference, ProcedureReference, SchemaReference,
+};
 
 // ============================================================================
-// Catalog References (Task 8)
-// ============================================================================
-
-/// Schema reference in a catalog context.
-#[derive(Debug, Clone, PartialEq)]
-pub enum SchemaReference {
-    /// Absolute path (/schema/path)
-    AbsolutePath { path: Vec<SmolStr>, span: Span },
-    /// Relative path (../schema or ./schema)
-    RelativePath { path: Vec<SmolStr>, span: Span },
-    /// HOME_SCHEMA predefined reference
-    HomeSchema(Span),
-    /// CURRENT_SCHEMA predefined reference
-    CurrentSchema(Span),
-    /// Single dot (.) reference
-    Dot(Span),
-    /// Reference parameter ($$name)
-    Parameter { name: SmolStr, span: Span },
-}
-
-/// Graph reference in a catalog context.
-#[derive(Debug, Clone, PartialEq)]
-pub enum GraphReference {
-    /// Catalog-qualified name (catalog.schema.graph)
-    CatalogQualified {
-        catalog: Option<SmolStr>,
-        schema: Option<SmolStr>,
-        name: SmolStr,
-        span: Span,
-    },
-    /// Delimited identifier
-    Delimited { name: SmolStr, span: Span },
-    /// HOME_GRAPH predefined reference
-    HomeGraph(Span),
-    /// HOME_PROPERTY_GRAPH predefined reference
-    HomePropertyGraph(Span),
-    /// Reference parameter ($$name)
-    Parameter { name: SmolStr, span: Span },
-}
-
-/// Graph type reference in a catalog context.
-#[derive(Debug, Clone, PartialEq)]
-pub enum GraphTypeReference {
-    /// Catalog-qualified name (catalog.schema.type)
-    CatalogQualified {
-        catalog: Option<SmolStr>,
-        schema: Option<SmolStr>,
-        name: SmolStr,
-        span: Span,
-    },
-    /// Reference parameter ($$name)
-    Parameter { name: SmolStr, span: Span },
-}
-
-// ============================================================================
-// Schema Statements (Task 4)
+// Schema Statements
 // ============================================================================
 
 /// CREATE SCHEMA statement.
@@ -92,7 +38,7 @@ pub struct DropSchemaStatement {
 }
 
 // ============================================================================
-// Graph Statements (Task 5)
+// Graph Statements
 // ============================================================================
 
 /// CREATE GRAPH statement.
@@ -140,7 +86,7 @@ pub struct DropGraphStatement {
 }
 
 // ============================================================================
-// Graph Type Statements (Task 6)
+// Graph Type Statements
 // ============================================================================
 
 /// CREATE GRAPH TYPE statement.
@@ -186,14 +132,14 @@ pub struct DropGraphTypeStatement {
 }
 
 // ============================================================================
-// Catalog Procedure Call (Task 7)
+// Catalog Procedure Call
 // ============================================================================
 
 /// CALL catalog-modifying procedure statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CallCatalogModifyingProcedureStatement {
-    /// Procedure name (simplified for now)
-    pub procedure_name: SmolStr,
+    /// Procedure reference
+    pub procedure: ProcedureReference,
     /// Procedure arguments placeholder (deferred to Sprint 11)
     pub span: Span,
 }
@@ -217,37 +163,40 @@ pub enum CatalogStatementKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::references::CatalogQualifiedName;
 
     #[test]
     fn test_schema_reference_variants() {
         let abs = SchemaReference::AbsolutePath {
-            path: vec!["catalog".into(), "schema".into()],
+            components: vec!["catalog".into(), "schema".into()],
             span: 0..10,
         };
         assert!(matches!(abs, SchemaReference::AbsolutePath { .. }));
 
-        let home = SchemaReference::HomeSchema(0..11);
-        assert!(matches!(home, SchemaReference::HomeSchema(_)));
+        let home = SchemaReference::HomeSchema { span: 0..11 };
+        assert!(matches!(home, SchemaReference::HomeSchema { .. }));
 
-        let param = SchemaReference::Parameter {
+        let param = SchemaReference::ReferenceParameter {
             name: "myschema".into(),
             span: 0..10,
         };
-        assert!(matches!(param, SchemaReference::Parameter { .. }));
+        assert!(matches!(param, SchemaReference::ReferenceParameter { .. }));
     }
 
     #[test]
     fn test_graph_reference_variants() {
         let qualified = GraphReference::CatalogQualified {
-            catalog: Some("cat".into()),
-            schema: Some("sch".into()),
-            name: "graph".into(),
-            span: 0..15,
+            name: CatalogQualifiedName {
+                parent: None,
+                name: "graph".into(),
+                span: 0..5,
+            },
+            span: 0..5,
         };
         assert!(matches!(qualified, GraphReference::CatalogQualified { .. }));
 
-        let home = GraphReference::HomeGraph(0..10);
-        assert!(matches!(home, GraphReference::HomeGraph(_)));
+        let home = GraphReference::HomeGraph { span: 0..10 };
+        assert!(matches!(home, GraphReference::HomeGraph { .. }));
     }
 
     #[test]
@@ -255,7 +204,7 @@ mod tests {
         let stmt = CreateSchemaStatement {
             or_replace: true,
             if_not_exists: false,
-            schema: SchemaReference::Dot(15..16),
+            schema: SchemaReference::Dot { span: 15..16 },
             span: 0..30,
         };
         assert!(stmt.or_replace);
@@ -268,7 +217,7 @@ mod tests {
         assert!(matches!(open, GraphTypeSpec::Open { .. }));
 
         let of_type = GraphTypeSpec::Of {
-            graph_type: GraphTypeReference::Parameter {
+            graph_type: GraphTypeReference::ReferenceParameter {
                 name: "mytype".into(),
                 span: 3..11,
             },
@@ -277,7 +226,7 @@ mod tests {
         assert!(matches!(of_type, GraphTypeSpec::Of { .. }));
 
         let like = GraphTypeSpec::Like {
-            graph: GraphReference::HomeGraph(5..15),
+            graph: GraphReference::HomeGraph { span: 5..15 },
             span: 0..15,
         };
         assert!(matches!(like, GraphTypeSpec::Like { .. }));
@@ -287,7 +236,7 @@ mod tests {
     fn test_drop_statements() {
         let drop_schema = DropSchemaStatement {
             if_exists: true,
-            schema: SchemaReference::CurrentSchema(11..25),
+            schema: SchemaReference::CurrentSchema { span: 11..25 },
             span: 0..25,
         };
         assert!(drop_schema.if_exists);
@@ -295,7 +244,7 @@ mod tests {
         let drop_graph = DropGraphStatement {
             property: true,
             if_exists: false,
-            graph: GraphReference::HomePropertyGraph(11..31),
+            graph: GraphReference::HomePropertyGraph { span: 11..31 },
             span: 0..31,
         };
         assert!(drop_graph.property);

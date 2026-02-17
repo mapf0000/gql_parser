@@ -124,24 +124,93 @@ pub fn lookup_keyword(name: &str) -> Option<TokenKind> {
         "NULL" => Some(TokenKind::Null),
         "UNKNOWN" => Some(TokenKind::Unknown),
 
-        // Type names
-        "STRING" => Some(TokenKind::String),
-        "INTEGER" => Some(TokenKind::Integer),
-        "FLOAT" => Some(TokenKind::Float),
+        // Type names - Boolean
+        "BOOL" => Some(TokenKind::Bool),
         "BOOLEAN" => Some(TokenKind::Boolean),
-        "LIST" => Some(TokenKind::List),
-        "RECORD" => Some(TokenKind::Record),
 
-        // Standalone keywords
-        "DETACH" => Some(TokenKind::Detach),
-        "NODETACH" => Some(TokenKind::Nodetach),
+        // Type names - String
+        "STRING" => Some(TokenKind::String),
+        "CHAR" => Some(TokenKind::Char),
+        "VARCHAR" => Some(TokenKind::Varchar),
+
+        // Type names - Bytes
+        "BYTES" => Some(TokenKind::Bytes),
+        "BINARY" => Some(TokenKind::Binary),
+        "VARBINARY" => Some(TokenKind::Varbinary),
+
+        // Type names - Numeric (Signed)
+        "INT" => Some(TokenKind::Int),
+        "INTEGER" => Some(TokenKind::Integer),
+        "INT8" => Some(TokenKind::Int8),
+        "INT16" => Some(TokenKind::Int16),
+        "INT32" => Some(TokenKind::Int32),
+        "INT64" => Some(TokenKind::Int64),
+        "INT128" => Some(TokenKind::Int128),
+        "INT256" => Some(TokenKind::Int256),
+        "SMALLINT" => Some(TokenKind::Smallint),
+        "BIGINT" => Some(TokenKind::Bigint),
+        "SIGNED" => Some(TokenKind::Signed),
+
+        // Type names - Numeric (Unsigned)
+        "UINT" => Some(TokenKind::Uint),
+        "UINT8" => Some(TokenKind::Uint8),
+        "UINT16" => Some(TokenKind::Uint16),
+        "UINT32" => Some(TokenKind::Uint32),
+        "UINT64" => Some(TokenKind::Uint64),
+        "UINT128" => Some(TokenKind::Uint128),
+        "UINT256" => Some(TokenKind::Uint256),
+        "USMALLINT" => Some(TokenKind::Usmallint),
+        "UBIGINT" => Some(TokenKind::Ubigint),
+        "UNSIGNED" => Some(TokenKind::Unsigned),
+
+        // Type names - Numeric (Decimal/Float)
+        "DECIMAL" => Some(TokenKind::Decimal),
+        "DEC" => Some(TokenKind::Dec),
+        "FLOAT" => Some(TokenKind::Float),
+        "FLOAT16" => Some(TokenKind::Float16),
+        "FLOAT32" => Some(TokenKind::Float32),
+        "FLOAT64" => Some(TokenKind::Float64),
+        "FLOAT128" => Some(TokenKind::Float128),
+        "FLOAT256" => Some(TokenKind::Float256),
+        "REAL" => Some(TokenKind::Real),
+        "DOUBLE" => Some(TokenKind::Double),
+        "PRECISION" => Some(TokenKind::Precision),
+
+        // Type names - Temporal
+        "ZONED" => Some(TokenKind::Zoned),
+        "LOCAL" => Some(TokenKind::Local),
+        "DATETIME" => Some(TokenKind::Datetime),
+        "WITHOUT" => Some(TokenKind::Without),
+        "YEAR" => Some(TokenKind::Year),
+        "MONTH" => Some(TokenKind::Month),
+        "DAY" => Some(TokenKind::Day),
+        "SECOND" => Some(TokenKind::Second),
+        "TO" => Some(TokenKind::To),
+
+        // Type names - Other
+        "NOTHING" => Some(TokenKind::Nothing),
+        "LIST" => Some(TokenKind::List),
+        "ARRAY" => Some(TokenKind::Array),
+        "RECORD" => Some(TokenKind::Record),
+        "VERTEX" => Some(TokenKind::Vertex),
 
         // Additional expression and function keywords
         "VALUE" => Some(TokenKind::Value),
         "TABLE" => Some(TokenKind::Table),
         "BINDING" => Some(TokenKind::Binding),
         "VARIABLE" => Some(TokenKind::Variable),
-        "DATETIME" => Some(TokenKind::Datetime),
+
+        // Standalone keywords
+        "DETACH" => Some(TokenKind::Detach),
+        "NODETACH" => Some(TokenKind::Nodetach),
+
+        // Null ordering keywords
+        "NULLS" => Some(TokenKind::Nulls),
+        "FIRST" => Some(TokenKind::First),
+        "LAST" => Some(TokenKind::Last),
+
+        // For statement keywords
+        "ORDINALITY" => Some(TokenKind::Ordinality),
 
         // Predicate keywords
         "TYPED" => Some(TokenKind::Typed),

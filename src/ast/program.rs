@@ -68,6 +68,7 @@ pub struct CatalogStatement {
 mod tests {
     use super::*;
     use crate::ast::catalog::{CallCatalogModifyingProcedureStatement, CatalogStatementKind};
+    use crate::ast::references::ProcedureReference;
     use crate::ast::session::{SessionCloseCommand, SessionCommand};
     use crate::ast::transaction::{CommitCommand, TransactionCommand};
 
@@ -106,7 +107,10 @@ mod tests {
         let catalog = Statement::Catalog(Box::new(CatalogStatement {
             kind: CatalogStatementKind::CallCatalogModifyingProcedure(
                 CallCatalogModifyingProcedureStatement {
-                    procedure_name: "test".into(),
+                    procedure: ProcedureReference::ReferenceParameter {
+                        name: "test".into(),
+                        span: 0..5,
+                    },
                     span: 0..5,
                 },
             ),
