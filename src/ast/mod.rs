@@ -1,6 +1,7 @@
 //! AST foundation types and node structures.
 
 mod catalog;
+pub mod expression;
 mod mutation;
 pub mod program;
 mod query;
@@ -37,4 +38,13 @@ pub use catalog::{
     CreateGraphTypeStatement, CreateSchemaStatement, DropGraphStatement, DropGraphTypeStatement,
     DropSchemaStatement, GraphReference, GraphTypeReference, GraphTypeSource, GraphTypeSpec,
     SchemaReference,
+};
+
+// Re-export expression types
+pub use expression::{
+    BinaryOperator, BooleanValue, CaseExpression, CastExpression, ComparisonOperator,
+    ExistsExpression, ExistsVariant, Expression, FunctionCall, FunctionName,
+    GraphPatternPlaceholder, LabelExpression, Literal, LogicalOperator, Predicate, RecordField,
+    SearchedCaseExpression, SearchedWhenClause, SimpleCaseExpression, SimpleWhenClause,
+    TrimSpecification, TruthValue, TypeReference, UnaryOperator,
 };

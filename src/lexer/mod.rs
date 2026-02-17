@@ -123,7 +123,17 @@ enum RawToken {
     DelimitedIdentifier,
     #[regex(r"'(?:\\.|[^'\\])*'?")]
     StringLiteral,
+    #[regex(r#""(?:\\.|[^"\\])*"?"#)]
+    DoubleQuotedStringLiteral,
+    #[regex(r"[Xx]'(?:\\.|[^'\\])*'?")]
+    ByteStringLiteral,
 
+    #[regex(r"0[xX][0-9A-Fa-f_]+")]
+    HexNumber,
+    #[regex(r"0[oO][0-7_]+")]
+    OctalNumber,
+    #[regex(r"0[bB][01_]+")]
+    BinaryNumber,
     #[regex(r"[0-9](?:[0-9_]*)(?:\.[0-9_]+(?:[eE][+-]?[0-9_]+)?|[eE][+-]?[0-9_]+)?")]
     Number,
 
@@ -238,7 +248,23 @@ impl<'a> Lexer<'a> {
                     decode_string_literal(&self.source[span.clone()], span.start, diagnostics);
                 Token::new(TokenKind::StringLiteral(value), span)
             }
-            RawToken::Number => {
+            RawToken::DoubleQuotedStringLiteral => {
+                let value = decode_double_quoted_string_literal(
+                    &self.source[span.clone()],
+                    span.start,
+                    diagnostics,
+                );
+                Token::new(TokenKind::StringLiteral(value), span)
+            }
+            RawToken::ByteStringLiteral => {
+                let value =
+                    decode_byte_string_literal(&self.source[span.clone()], span.start, diagnostics);
+                Token::new(TokenKind::ByteStringLiteral(value), span)
+            }
+            RawToken::HexNumber
+            | RawToken::OctalNumber
+            | RawToken::BinaryNumber
+            | RawToken::Number => {
                 let text = &self.source[span.clone()];
                 if !is_valid_numeric_literal(text) {
                     diagnostics.push(
@@ -308,7 +334,24 @@ fn lex_nested_block_comment(lex: &mut LogosLexer<'_, RawToken>) -> Skip {
 }
 
 fn decode_string_literal(raw: &str, span_start: usize, diagnostics: &mut Vec<Diag>) -> SmolStr {
-    let closed = raw.len() >= 2 && raw.ends_with('\'');
+    decode_quoted_string_literal(raw, '\'', span_start, diagnostics)
+}
+
+fn decode_double_quoted_string_literal(
+    raw: &str,
+    span_start: usize,
+    diagnostics: &mut Vec<Diag>,
+) -> SmolStr {
+    decode_quoted_string_literal(raw, '"', span_start, diagnostics)
+}
+
+fn decode_quoted_string_literal(
+    raw: &str,
+    quote: char,
+    span_start: usize,
+    diagnostics: &mut Vec<Diag>,
+) -> SmolStr {
+    let closed = raw.len() >= 2 && raw.ends_with(quote);
     let content_end = if closed { raw.len() - 1 } else { raw.len() };
 
     if !closed {
@@ -342,7 +385,8 @@ fn decode_string_literal(raw: &str, span_start: usize, diagnostics: &mut Vec<Dia
             'n' => out.push('\n'),
             't' => out.push('\t'),
             'r' => out.push('\r'),
-            '\'' => out.push('\''),
+            '\'' if quote == '\'' => out.push('\''),
+            '"' if quote == '"' => out.push('"'),
             '\\' => out.push('\\'),
             'u' => {
                 let mut hex = String::new();
@@ -407,6 +451,42 @@ fn decode_string_literal(raw: &str, span_start: usize, diagnostics: &mut Vec<Dia
     }
 
     out.into()
+}
+
+fn decode_byte_string_literal(
+    raw: &str,
+    span_start: usize,
+    diagnostics: &mut Vec<Diag>,
+) -> SmolStr {
+    let closed = raw.len() >= 3 && raw.ends_with('\'');
+    if !closed {
+        diagnostics.push(
+            Diag::error("unclosed byte string literal")
+                .with_primary_label(span_start..span_start + raw.len(), "here")
+                .with_code("L001"),
+        );
+    }
+
+    if raw.len() < 2 {
+        return SmolStr::new("");
+    }
+
+    let content_end = if closed { raw.len() - 1 } else { raw.len() };
+    let content = if content_end > 2 {
+        &raw[2..content_end]
+    } else {
+        ""
+    };
+
+    if !content.chars().all(|ch| ch.is_ascii_hexdigit()) || !content.len().is_multiple_of(2) {
+        diagnostics.push(
+            Diag::error("malformed byte string literal")
+                .with_primary_label(span_start..span_start + raw.len(), "here")
+                .with_code("L002"),
+        );
+    }
+
+    SmolStr::new(content)
 }
 
 fn decode_delimited_identifier(
@@ -476,6 +556,16 @@ fn normalize_span(span: std::ops::Range<usize>, len: usize) -> std::ops::Range<u
 }
 
 fn is_valid_numeric_literal(text: &str) -> bool {
+    if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+        return is_valid_base_digit_group(hex, |ch| ch.is_ascii_hexdigit());
+    }
+    if let Some(octal) = text.strip_prefix("0o").or_else(|| text.strip_prefix("0O")) {
+        return is_valid_base_digit_group(octal, |ch| ('0'..='7').contains(&ch));
+    }
+    if let Some(binary) = text.strip_prefix("0b").or_else(|| text.strip_prefix("0B")) {
+        return is_valid_base_digit_group(binary, |ch| matches!(ch, '0' | '1'));
+    }
+
     let (mantissa, exponent) = match text.char_indices().find(|(_, ch)| matches!(ch, 'e' | 'E')) {
         Some((index, _)) => (&text[..index], Some(&text[index + 1..])),
         None => (text, None),
@@ -514,6 +604,13 @@ fn is_valid_mantissa(mantissa: &str) -> bool {
 }
 
 fn is_valid_digit_group(group: &str) -> bool {
+    is_valid_base_digit_group(group, |ch| ch.is_ascii_digit())
+}
+
+fn is_valid_base_digit_group<F>(group: &str, is_valid_digit: F) -> bool
+where
+    F: Fn(char) -> bool,
+{
     if group.is_empty() {
         return false;
     }
@@ -522,19 +619,21 @@ fn is_valid_digit_group(group: &str) -> bool {
     let mut saw_digit = false;
 
     for ch in group.chars() {
-        match ch {
-            '0'..='9' => {
-                saw_digit = true;
-                prev_was_underscore = false;
-            }
-            '_' => {
-                if !saw_digit || prev_was_underscore {
-                    return false;
-                }
-                prev_was_underscore = true;
-            }
-            _ => return false,
+        if is_valid_digit(ch) {
+            saw_digit = true;
+            prev_was_underscore = false;
+            continue;
         }
+
+        if ch == '_' {
+            if !saw_digit || prev_was_underscore {
+                return false;
+            }
+            prev_was_underscore = true;
+            continue;
+        }
+
+        return false;
     }
 
     saw_digit && !prev_was_underscore
@@ -577,8 +676,8 @@ mod tests {
 
     #[test]
     fn delimited_identifier_and_string() {
-        let result = tokenize("`my var` 'hello\\nworld'");
-        assert_eq!(result.tokens.len(), 3);
+        let result = tokenize("`my var` 'hello\\nworld' \"hello\\tworld\"");
+        assert_eq!(result.tokens.len(), 4);
         assert_eq!(
             result.tokens[0].kind,
             TokenKind::DelimitedIdentifier("my var".into())
@@ -587,11 +686,15 @@ mod tests {
             result.tokens[1].kind,
             TokenKind::StringLiteral("hello\nworld".into())
         );
+        assert_eq!(
+            result.tokens[2].kind,
+            TokenKind::StringLiteral("hello\tworld".into())
+        );
     }
 
     #[test]
     fn numeric_literals_and_validation() {
-        let valid = tokenize("42 3.14 1e10 1_000_000");
+        let valid = tokenize("42 3.14 1e10 1_000_000 0xFF 0o77 0b1010");
         assert!(valid.diagnostics.is_empty());
 
         let invalid = tokenize("1e 1__2 1_ 1e1_");
@@ -663,6 +766,17 @@ mod tests {
         assert_eq!(
             result.tokens[3].kind,
             TokenKind::StringLiteral("14:30:00".into())
+        );
+    }
+
+    #[test]
+    fn byte_string_literals_are_tokenized() {
+        let result = tokenize("X'0A0b'");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.tokens.len(), 2);
+        assert_eq!(
+            result.tokens[0].kind,
+            TokenKind::ByteStringLiteral("0A0b".into())
         );
     }
 }

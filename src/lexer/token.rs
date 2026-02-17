@@ -134,12 +134,72 @@ pub enum TokenKind {
     List,
     Record,
 
+    // Additional expression and function keywords
+    Value,
+    Table,
+    Binding,
+    Variable,
+    Datetime,
+
+    // Predicate keywords
+    Typed,
+    Normalized,
+    Directed,
+    Labeled,
+    Source,
+    Destination,
+
+    // Built-in function keywords (common ones as tokens)
+    // Numeric
+    Abs,
+    Mod,
+    Floor,
+    Ceil,
+    Sqrt,
+    Power,
+    Exp,
+    Ln,
+    Log,
+
+    // Trigonometric
+    Sin,
+    Cos,
+    Tan,
+    Asin,
+    Acos,
+    Atan,
+
+    // String functions
+    Upper,
+    Lower,
+    Trim,
+    Substring,
+    Normalize,
+
+    // Conditional
+    Coalesce,
+    Nullif,
+
+    // Cardinality
+    Cardinality,
+    Size,
+
+    // Graph
+    Elements,
+    Element,
+
+    // Predicates
+    AllDifferent,
+    Same,
+    PropertyExists,
+
     // Identifiers
     Identifier(SmolStr),
     DelimitedIdentifier(SmolStr),
 
     // Literals
     StringLiteral(SmolStr),
+    ByteStringLiteral(SmolStr), // X'...'
     IntegerLiteral(SmolStr),
     FloatLiteral(SmolStr),
 
@@ -300,6 +360,46 @@ impl TokenKind {
                 | TokenKind::False
                 | TokenKind::Null
                 | TokenKind::Unknown
+                | TokenKind::Value
+                | TokenKind::Table
+                | TokenKind::Binding
+                | TokenKind::Variable
+                | TokenKind::Datetime
+                | TokenKind::Typed
+                | TokenKind::Normalized
+                | TokenKind::Directed
+                | TokenKind::Labeled
+                | TokenKind::Source
+                | TokenKind::Destination
+                | TokenKind::Abs
+                | TokenKind::Mod
+                | TokenKind::Floor
+                | TokenKind::Ceil
+                | TokenKind::Sqrt
+                | TokenKind::Power
+                | TokenKind::Exp
+                | TokenKind::Ln
+                | TokenKind::Log
+                | TokenKind::Sin
+                | TokenKind::Cos
+                | TokenKind::Tan
+                | TokenKind::Asin
+                | TokenKind::Acos
+                | TokenKind::Atan
+                | TokenKind::Upper
+                | TokenKind::Lower
+                | TokenKind::Trim
+                | TokenKind::Substring
+                | TokenKind::Normalize
+                | TokenKind::Coalesce
+                | TokenKind::Nullif
+                | TokenKind::Cardinality
+                | TokenKind::Size
+                | TokenKind::Elements
+                | TokenKind::Element
+                | TokenKind::AllDifferent
+                | TokenKind::Same
+                | TokenKind::PropertyExists
         )
     }
 
@@ -308,6 +408,7 @@ impl TokenKind {
         matches!(
             self,
             TokenKind::StringLiteral(_)
+                | TokenKind::ByteStringLiteral(_)
                 | TokenKind::IntegerLiteral(_)
                 | TokenKind::FloatLiteral(_)
                 | TokenKind::True
@@ -458,9 +559,50 @@ impl fmt::Display for TokenKind {
             TokenKind::Boolean => write!(f, "BOOLEAN"),
             TokenKind::List => write!(f, "LIST"),
             TokenKind::Record => write!(f, "RECORD"),
+            TokenKind::Value => write!(f, "VALUE"),
+            TokenKind::Table => write!(f, "TABLE"),
+            TokenKind::Binding => write!(f, "BINDING"),
+            TokenKind::Variable => write!(f, "VARIABLE"),
+            TokenKind::Datetime => write!(f, "DATETIME"),
+            TokenKind::Typed => write!(f, "TYPED"),
+            TokenKind::Normalized => write!(f, "NORMALIZED"),
+            TokenKind::Directed => write!(f, "DIRECTED"),
+            TokenKind::Labeled => write!(f, "LABELED"),
+            TokenKind::Source => write!(f, "SOURCE"),
+            TokenKind::Destination => write!(f, "DESTINATION"),
+            TokenKind::Abs => write!(f, "ABS"),
+            TokenKind::Mod => write!(f, "MOD"),
+            TokenKind::Floor => write!(f, "FLOOR"),
+            TokenKind::Ceil => write!(f, "CEIL"),
+            TokenKind::Sqrt => write!(f, "SQRT"),
+            TokenKind::Power => write!(f, "POWER"),
+            TokenKind::Exp => write!(f, "EXP"),
+            TokenKind::Ln => write!(f, "LN"),
+            TokenKind::Log => write!(f, "LOG"),
+            TokenKind::Sin => write!(f, "SIN"),
+            TokenKind::Cos => write!(f, "COS"),
+            TokenKind::Tan => write!(f, "TAN"),
+            TokenKind::Asin => write!(f, "ASIN"),
+            TokenKind::Acos => write!(f, "ACOS"),
+            TokenKind::Atan => write!(f, "ATAN"),
+            TokenKind::Upper => write!(f, "UPPER"),
+            TokenKind::Lower => write!(f, "LOWER"),
+            TokenKind::Trim => write!(f, "TRIM"),
+            TokenKind::Substring => write!(f, "SUBSTRING"),
+            TokenKind::Normalize => write!(f, "NORMALIZE"),
+            TokenKind::Coalesce => write!(f, "COALESCE"),
+            TokenKind::Nullif => write!(f, "NULLIF"),
+            TokenKind::Cardinality => write!(f, "CARDINALITY"),
+            TokenKind::Size => write!(f, "SIZE"),
+            TokenKind::Elements => write!(f, "ELEMENTS"),
+            TokenKind::Element => write!(f, "ELEMENT"),
+            TokenKind::AllDifferent => write!(f, "ALL_DIFFERENT"),
+            TokenKind::Same => write!(f, "SAME"),
+            TokenKind::PropertyExists => write!(f, "PROPERTY_EXISTS"),
             TokenKind::Identifier(name) => write!(f, "{name}"),
             TokenKind::DelimitedIdentifier(name) => write!(f, "`{name}`"),
             TokenKind::StringLiteral(s) => write!(f, "'{s}'"),
+            TokenKind::ByteStringLiteral(s) => write!(f, "X'{s}'"),
             TokenKind::IntegerLiteral(n) => write!(f, "{n}"),
             TokenKind::FloatLiteral(n) => write!(f, "{n}"),
             TokenKind::Parameter(name) => write!(f, "${name}"),

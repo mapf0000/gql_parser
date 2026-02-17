@@ -5,7 +5,7 @@
 //! - SESSION RESET
 //! - SESSION CLOSE
 
-use crate::ast::Span;
+use crate::ast::{Expression, Span};
 use smol_str::SmolStr;
 
 /// A session management command.
@@ -53,8 +53,8 @@ pub struct SessionSetGraphClause {
 /// SESSION SET TIME ZONE clause.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionSetTimeZoneClause {
-    /// The time zone value (deferred - expression placeholder)
-    pub value: ExpressionPlaceholder,
+    /// The time zone value (expression from Sprint 5)
+    pub value: Expression,
     pub span: Span,
 }
 
@@ -64,19 +64,19 @@ pub enum SessionSetParameterClause {
     /// Graph parameter
     GraphParameter {
         name: SmolStr,
-        value: ExpressionPlaceholder,
+        value: Expression,
         span: Span,
     },
     /// Binding table parameter
     BindingTableParameter {
         name: SmolStr,
-        value: ExpressionPlaceholder,
+        value: Expression,
         span: Span,
     },
     /// Value parameter
     ValueParameter {
         name: SmolStr,
-        value: ExpressionPlaceholder,
+        value: Expression,
         span: Span,
     },
 }

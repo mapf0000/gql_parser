@@ -3,7 +3,7 @@
 use crate::ast::{
     CallCatalogModifyingProcedureStatement, CatalogStatement, CatalogStatementKind, CommitCommand,
     CreateGraphStatement, CreateGraphTypeStatement, CreateSchemaStatement, DropGraphStatement,
-    DropGraphTypeStatement, DropSchemaStatement, ExpressionPlaceholder, GraphReference,
+    DropGraphTypeStatement, DropSchemaStatement, Expression, GraphReference,
     GraphReferencePlaceholder, GraphTypeReference, GraphTypeSource, GraphTypeSpec,
     MutationStatement, Program, QueryStatement, RollbackCommand, SchemaReference,
     SchemaReferencePlaceholder, SessionCloseCommand, SessionCommand, SessionResetCommand,
@@ -231,22 +231,22 @@ fn parse_session_set_command(tokens: &[Token], mut cursor: usize) -> ParseOutcom
                 "SESSION SET TIME ZONE",
             ));
         }
-        let value_span = span_for_segment(tokens, cursor, tokens.len());
+        // Parse the time zone expression
+        let value_tokens = &tokens[cursor..];
+        let value = crate::parser::expression::parse_expression(value_tokens)?;
         return Ok(SessionCommand::Set(SessionSetCommand::TimeZone(
             SessionSetTimeZoneClause {
-                value: ExpressionPlaceholder { span: value_span },
+                value,
                 span: stmt_span,
             },
         )));
     }
 
-    if is_identifier_word(&tokens[cursor].kind, "VALUE") {
+    if matches!(tokens[cursor].kind, TokenKind::Value) {
         return parse_session_set_value_parameter(tokens, cursor + 1);
     }
 
-    if is_identifier_word(&tokens[cursor].kind, "BINDING")
-        || is_identifier_word(&tokens[cursor].kind, "TABLE")
-    {
+    if matches!(tokens[cursor].kind, TokenKind::Binding | TokenKind::Table) {
         return parse_session_set_binding_table_parameter(tokens, cursor);
     }
 
@@ -294,13 +294,14 @@ fn parse_session_set_graph_or_graph_parameter(
     }
 
     if starts_session_parameter_name(tokens, cursor) {
-        let (name, next_cursor, name_span) =
+        let (name, next_cursor) =
             parse_session_parameter_name(tokens, cursor, "SESSION SET GRAPH parameter")?;
-        let value_span = parse_initializer_span(tokens, next_cursor, name_span.end);
+        let value =
+            parse_initializer_expression(tokens, next_cursor, "SESSION SET GRAPH parameter")?;
         return Ok(SessionCommand::Set(SessionSetCommand::Parameter(
             SessionSetParameterClause::GraphParameter {
                 name,
-                value: ExpressionPlaceholder { span: value_span },
+                value,
                 span: stmt_span,
             },
         )));
@@ -321,11 +322,11 @@ fn parse_session_set_binding_table_parameter(
     mut cursor: usize,
 ) -> ParseOutcome<SessionCommand> {
     let stmt_span = slice_span(tokens);
-    if cursor < tokens.len() && is_identifier_word(&tokens[cursor].kind, "BINDING") {
+    if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::Binding) {
         cursor += 1;
     }
 
-    if cursor >= tokens.len() || !is_identifier_word(&tokens[cursor].kind, "TABLE") {
+    if cursor >= tokens.len() || !matches!(tokens[cursor].kind, TokenKind::Table) {
         return Err(expected_token_diag(
             tokens,
             cursor,
@@ -335,14 +336,14 @@ fn parse_session_set_binding_table_parameter(
     }
     cursor += 1;
 
-    let (name, next_cursor, name_span) =
+    let (name, next_cursor) =
         parse_session_parameter_name(tokens, cursor, "SESSION SET TABLE parameter")?;
-    let value_span = parse_initializer_span(tokens, next_cursor, name_span.end);
+    let value = parse_initializer_expression(tokens, next_cursor, "SESSION SET TABLE parameter")?;
 
     Ok(SessionCommand::Set(SessionSetCommand::Parameter(
         SessionSetParameterClause::BindingTableParameter {
             name,
-            value: ExpressionPlaceholder { span: value_span },
+            value,
             span: stmt_span,
         },
     )))
@@ -353,14 +354,14 @@ fn parse_session_set_value_parameter(
     cursor: usize,
 ) -> ParseOutcome<SessionCommand> {
     let stmt_span = slice_span(tokens);
-    let (name, next_cursor, name_span) =
+    let (name, next_cursor) =
         parse_session_parameter_name(tokens, cursor, "SESSION SET VALUE parameter")?;
-    let value_span = parse_initializer_span(tokens, next_cursor, name_span.end);
+    let value = parse_initializer_expression(tokens, next_cursor, "SESSION SET VALUE parameter")?;
 
     Ok(SessionCommand::Set(SessionSetCommand::Parameter(
         SessionSetParameterClause::ValueParameter {
             name,
-            value: ExpressionPlaceholder { span: value_span },
+            value,
             span: stmt_span,
         },
     )))
@@ -470,7 +471,7 @@ fn parse_session_parameter_name(
     tokens: &[Token],
     mut cursor: usize,
     context: &str,
-) -> ParseOutcome<(SmolStr, usize, Span)> {
+) -> ParseOutcome<(SmolStr, usize)> {
     if cursor + 2 < tokens.len()
         && matches!(tokens[cursor].kind, TokenKind::If)
         && matches!(tokens[cursor + 1].kind, TokenKind::Not)
@@ -484,25 +485,38 @@ fn parse_session_parameter_name(
     }
 
     match &tokens[cursor].kind {
-        TokenKind::Parameter(name) => Ok((name.clone(), cursor + 1, tokens[cursor].span.clone())),
+        TokenKind::Parameter(name) => Ok((name.clone(), cursor + 1)),
         _ => Err(expected_token_diag(tokens, cursor, "$parameter", context)),
     }
 }
 
-fn parse_initializer_span(tokens: &[Token], cursor: usize, fallback_end: usize) -> Span {
+/// Parses an expression from the token stream starting at the given cursor position.
+/// Expects an '=' token at cursor, then parses the expression after it.
+fn parse_initializer_expression(
+    tokens: &[Token],
+    cursor: usize,
+    context: &str,
+) -> ParseOutcome<Expression> {
     if cursor >= tokens.len() {
-        return fallback_end..fallback_end;
+        return Err(expected_token_diag(tokens, cursor, "=", context));
     }
-    let expr_start = if matches!(tokens[cursor].kind, TokenKind::Eq) {
-        cursor + 1
-    } else {
-        cursor
-    };
+
+    if !matches!(tokens[cursor].kind, TokenKind::Eq) {
+        return Err(expected_token_diag(tokens, cursor, "=", context));
+    }
+
+    let expr_start = cursor + 1;
     if expr_start >= tokens.len() {
-        let end = tokens[cursor].span.end;
-        return end..end;
+        return Err(expected_token_diag(
+            tokens,
+            expr_start,
+            "expression",
+            context,
+        ));
     }
-    span_for_segment(tokens, expr_start, tokens.len())
+
+    let expr_tokens = &tokens[expr_start..];
+    crate::parser::expression::parse_expression(expr_tokens)
 }
 
 fn parse_transaction_statement(tokens: &[Token]) -> ParseOutcome<Statement> {

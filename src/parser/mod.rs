@@ -3,6 +3,7 @@
 //! The parser consumes a token stream produced by the lexer and constructs
 //! an AST while preserving diagnostics and recovering at statement boundaries.
 
+pub mod expression;
 mod program;
 
 use crate::ast::Program;

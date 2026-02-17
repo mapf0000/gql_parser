@@ -136,6 +136,64 @@ pub fn lookup_keyword(name: &str) -> Option<TokenKind> {
         "DETACH" => Some(TokenKind::Detach),
         "NODETACH" => Some(TokenKind::Nodetach),
 
+        // Additional expression and function keywords
+        "VALUE" => Some(TokenKind::Value),
+        "TABLE" => Some(TokenKind::Table),
+        "BINDING" => Some(TokenKind::Binding),
+        "VARIABLE" => Some(TokenKind::Variable),
+        "DATETIME" => Some(TokenKind::Datetime),
+
+        // Predicate keywords
+        "TYPED" => Some(TokenKind::Typed),
+        "NORMALIZED" => Some(TokenKind::Normalized),
+        "DIRECTED" => Some(TokenKind::Directed),
+        "LABELED" => Some(TokenKind::Labeled),
+        "SOURCE" => Some(TokenKind::Source),
+        "DESTINATION" => Some(TokenKind::Destination),
+
+        // Built-in function keywords - Numeric
+        "ABS" => Some(TokenKind::Abs),
+        "MOD" => Some(TokenKind::Mod),
+        "FLOOR" => Some(TokenKind::Floor),
+        "CEIL" => Some(TokenKind::Ceil),
+        "SQRT" => Some(TokenKind::Sqrt),
+        "POWER" => Some(TokenKind::Power),
+        "EXP" => Some(TokenKind::Exp),
+        "LN" => Some(TokenKind::Ln),
+        "LOG" => Some(TokenKind::Log),
+
+        // Built-in function keywords - Trigonometric
+        "SIN" => Some(TokenKind::Sin),
+        "COS" => Some(TokenKind::Cos),
+        "TAN" => Some(TokenKind::Tan),
+        "ASIN" => Some(TokenKind::Asin),
+        "ACOS" => Some(TokenKind::Acos),
+        "ATAN" => Some(TokenKind::Atan),
+
+        // Built-in function keywords - String functions
+        "UPPER" => Some(TokenKind::Upper),
+        "LOWER" => Some(TokenKind::Lower),
+        "TRIM" => Some(TokenKind::Trim),
+        "SUBSTRING" => Some(TokenKind::Substring),
+        "NORMALIZE" => Some(TokenKind::Normalize),
+
+        // Built-in function keywords - Conditional
+        "COALESCE" => Some(TokenKind::Coalesce),
+        "NULLIF" => Some(TokenKind::Nullif),
+
+        // Built-in function keywords - Cardinality
+        "CARDINALITY" => Some(TokenKind::Cardinality),
+        "SIZE" => Some(TokenKind::Size),
+
+        // Built-in function keywords - Graph
+        "ELEMENTS" => Some(TokenKind::Elements),
+        "ELEMENT" => Some(TokenKind::Element),
+
+        // Built-in function keywords - Predicates
+        "ALL_DIFFERENT" => Some(TokenKind::AllDifferent),
+        "SAME" => Some(TokenKind::Same),
+        "PROPERTY_EXISTS" => Some(TokenKind::PropertyExists),
+
         _ => None,
     }
 }
