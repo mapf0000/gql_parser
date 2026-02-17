@@ -30,6 +30,7 @@ use smol_str::SmolStr;
 /// /dir/my_schema          -- Absolute path with directory
 /// ../other_schema         -- Relative path
 /// ../../another/schema    -- Relative path with multiple levels
+/// my_schema               -- Plain schema identifier
 /// HOME_SCHEMA             -- Predefined reference
 /// CURRENT_SCHEMA          -- Predefined reference
 /// .                       -- Current schema (dot notation)
@@ -55,6 +56,16 @@ pub enum SchemaReference {
         up_levels: u32,
         /// Path components after the relative navigation
         components: Vec<SmolStr>,
+        /// Source span
+        span: Span,
+    },
+
+    /// Plain schema identifier
+    ///
+    /// Example: `my_schema`
+    Identifier {
+        /// Schema name
+        name: SmolStr,
         /// Source span
         span: Span,
     },
@@ -92,6 +103,7 @@ impl SchemaReference {
         match self {
             SchemaReference::AbsolutePath { span, .. }
             | SchemaReference::RelativePath { span, .. }
+            | SchemaReference::Identifier { span, .. }
             | SchemaReference::HomeSchema { span }
             | SchemaReference::CurrentSchema { span }
             | SchemaReference::Dot { span }
@@ -403,4 +415,3 @@ pub struct BindingVariable {
     /// Source span
     pub span: Span,
 }
-

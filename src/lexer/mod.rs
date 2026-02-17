@@ -76,6 +76,10 @@ enum RawToken {
     Slash,
     #[token("%")]
     Percent,
+    #[token("?")]
+    Question,
+    #[token("!")]
+    Bang,
     #[token("^")]
     Caret,
     #[token("=")]
@@ -210,6 +214,8 @@ impl<'a> Lexer<'a> {
             RawToken::Star => Token::new(TokenKind::Star, span),
             RawToken::Slash => Token::new(TokenKind::Slash, span),
             RawToken::Percent => Token::new(TokenKind::Percent, span),
+            RawToken::Question => Token::new(TokenKind::Question, span),
+            RawToken::Bang => Token::new(TokenKind::Bang, span),
             RawToken::Caret => Token::new(TokenKind::Caret, span),
             RawToken::Eq => Token::new(TokenKind::Eq, span),
             RawToken::Lt => Token::new(TokenKind::Lt, span),

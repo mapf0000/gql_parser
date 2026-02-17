@@ -2,6 +2,7 @@
 
 use crate::ast::Span;
 use crate::ast::catalog::CatalogStatementKind;
+use crate::ast::query::Query;
 use crate::ast::session::SessionCommand;
 use crate::ast::transaction::TransactionCommand;
 
@@ -29,11 +30,11 @@ pub enum Statement {
     Empty(Span),
 }
 
-/// Query statement AST node (placeholder for Sprint 7).
+/// Query statement AST node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct QueryStatement {
+    pub query: Query,
     pub span: Span,
-    // Body to be implemented in Sprint 7
 }
 
 /// Mutation statement AST node (placeholder for Sprint 10).
@@ -68,6 +69,7 @@ pub struct CatalogStatement {
 mod tests {
     use super::*;
     use crate::ast::catalog::{CallCatalogModifyingProcedureStatement, CatalogStatementKind};
+    use crate::ast::query::{AmbientLinearQuery, LinearQuery, Query};
     use crate::ast::references::ProcedureReference;
     use crate::ast::session::{SessionCloseCommand, SessionCommand};
     use crate::ast::transaction::{CommitCommand, TransactionCommand};
@@ -83,7 +85,14 @@ mod tests {
 
     #[test]
     fn test_statement_types() {
-        let query = Statement::Query(Box::new(QueryStatement { span: 0..5 }));
+        let query = Statement::Query(Box::new(QueryStatement {
+            query: Query::Linear(LinearQuery::Ambient(AmbientLinearQuery {
+                primitive_statements: vec![],
+                result_statement: None,
+                span: 0..5,
+            })),
+            span: 0..5,
+        }));
         assert!(matches!(query, Statement::Query(_)));
 
         let mutation = Statement::Mutation(Box::new(MutationStatement { span: 0..5 }));

@@ -75,8 +75,8 @@ pub use query::{
     ForOrdinalityOrOffset, ForStatement, GraphPattern, GroupByClause, GroupingElement,
     HavingClause, LetStatement, LetVariableDefinition, LimitClause, LinearQuery, MatchStatement,
     NullOrdering, OffsetClause, OptionalMatchStatement, OptionalOperand, OrderByAndPageStatement,
-    OrderByClause, OrderingSpecification, PrimitiveQueryStatement, PrimitiveResultStatement,
-    Query, ReturnItem, ReturnItemList, ReturnStatement, SelectFromClause, SelectItem,
-    SelectItemList, SelectStatement, SetOperator, SetQuantifier, SimpleMatchStatement,
-    SortSpecification, UseGraphClause, WhereClause,
+    OrderByClause, OrderingSpecification, PrimitiveQueryStatement, PrimitiveResultStatement, Query,
+    ReturnItem, ReturnItemList, ReturnStatement, SelectFromClause, SelectItem, SelectItemList,
+    SelectStatement, SetOperator, SetQuantifier, SimpleMatchStatement, SortSpecification,
+    UseGraphClause, WhereClause,
 };

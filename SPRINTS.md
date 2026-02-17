@@ -25,7 +25,7 @@ This document is intentionally broad and will be refined into detailed sprint pl
 
 ## Sprint Sequence
 
-### Sprint 0: Project Foundations
+### Sprint 0: Project Foundations (Completed February 17, 2026)
 - Goal: Establish base project architecture and engineering guardrails.
 - Scope: crate layout, module boundaries (`lexer`, `parser`, `ast`, `diag`, `lib`), CI, lint/test baseline.
 - Exit Criteria: baseline crate builds cleanly, strict clippy/test wiring in place, developer workflow documented.
@@ -35,13 +35,13 @@ This document is intentionally broad and will be refined into detailed sprint pl
 - Scope: `Span`, `Spanned<T>`, internal `Diag`, severity/help/labels/notes, `miette` conversion.
 - Exit Criteria: diagnostic pipeline supports multi-label errors and source snippets end-to-end.
 
-### Sprint 2: Lexer Core and Token Model
+### Sprint 2: Lexer Core and Token Model (Completed February 17, 2026)
 - Goal: Implement robust lexical layer with error-tolerant scanning.
 - Scope: token kinds, keywords, identifiers, literals, operators, comments/whitespace, parameter tokens, lexer errors.
 - Exit Criteria: lexer emits `Vec<Token> + Vec<Diag>` with continuation after lexical errors.
 - Implementation note: lexer implementation is `logos`-based.
 
-### Sprint 3: Parser Skeleton and Recovery Framework
+### Sprint 3: Parser Skeleton and Recovery Framework (Completed February 17, 2026)
 - Goal: Establish parser control flow, AST entry points, and recovery strategy.
 - Scope: parser context/state, clause-boundary recovery, partial AST policy, top-level program framing.
 - Exit Criteria: parser handles malformed inputs without panic and returns structured partial results.
@@ -53,22 +53,22 @@ This document is intentionally broad and will be refined into detailed sprint pl
 - Exit Criteria: all corresponding statement families parse with correct AST forms and diagnostics.
 - Status: ✅ **Completed** - All AST nodes defined, parser builds command-level AST variants for Sprint 4 statement families, and comprehensive tests pass.
 
-### Sprint 5: Values, Literals, and Expression Core
+### Sprint 5: Values, Literals, and Expression Core (Completed February 17, 2026)
 - Goal: Implement expression backbone used by nearly all clauses.
 - Scope: value expressions, predicates, case/cast, parameters, literals, constructors, operator precedence.
 - Exit Criteria: expression parser is reusable across query/mutation/procedure contexts.
 
-### Sprint 6: Type System and Reference Forms
+### Sprint 6: Type System and Reference Forms (Completed February 17, 2026)
 - Goal: Add complete type grammar and catalog/object reference syntax.
 - Scope: predefined/constructed/dynamic union types, graph/node/edge/binding-table types, schema/graph/procedure references.
 - Exit Criteria: type annotations and reference forms parse consistently in all legal contexts.
 
-### Sprint 7: Query Pipeline Core
+### Sprint 7: Query Pipeline Core (Completed February 17, 2026)
 - Goal: Implement linear/composite query composition and clause chaining.
 - Scope: composite queries, set operators plus `OTHERWISE`, focused/ambient linear queries, `MATCH`, `FILTER`, `LET`, `FOR`, `SELECT`.
 - Exit Criteria: query chains and nested query forms parse correctly with recovery at clause boundaries.
 
-### Sprint 8: Graph Pattern and Path Pattern System
+### Sprint 8: Graph Pattern and Path Pattern System (Completed February 17, 2026)
 - Goal: Deliver full graph matching syntax breadth.
 - Scope: graph pattern binding/yield, match modes, node/edge patterns, path prefixes/search modes, quantifiers, simplified path patterns, label expressions.
 - Exit Criteria: pattern AST supports all directional and quantified variants in grammar.

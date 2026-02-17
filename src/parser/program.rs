@@ -13,11 +13,13 @@ use crate::ast::{
 };
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
+use crate::parser::query::parse_query;
 use crate::parser::references as reference_parser;
 use smol_str::SmolStr;
 
 type ParseError = Box<Diag>;
 type ParseOutcome<T> = Result<T, ParseError>;
+type StatementParseOutcome = (Option<Statement>, Vec<Diag>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum SyntaxToken {
@@ -46,6 +48,7 @@ pub(crate) fn parse_program_tokens(tokens: &[Token], source_len: usize) -> (Prog
     let mut cursor = 0usize;
 
     while cursor < tokens.len() {
+        let start_cursor = cursor;
         match classify(&tokens[cursor].kind) {
             SyntaxToken::Eof => break,
             SyntaxToken::Semicolon => {
@@ -64,14 +67,20 @@ pub(crate) fn parse_program_tokens(tokens: &[Token], source_len: usize) -> (Prog
             }
             start => {
                 let class = syntax_to_statement_class(start);
-                let end = find_statement_end(tokens, cursor);
+                let end = find_statement_end(tokens, cursor, class);
                 let statement_tokens = &tokens[cursor..end];
-                match parse_statement(class, statement_tokens) {
-                    Ok(statement) => statements.push(statement),
-                    Err(diag) => diagnostics.push(*diag),
+                let (statement_opt, mut statement_diags) = parse_statement(class, statement_tokens);
+                diagnostics.append(&mut statement_diags);
+                if let Some(statement) = statement_opt {
+                    statements.push(statement);
                 }
                 cursor = end;
             }
+        }
+
+        // Safety net to guarantee forward progress even on parser contract bugs.
+        if cursor == start_cursor {
+            cursor += 1;
         }
     }
 
@@ -87,7 +96,19 @@ pub(crate) fn parse_program_tokens(tokens: &[Token], source_len: usize) -> (Prog
 
 fn classify(kind: &TokenKind) -> SyntaxToken {
     match kind {
-        TokenKind::Match | TokenKind::Select | TokenKind::From => SyntaxToken::QueryStart,
+        TokenKind::Match
+        | TokenKind::Optional
+        | TokenKind::Use
+        | TokenKind::Filter
+        | TokenKind::Let
+        | TokenKind::For
+        | TokenKind::Order
+        | TokenKind::Limit
+        | TokenKind::Offset
+        | TokenKind::Return
+        | TokenKind::Finish
+        | TokenKind::Select
+        | TokenKind::From => SyntaxToken::QueryStart,
         TokenKind::Insert | TokenKind::Delete => SyntaxToken::MutationStart,
         TokenKind::Session => SyntaxToken::SessionStart,
         TokenKind::Start | TokenKind::Commit | TokenKind::Rollback => SyntaxToken::TransactionStart,
@@ -111,18 +132,20 @@ fn syntax_to_statement_class(token: SyntaxToken) -> StatementClass {
     }
 }
 
-fn find_statement_end(tokens: &[Token], start: usize) -> usize {
+fn find_statement_end(tokens: &[Token], start: usize, class: StatementClass) -> usize {
     let mut cursor = start + 1;
     while cursor < tokens.len() {
         match classify(&tokens[cursor].kind) {
-            SyntaxToken::Semicolon
-            | SyntaxToken::Eof
-            | SyntaxToken::QueryStart
-            | SyntaxToken::MutationStart
+            SyntaxToken::Semicolon | SyntaxToken::Eof => return cursor,
+            SyntaxToken::MutationStart
             | SyntaxToken::SessionStart
             | SyntaxToken::TransactionStart
             | SyntaxToken::CatalogStart => return cursor,
+            SyntaxToken::QueryStart if !matches!(class, StatementClass::Query) => return cursor,
             SyntaxToken::Other => {
+                cursor += 1;
+            }
+            SyntaxToken::QueryStart => {
                 cursor += 1;
             }
         }
@@ -130,17 +153,55 @@ fn find_statement_end(tokens: &[Token], start: usize) -> usize {
     cursor
 }
 
-fn parse_statement(class: StatementClass, tokens: &[Token]) -> ParseOutcome<Statement> {
+fn parse_statement(class: StatementClass, tokens: &[Token]) -> StatementParseOutcome {
     match class {
-        StatementClass::Query => Ok(Statement::Query(Box::new(QueryStatement {
-            span: slice_span(tokens),
-        }))),
-        StatementClass::Mutation => Ok(Statement::Mutation(Box::new(MutationStatement {
-            span: slice_span(tokens),
-        }))),
-        StatementClass::Session => parse_session_statement(tokens),
-        StatementClass::Transaction => parse_transaction_statement(tokens),
-        StatementClass::Catalog => parse_catalog_statement(tokens),
+        StatementClass::Query => parse_query_statement(tokens),
+        StatementClass::Mutation => (
+            Some(Statement::Mutation(Box::new(MutationStatement {
+                span: slice_span(tokens),
+            }))),
+            Vec::new(),
+        ),
+        StatementClass::Session => parse_non_query_statement(tokens, parse_session_statement),
+        StatementClass::Transaction => {
+            parse_non_query_statement(tokens, parse_transaction_statement)
+        }
+        StatementClass::Catalog => parse_non_query_statement(tokens, parse_catalog_statement),
+    }
+}
+
+fn parse_query_statement(tokens: &[Token]) -> StatementParseOutcome {
+    let mut pos = 0usize;
+    let (query_opt, mut diags) = parse_query(tokens, &mut pos);
+
+    match query_opt {
+        Some(query) => {
+            let span = query.span().clone();
+            (
+                Some(Statement::Query(Box::new(QueryStatement { query, span }))),
+                diags,
+            )
+        }
+        None => {
+            if diags.is_empty() {
+                diags.push(
+                    Diag::error("expected query statement")
+                        .with_primary_label(slice_span(tokens), "expected query statement")
+                        .with_code("P004"),
+                );
+            }
+            (None, diags)
+        }
+    }
+}
+
+fn parse_non_query_statement(
+    tokens: &[Token],
+    parse: impl Fn(&[Token]) -> ParseOutcome<Statement>,
+) -> StatementParseOutcome {
+    match parse(tokens) {
+        Ok(statement) => (Some(statement), Vec::new()),
+        Err(diag) => (None, vec![*diag]),
     }
 }
 
@@ -1383,6 +1444,9 @@ fn compute_program_span(tokens: &[Token], source_len: usize) -> Span {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::query::{
+        LinearQuery, PrimitiveQueryStatement, PrimitiveResultStatement, Query,
+    };
     use crate::lexer::tokenize;
 
     fn parse_source(source: &str) -> (Program, Vec<Diag>) {
@@ -1418,6 +1482,69 @@ mod tests {
     }
 
     #[test]
+    fn parse_return_query_builds_real_query_ast() {
+        let (program, diagnostics) = parse_source("RETURN 1");
+        assert!(diagnostics.is_empty());
+        assert_eq!(program.statements.len(), 1);
+
+        let Statement::Query(stmt) = &program.statements[0] else {
+            panic!("expected query statement");
+        };
+
+        let Query::Linear(LinearQuery::Ambient(query)) = &stmt.query else {
+            panic!("expected ambient linear query");
+        };
+        assert!(query.primitive_statements.is_empty());
+        assert!(matches!(
+            query.result_statement.as_deref(),
+            Some(PrimitiveResultStatement::Return(_))
+        ));
+    }
+
+    #[test]
+    fn parse_select_from_match_stays_single_query_statement() {
+        let source = "SELECT * FROM MATCH (n) RETURN n";
+        let (program, diagnostics) = parse_source(source);
+
+        assert!(
+            diagnostics.is_empty(),
+            "unexpected diagnostics: {diagnostics:?}"
+        );
+        assert_eq!(program.statements.len(), 1);
+
+        let Statement::Query(stmt) = &program.statements[0] else {
+            panic!("expected query statement");
+        };
+        let Query::Linear(LinearQuery::Ambient(query)) = &stmt.query else {
+            panic!("expected ambient linear query");
+        };
+        assert!(matches!(
+            query.primitive_statements.first(),
+            Some(PrimitiveQueryStatement::Select(_))
+        ));
+    }
+
+    #[test]
+    fn parse_use_graph_query_start_is_accepted() {
+        let source = "USE GRAPH g MATCH (n) RETURN n";
+        let (program, diagnostics) = parse_source(source);
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(program.statements.len(), 1);
+        assert!(matches!(program.statements[0], Statement::Query(_)));
+    }
+
+    #[test]
+    fn parse_optional_match_query_start_is_accepted() {
+        let source = "OPTIONAL MATCH (n) RETURN n";
+        let (program, diagnostics) = parse_source(source);
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(program.statements.len(), 1);
+        assert!(matches!(program.statements[0], Statement::Query(_)));
+    }
+
+    #[test]
     fn parse_recovers_after_invalid_top_level_token() {
         let source = "x MATCH (n) RETURN n";
         let (program, diagnostics) = parse_source(source);
@@ -1430,6 +1557,20 @@ mod tests {
     #[test]
     fn parse_session_set_schema_statement() {
         let (program, diagnostics) = parse_source("SESSION SET SCHEMA /myschema");
+        assert!(diagnostics.is_empty());
+        assert_eq!(program.statements.len(), 1);
+
+        let Statement::Session(stmt) = &program.statements[0] else {
+            panic!("expected session statement");
+        };
+        let SessionCommand::Set(SessionSetCommand::Schema(_)) = &stmt.command else {
+            panic!("expected SESSION SET SCHEMA");
+        };
+    }
+
+    #[test]
+    fn parse_session_set_schema_plain_identifier_statement() {
+        let (program, diagnostics) = parse_source("SESSION SET SCHEMA myschema");
         assert!(diagnostics.is_empty());
         assert_eq!(program.statements.len(), 1);
 

@@ -10,6 +10,7 @@
 //! schema_reference ::=
 //!     | absolute_schema_path
 //!     | relative_schema_path
+//!     | identifier
 //!     | HOME_SCHEMA
 //!     | CURRENT_SCHEMA
 //!     | .
@@ -105,6 +106,7 @@ impl<'a> ReferenceParser<'a> {
     /// schema_reference ::=
     ///     | / [ identifier / ]* identifier    -- Absolute path
     ///     | ( .. / )+ [ identifier / ]* identifier  -- Relative path
+    ///     | identifier                         -- Plain identifier
     ///     | HOME_SCHEMA                        -- Predefined
     ///     | CURRENT_SCHEMA                     -- Predefined
     ///     | .                                  -- Current schema (dot)
@@ -118,6 +120,7 @@ impl<'a> ReferenceParser<'a> {
     /// /dir/my_schema
     /// ../other_schema
     /// ../../another/schema
+    /// my_schema
     /// HOME_SCHEMA
     /// CURRENT_SCHEMA
     /// .
@@ -190,9 +193,12 @@ impl<'a> ReferenceParser<'a> {
                         self.advance();
                         Ok(SchemaReference::CurrentSchema { span })
                     }
-                    _ => Err(self.error_here(format!(
-                        "expected schema reference, found identifier '{name}'"
-                    ))),
+                    _ => {
+                        let name = name.clone();
+                        let span = self.current().span.clone();
+                        self.advance();
+                        Ok(SchemaReference::Identifier { name, span })
+                    }
                 }
             }
 
@@ -1167,6 +1173,18 @@ mod tests {
         let result = parse_schema_reference(&tokens);
         assert!(result.is_ok());
         assert!(matches!(result.unwrap(), SchemaReference::Dot { .. }));
+    }
+
+    #[test]
+    fn test_parse_plain_identifier_schema_reference() {
+        // my_schema
+        let tokens = vec![make_token(TokenKind::Identifier("my_schema".into()), 0, 9)];
+        let result = parse_schema_reference(&tokens);
+        assert!(result.is_ok());
+        assert!(matches!(
+            result.unwrap(),
+            SchemaReference::Identifier { .. }
+        ));
     }
 
     #[test]

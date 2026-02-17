@@ -79,6 +79,15 @@ pub fn lookup_keyword(name: &str) -> Option<TokenKind> {
         "ACYCLIC" => Some(TokenKind::Acyclic),
         "SIMPLE" => Some(TokenKind::Simple),
 
+        // Pattern matching keywords
+        "REPEATABLE" => Some(TokenKind::Repeatable),
+        "DIFFERENT" => Some(TokenKind::Different),
+        "KEEP" => Some(TokenKind::Keep),
+        "SHORTEST" => Some(TokenKind::Shortest),
+        "PATHS" => Some(TokenKind::Paths),
+        "GROUPS" => Some(TokenKind::Groups),
+        "LABELS" => Some(TokenKind::Labels),
+
         // Schema/catalog keywords
         "SCHEMA" => Some(TokenKind::Schema),
         "CATALOG" => Some(TokenKind::Catalog),

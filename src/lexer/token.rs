@@ -81,6 +81,15 @@ pub enum TokenKind {
     Acyclic,
     Simple,
 
+    // Pattern matching keywords
+    Repeatable,
+    Different,
+    Keep,
+    Shortest,
+    Paths,
+    Groups,
+    Labels,
+
     // Schema/catalog keywords
     Schema,
     Catalog,
@@ -282,6 +291,8 @@ pub enum TokenKind {
     Star,        // *
     Slash,       // /
     Percent,     // %
+    Question,    // ?
+    Bang,        // !
     Caret,       // ^
     Eq,          // =
     NotEq,       // <>
@@ -388,6 +399,13 @@ impl TokenKind {
                 | TokenKind::Trail
                 | TokenKind::Acyclic
                 | TokenKind::Simple
+                | TokenKind::Repeatable
+                | TokenKind::Different
+                | TokenKind::Keep
+                | TokenKind::Shortest
+                | TokenKind::Paths
+                | TokenKind::Groups
+                | TokenKind::Labels
                 | TokenKind::Schema
                 | TokenKind::Catalog
                 | TokenKind::Drop
@@ -548,6 +566,8 @@ impl TokenKind {
                 | TokenKind::Star
                 | TokenKind::Slash
                 | TokenKind::Percent
+                | TokenKind::Question
+                | TokenKind::Bang
                 | TokenKind::Caret
                 | TokenKind::Eq
                 | TokenKind::NotEq
@@ -639,6 +659,13 @@ impl fmt::Display for TokenKind {
             TokenKind::Trail => write!(f, "TRAIL"),
             TokenKind::Acyclic => write!(f, "ACYCLIC"),
             TokenKind::Simple => write!(f, "SIMPLE"),
+            TokenKind::Repeatable => write!(f, "REPEATABLE"),
+            TokenKind::Different => write!(f, "DIFFERENT"),
+            TokenKind::Keep => write!(f, "KEEP"),
+            TokenKind::Shortest => write!(f, "SHORTEST"),
+            TokenKind::Paths => write!(f, "PATHS"),
+            TokenKind::Groups => write!(f, "GROUPS"),
+            TokenKind::Labels => write!(f, "LABELS"),
             TokenKind::Schema => write!(f, "SCHEMA"),
             TokenKind::Catalog => write!(f, "CATALOG"),
             TokenKind::Drop => write!(f, "DROP"),
@@ -785,6 +812,8 @@ impl fmt::Display for TokenKind {
             TokenKind::Star => write!(f, "*"),
             TokenKind::Slash => write!(f, "/"),
             TokenKind::Percent => write!(f, "%"),
+            TokenKind::Question => write!(f, "?"),
+            TokenKind::Bang => write!(f, "!"),
             TokenKind::Caret => write!(f, "^"),
             TokenKind::Eq => write!(f, "="),
             TokenKind::NotEq => write!(f, "<>"),
@@ -855,6 +884,13 @@ mod tests {
         assert!(TokenKind::Match.is_keyword());
         assert!(TokenKind::Where.is_keyword());
         assert!(TokenKind::And.is_keyword());
+        assert!(TokenKind::Repeatable.is_keyword());
+        assert!(TokenKind::Different.is_keyword());
+        assert!(TokenKind::Keep.is_keyword());
+        assert!(TokenKind::Shortest.is_keyword());
+        assert!(TokenKind::Paths.is_keyword());
+        assert!(TokenKind::Groups.is_keyword());
+        assert!(TokenKind::Labels.is_keyword());
         assert!(!TokenKind::Identifier("foo".into()).is_keyword());
         assert!(!TokenKind::Plus.is_keyword());
     }

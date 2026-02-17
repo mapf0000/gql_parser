@@ -7,12 +7,13 @@
 //! - Result statements (RETURN)
 //! - Ordering, pagination, and grouping
 
-use crate::ast::*;
 use crate::ast::query::*;
 use crate::ast::references::BindingVariable;
+use crate::ast::*;
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
 use crate::parser::expression::parse_expression;
+use crate::parser::patterns::parse_graph_pattern;
 use crate::parser::types::parse_value_type_prefix;
 
 /// Parse result with optional value and diagnostics.
@@ -96,11 +97,13 @@ fn parse_expression_at(tokens: &[Token], pos: &mut usize) -> Result<Expression, 
 
     if count == 0 {
         return Err(Box::new(
-            Diag::error("Expected expression")
-                .with_primary_label(
-                    tokens.get(start_pos).map(|t| t.span.clone()).unwrap_or(start_pos..start_pos),
-                    "expected expression here"
-                )
+            Diag::error("Expected expression").with_primary_label(
+                tokens
+                    .get(start_pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or(start_pos..start_pos),
+                "expected expression here",
+            ),
         ));
     }
 
@@ -132,7 +135,26 @@ fn parse_expression_with_diags(tokens: &[Token], pos: &mut usize) -> ParseResult
 ///
 /// This handles composite queries, linear queries, and parenthesized queries.
 pub fn parse_query(tokens: &[Token], pos: &mut usize) -> ParseResult<Query> {
-    parse_composite_query(tokens, pos)
+    let start_pos = *pos;
+    let (query_opt, mut diags) = parse_composite_query(tokens, pos);
+
+    // Parser contract: a successful parse must always consume input.
+    if *pos == start_pos {
+        if diags.is_empty() {
+            diags.push(
+                Diag::error("Expected query statement").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start_pos..start_pos),
+                    "expected query statement here",
+                ),
+            );
+        }
+        return (None, diags);
+    }
+
+    (query_opt, diags)
 }
 
 // ============================================================================
@@ -187,7 +209,7 @@ fn parse_composite_query(tokens: &[Token], pos: &mut usize) -> ParseResult<Query
 
         let operator = match operator_opt {
             Some(op) => op,
-            None => break,  // No more set operators
+            None => break, // No more set operators
         };
 
         // Parse right operand
@@ -200,9 +222,12 @@ fn parse_composite_query(tokens: &[Token], pos: &mut usize) -> ParseResult<Query
                 diags.push(
                     Diag::error(format!("Expected query after {:?} operator", operator))
                         .with_primary_label(
-                            tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(op_pos..op_pos),
-                            "expected query here"
-                        )
+                            tokens
+                                .get(*pos)
+                                .map(|t| t.span.clone())
+                                .unwrap_or(op_pos..op_pos),
+                            "expected query here",
+                        ),
                 );
                 break;
             }
@@ -258,15 +283,20 @@ fn parse_linear_query_as_query(tokens: &[Token], pos: &mut usize) -> ParseResult
             *pos += 1;
 
             if let Some(query) = query_opt {
-                return (Some(Query::Parenthesized(Box::new(query), start..end)), diags);
+                return (
+                    Some(Query::Parenthesized(Box::new(query), start..end)),
+                    diags,
+                );
             }
         } else {
             diags.push(
-                Diag::error("Expected ')' to close parenthesized query")
-                    .with_primary_label(
-                        tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                        "expected ')' here"
-                    )
+                Diag::error("Expected ')' to close parenthesized query").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start..start),
+                    "expected ')' here",
+                ),
             );
         }
 
@@ -295,7 +325,10 @@ fn parse_linear_query(tokens: &[Token], pos: &mut usize) -> ParseResult<LinearQu
 }
 
 /// Parses a focused linear query (with USE GRAPH clause).
-fn parse_focused_linear_query(tokens: &[Token], pos: &mut usize) -> ParseResult<FocusedLinearQuery> {
+fn parse_focused_linear_query(
+    tokens: &[Token],
+    pos: &mut usize,
+) -> ParseResult<FocusedLinearQuery> {
     let mut diags = Vec::new();
     let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
 
@@ -309,33 +342,68 @@ fn parse_focused_linear_query(tokens: &[Token], pos: &mut usize) -> ParseResult<
     };
 
     // Parse primitive statements and result statement
-    let (primitive_statements, result_statement, mut stmt_diags, end) =
+    let (primitive_statements, result_statement, has_query_body, mut stmt_diags, end) =
         parse_query_statements(tokens, pos, start);
     diags.append(&mut stmt_diags);
 
-    (Some(FocusedLinearQuery {
-        use_graph,
-        primitive_statements,
-        result_statement,
-        span: start..end,
-    }), diags)
+    if !has_query_body {
+        diags.push(
+            Diag::error("Expected query statement after USE GRAPH clause").with_primary_label(
+                tokens
+                    .get(*pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or(use_graph.span.clone()),
+                "expected query statement here",
+            ),
+        );
+        return (None, diags);
+    }
+
+    (
+        Some(FocusedLinearQuery {
+            use_graph,
+            primitive_statements,
+            result_statement,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 /// Parses an ambient linear query (without USE GRAPH clause).
-fn parse_ambient_linear_query(tokens: &[Token], pos: &mut usize) -> ParseResult<AmbientLinearQuery> {
+fn parse_ambient_linear_query(
+    tokens: &[Token],
+    pos: &mut usize,
+) -> ParseResult<AmbientLinearQuery> {
     let mut diags = Vec::new();
     let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
 
     // Parse primitive statements and result statement
-    let (primitive_statements, result_statement, mut stmt_diags, end) =
+    let (primitive_statements, result_statement, has_query_body, mut stmt_diags, end) =
         parse_query_statements(tokens, pos, start);
     diags.append(&mut stmt_diags);
 
-    (Some(AmbientLinearQuery {
-        primitive_statements,
-        result_statement,
-        span: start..end,
-    }), diags)
+    if !has_query_body {
+        diags.push(
+            Diag::error("Expected query statement").with_primary_label(
+                tokens
+                    .get(*pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or(start..start),
+                "expected query statement here",
+            ),
+        );
+        return (None, diags);
+    }
+
+    (
+        Some(AmbientLinearQuery {
+            primitive_statements,
+            result_statement,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 /// Helper to parse query statements (primitive + optional result).
@@ -343,7 +411,13 @@ fn parse_query_statements(
     tokens: &[Token],
     pos: &mut usize,
     start: usize,
-) -> (Vec<PrimitiveQueryStatement>, Option<Box<PrimitiveResultStatement>>, Vec<Diag>, usize) {
+) -> (
+    Vec<PrimitiveQueryStatement>,
+    Option<Box<PrimitiveResultStatement>>,
+    bool,
+    Vec<Diag>,
+    usize,
+) {
     let mut diags = Vec::new();
     let mut primitive_statements = Vec::new();
     let mut result_statement = None;
@@ -377,16 +451,26 @@ fn parse_query_statements(
 
         match stmt_opt {
             Some(stmt) => primitive_statements.push(stmt),
-            None => break,  // No more statements
+            None => break, // No more statements
         }
     }
 
     let end = tokens.get(*pos).map(|t| t.span.start).unwrap_or(start);
-    (primitive_statements, result_statement, diags, end)
+    let has_query_body = !primitive_statements.is_empty() || result_statement.is_some();
+    (
+        primitive_statements,
+        result_statement,
+        has_query_body,
+        diags,
+        end,
+    )
 }
 
 /// Parses a primitive query statement.
-fn parse_primitive_query_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<PrimitiveQueryStatement> {
+fn parse_primitive_query_statement(
+    tokens: &[Token],
+    pos: &mut usize,
+) -> ParseResult<PrimitiveQueryStatement> {
     if *pos >= tokens.len() {
         return (None, vec![]);
     }
@@ -414,15 +498,24 @@ fn parse_primitive_query_statement(tokens: &[Token], pos: &mut usize) -> ParseRe
         }
         TokenKind::Order => {
             let (order_opt, diags) = parse_order_by_and_page_statement(tokens, pos);
-            (order_opt.map(PrimitiveQueryStatement::OrderByAndPage), diags)
+            (
+                order_opt.map(PrimitiveQueryStatement::OrderByAndPage),
+                diags,
+            )
         }
         TokenKind::Limit | TokenKind::Offset | TokenKind::Skip => {
             let (order_opt, diags) = parse_order_by_and_page_statement(tokens, pos);
-            (order_opt.map(PrimitiveQueryStatement::OrderByAndPage), diags)
+            (
+                order_opt.map(PrimitiveQueryStatement::OrderByAndPage),
+                diags,
+            )
         }
         TokenKind::Select => {
             let (select_opt, diags) = parse_select_statement(tokens, pos);
-            (select_opt.map(PrimitiveQueryStatement::Select), diags)
+            (
+                select_opt.map(|select| PrimitiveQueryStatement::Select(Box::new(select))),
+                diags,
+            )
         }
         _ => (None, vec![]),
     }
@@ -456,22 +549,30 @@ fn parse_use_graph_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<UseG
         Some(g) => g,
         None => {
             diags.push(
-                Diag::error("Expected graph expression after USE")
-                    .with_primary_label(
-                        tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                        "expected expression here"
-                    )
+                Diag::error("Expected graph expression after USE").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start..start),
+                    "expected expression here",
+                ),
             );
             return (None, diags);
         }
     };
 
-    let end = tokens.get(pos.saturating_sub(1)).map(|t| t.span.end).unwrap_or(start);
+    let end = tokens
+        .get(pos.saturating_sub(1))
+        .map(|t| t.span.end)
+        .unwrap_or(start);
 
-    (Some(UseGraphClause {
-        graph,
-        span: start..end,
-    }), diags)
+    (
+        Some(UseGraphClause {
+            graph,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 // ============================================================================
@@ -489,14 +590,20 @@ fn parse_match_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<Match
         (opt_match.map(MatchStatement::Optional), diags)
     } else if matches!(tokens[*pos].kind, TokenKind::Match) {
         let (simple_match, diags) = parse_simple_match_statement(tokens, pos);
-        (simple_match.map(MatchStatement::Simple), diags)
+        (
+            simple_match.map(|simple| MatchStatement::Simple(Box::new(simple))),
+            diags,
+        )
     } else {
         (None, vec![])
     }
 }
 
 /// Parses a simple MATCH statement.
-fn parse_simple_match_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<SimpleMatchStatement> {
+fn parse_simple_match_statement(
+    tokens: &[Token],
+    pos: &mut usize,
+) -> ParseResult<SimpleMatchStatement> {
     let mut diags = Vec::new();
 
     if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Match) {
@@ -506,19 +613,21 @@ fn parse_simple_match_statement(tokens: &[Token], pos: &mut usize) -> ParseResul
     let start = tokens[*pos].span.start;
     *pos += 1;
 
-    // Parse graph pattern (placeholder for Sprint 8)
-    let (pattern_opt, mut pattern_diags) = parse_graph_pattern_placeholder(tokens, pos);
+    // Parse graph pattern with integration-level progress guarantees.
+    let (pattern_opt, mut pattern_diags) = parse_graph_pattern_checked(tokens, pos);
     diags.append(&mut pattern_diags);
 
     let pattern = match pattern_opt {
         Some(p) => p,
         None => {
             diags.push(
-                Diag::error("Expected graph pattern after MATCH")
-                    .with_primary_label(
-                        tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                        "expected pattern here"
-                    )
+                Diag::error("Expected graph pattern after MATCH").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start..start),
+                    "expected pattern here",
+                ),
             );
             return (None, diags);
         }
@@ -526,14 +635,20 @@ fn parse_simple_match_statement(tokens: &[Token], pos: &mut usize) -> ParseResul
 
     let end = pattern.span.end;
 
-    (Some(SimpleMatchStatement {
-        pattern,
-        span: start..end,
-    }), diags)
+    (
+        Some(SimpleMatchStatement {
+            pattern,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 /// Parses an OPTIONAL MATCH statement.
-fn parse_optional_match_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<OptionalMatchStatement> {
+fn parse_optional_match_statement(
+    tokens: &[Token],
+    pos: &mut usize,
+) -> ParseResult<OptionalMatchStatement> {
     let mut diags = Vec::new();
 
     if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Optional) {
@@ -551,22 +666,30 @@ fn parse_optional_match_statement(tokens: &[Token], pos: &mut usize) -> ParseRes
         Some(op) => op,
         None => {
             diags.push(
-                Diag::error("Expected MATCH, '{', or '(' after OPTIONAL")
-                    .with_primary_label(
-                        tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                        "expected operand here"
-                    )
+                Diag::error("Expected MATCH, '{', or '(' after OPTIONAL").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start..start),
+                    "expected operand here",
+                ),
             );
             return (None, diags);
         }
     };
 
-    let end = tokens.get(pos.saturating_sub(1)).map(|t| t.span.end).unwrap_or(start);
+    let end = tokens
+        .get(pos.saturating_sub(1))
+        .map(|t| t.span.end)
+        .unwrap_or(start);
 
-    (Some(OptionalMatchStatement {
-        operand,
-        span: start..end,
-    }), diags)
+    (
+        Some(OptionalMatchStatement {
+            operand,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 /// Parses an optional operand (MATCH, block, or parenthesized block).
@@ -578,8 +701,13 @@ fn parse_optional_operand(tokens: &[Token], pos: &mut usize) -> ParseResult<Opti
     match &tokens[*pos].kind {
         TokenKind::Match => {
             *pos += 1;
-            let (pattern_opt, diags) = parse_graph_pattern_placeholder(tokens, pos);
-            (pattern_opt.map(|pattern| OptionalOperand::Match { pattern }), diags)
+            let (pattern_opt, diags) = parse_graph_pattern_checked(tokens, pos);
+            (
+                pattern_opt.map(|pattern| OptionalOperand::Match {
+                    pattern: Box::new(pattern),
+                }),
+                diags,
+            )
         }
         TokenKind::LBrace => {
             *pos += 1;
@@ -589,11 +717,10 @@ fn parse_optional_operand(tokens: &[Token], pos: &mut usize) -> ParseResult<Opti
                 *pos += 1;
             } else {
                 diags.push(
-                    Diag::error("Expected '}' to close OPTIONAL block")
-                        .with_primary_label(
-                            tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(0..0),
-                            "expected '}' here"
-                        )
+                    Diag::error("Expected '}' to close OPTIONAL block").with_primary_label(
+                        tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(0..0),
+                        "expected '}' here",
+                    ),
                 );
             }
 
@@ -610,19 +737,25 @@ fn parse_optional_operand(tokens: &[Token], pos: &mut usize) -> ParseResult<Opti
                     Diag::error("Expected ')' to close OPTIONAL parenthesized block")
                         .with_primary_label(
                             tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(0..0),
-                            "expected ')' here"
-                        )
+                            "expected ')' here",
+                        ),
                 );
             }
 
-            (Some(OptionalOperand::ParenthesizedBlock { statements }), diags)
+            (
+                Some(OptionalOperand::ParenthesizedBlock { statements }),
+                diags,
+            )
         }
         _ => (None, vec![]),
     }
 }
 
 /// Parses a match statement block (multiple MATCH statements).
-fn parse_match_statement_block(tokens: &[Token], pos: &mut usize) -> (Vec<MatchStatement>, Vec<Diag>) {
+fn parse_match_statement_block(
+    tokens: &[Token],
+    pos: &mut usize,
+) -> (Vec<MatchStatement>, Vec<Diag>) {
     let mut statements = Vec::new();
     let mut diags = Vec::new();
 
@@ -643,32 +776,77 @@ fn parse_match_statement_block(tokens: &[Token], pos: &mut usize) -> (Vec<MatchS
     (statements, diags)
 }
 
-/// Placeholder parser for graph patterns (Sprint 8 will implement full pattern parsing).
-fn parse_graph_pattern_placeholder(tokens: &[Token], pos: &mut usize) -> ParseResult<GraphPattern> {
-    // For Sprint 7, we just parse a minimal placeholder
-    // Sprint 8 will implement full graph pattern parsing
-    let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
+/// Wrapper for graph-pattern parsing with progress and diagnostic guarantees.
+fn parse_graph_pattern_checked(tokens: &[Token], pos: &mut usize) -> ParseResult<GraphPattern> {
+    let start = *pos;
+    let (pattern_opt, mut diags) = parse_graph_pattern(tokens, pos);
 
-    // Skip until we find a statement boundary
-    // For now, we'll consume tokens until we hit a known statement keyword
-    while *pos < tokens.len() {
-        match &tokens[*pos].kind {
-            TokenKind::Filter | TokenKind::Let | TokenKind::For | TokenKind::Order |
-            TokenKind::Limit | TokenKind::Offset | TokenKind::Skip | TokenKind::Return |
-            TokenKind::Select | TokenKind::Match | TokenKind::Union | TokenKind::Except |
-            TokenKind::Intersect | TokenKind::Otherwise | TokenKind::Semicolon |
-            TokenKind::RBrace | TokenKind::RParen | TokenKind::Eof => {
-                break;
-            }
-            _ => *pos += 1,
-        }
+    if pattern_opt.is_some() && *pos == start {
+        diags.push(
+            Diag::error("Graph pattern parser succeeded without consuming input")
+                .with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start..start),
+                    "pattern parser stalled here",
+                ),
+        );
+        skip_to_query_clause_boundary(tokens, pos);
+        return (None, diags);
     }
 
-    let end = tokens.get(pos.saturating_sub(1)).map(|t| t.span.end).unwrap_or(start);
+    if pattern_opt.is_none() && *pos == start && diags.is_empty() {
+        diags.push(
+            Diag::error("Expected graph pattern").with_primary_label(
+                tokens
+                    .get(*pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or(start..start),
+                "expected pattern here",
+            ),
+        );
+    }
 
-    (Some(GraphPattern {
-        span: start..end,
-    }), vec![])
+    (pattern_opt, diags)
+}
+
+fn is_query_clause_boundary(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Match
+            | TokenKind::Optional
+            | TokenKind::Filter
+            | TokenKind::Let
+            | TokenKind::For
+            | TokenKind::Order
+            | TokenKind::Limit
+            | TokenKind::Offset
+            | TokenKind::Skip
+            | TokenKind::Return
+            | TokenKind::Select
+            | TokenKind::Finish
+            | TokenKind::Union
+            | TokenKind::Except
+            | TokenKind::Intersect
+            | TokenKind::Otherwise
+            | TokenKind::Where
+            | TokenKind::Group
+            | TokenKind::Having
+            | TokenKind::Semicolon
+            | TokenKind::Eof
+            | TokenKind::RBrace
+            | TokenKind::RParen
+    )
+}
+
+fn skip_to_query_clause_boundary(tokens: &[Token], pos: &mut usize) {
+    while *pos < tokens.len() {
+        if is_query_clause_boundary(&tokens[*pos].kind) {
+            break;
+        }
+        *pos += 1;
+    }
 }
 
 // ============================================================================
@@ -702,23 +880,31 @@ fn parse_filter_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<Filt
         Some(c) => c,
         None => {
             diags.push(
-                Diag::error("Expected search condition after FILTER")
-                    .with_primary_label(
-                        tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                        "expected condition here"
-                    )
+                Diag::error("Expected search condition after FILTER").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start..start),
+                    "expected condition here",
+                ),
             );
             return (None, diags);
         }
     };
 
-    let end = tokens.get(pos.saturating_sub(1)).map(|t| t.span.end).unwrap_or(start);
+    let end = tokens
+        .get(pos.saturating_sub(1))
+        .map(|t| t.span.end)
+        .unwrap_or(start);
 
-    (Some(FilterStatement {
-        where_optional,
-        condition,
-        span: start..end,
-    }), diags)
+    (
+        Some(FilterStatement {
+            where_optional,
+            condition,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 // ============================================================================
@@ -758,25 +944,33 @@ fn parse_let_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<LetStat
 
     if bindings.is_empty() {
         diags.push(
-            Diag::error("Expected variable definition after LET")
-                .with_primary_label(
-                    tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                    "expected variable definition here"
-                )
+            Diag::error("Expected variable definition after LET").with_primary_label(
+                tokens
+                    .get(*pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or(start..start),
+                "expected variable definition here",
+            ),
         );
         return (None, diags);
     }
 
     let end = bindings.last().map(|b| b.span.end).unwrap_or(start);
 
-    (Some(LetStatement {
-        bindings,
-        span: start..end,
-    }), diags)
+    (
+        Some(LetStatement {
+            bindings,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 /// Parses a LET variable definition.
-fn parse_let_variable_definition(tokens: &[Token], pos: &mut usize) -> ParseResult<LetVariableDefinition> {
+fn parse_let_variable_definition(
+    tokens: &[Token],
+    pos: &mut usize,
+) -> ParseResult<LetVariableDefinition> {
     let mut diags = Vec::new();
     let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
 
@@ -793,7 +987,7 @@ fn parse_let_variable_definition(tokens: &[Token], pos: &mut usize) -> ParseResu
             _ => {
                 diags.push(
                     Diag::error("Expected variable name in LET definition")
-                        .with_primary_label(token.span.clone(), "expected identifier here")
+                        .with_primary_label(token.span.clone(), "expected identifier here"),
                 );
                 return (None, diags);
             }
@@ -802,32 +996,35 @@ fn parse_let_variable_definition(tokens: &[Token], pos: &mut usize) -> ParseResu
     };
 
     // Parse optional type annotation
-    let type_annotation = if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::DoubleColon) {
-        *pos += 1;
-        match parse_value_type_prefix(&tokens[*pos..]) {
-            Ok((value_type, consumed)) => {
-                *pos += consumed;
-                Some(value_type)
+    let type_annotation =
+        if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::DoubleColon) {
+            *pos += 1;
+            match parse_value_type_prefix(&tokens[*pos..]) {
+                Ok((value_type, consumed)) => {
+                    *pos += consumed;
+                    Some(value_type)
+                }
+                Err(err) => {
+                    diags.push(*err);
+                    None
+                }
             }
-            Err(err) => {
-                diags.push(*err);
-                None
-            }
-        }
-    } else {
-        None
-    };
+        } else {
+            None
+        };
 
     // Expect '='
     if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Eq) {
         *pos += 1;
     } else {
         diags.push(
-            Diag::error("Expected '=' in LET variable definition")
-                .with_primary_label(
-                    tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                    "expected '=' here"
-                )
+            Diag::error("Expected '=' in LET variable definition").with_primary_label(
+                tokens
+                    .get(*pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or(start..start),
+                "expected '=' here",
+            ),
         );
         return (None, diags);
     }
@@ -840,24 +1037,32 @@ fn parse_let_variable_definition(tokens: &[Token], pos: &mut usize) -> ParseResu
         Some(v) => v,
         None => {
             diags.push(
-                Diag::error("Expected value expression in LET definition")
-                    .with_primary_label(
-                        tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                        "expected expression here"
-                    )
+                Diag::error("Expected value expression in LET definition").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start..start),
+                    "expected expression here",
+                ),
             );
             return (None, diags);
         }
     };
 
-    let end = tokens.get(pos.saturating_sub(1)).map(|t| t.span.end).unwrap_or(start);
+    let end = tokens
+        .get(pos.saturating_sub(1))
+        .map(|t| t.span.end)
+        .unwrap_or(start);
 
-    (Some(LetVariableDefinition {
-        variable,
-        type_annotation,
-        value,
-        span: start..end,
-    }), diags)
+    (
+        Some(LetVariableDefinition {
+            variable,
+            type_annotation,
+            value,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 // ============================================================================
@@ -883,31 +1088,43 @@ fn parse_for_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<ForStat
         Some(i) => i,
         None => {
             diags.push(
-                Diag::error("Expected FOR item specification")
-                    .with_primary_label(
-                        tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                        "expected 'variable IN expression' here"
-                    )
+                Diag::error("Expected FOR item specification").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start..start),
+                    "expected 'variable IN expression' here",
+                ),
             );
             return (None, diags);
         }
     };
 
     // Parse optional WITH ORDINALITY/OFFSET
-    let ordinality_or_offset = if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::With) {
+    let ordinality_or_offset = if *pos < tokens.len()
+        && matches!(tokens[*pos].kind, TokenKind::With)
+    {
         *pos += 1;
-        parse_for_ordinality_or_offset(tokens, pos)
+        let (ordinality_opt, mut ordinality_diags) = parse_for_ordinality_or_offset(tokens, pos);
+        diags.append(&mut ordinality_diags);
+        ordinality_opt
     } else {
         None
     };
 
-    let end = tokens.get(pos.saturating_sub(1)).map(|t| t.span.end).unwrap_or(start);
+    let end = tokens
+        .get(pos.saturating_sub(1))
+        .map(|t| t.span.end)
+        .unwrap_or(start);
 
-    (Some(ForStatement {
-        item,
-        ordinality_or_offset,
-        span: start..end,
-    }), diags)
+    (
+        Some(ForStatement {
+            item,
+            ordinality_or_offset,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 /// Parses a FOR item (variable IN collection).
@@ -928,7 +1145,7 @@ fn parse_for_item(tokens: &[Token], pos: &mut usize) -> ParseResult<ForItem> {
             _ => {
                 diags.push(
                     Diag::error("Expected variable name in FOR statement")
-                        .with_primary_label(token.span.clone(), "expected identifier here")
+                        .with_primary_label(token.span.clone(), "expected identifier here"),
                 );
                 return (None, diags);
             }
@@ -941,11 +1158,13 @@ fn parse_for_item(tokens: &[Token], pos: &mut usize) -> ParseResult<ForItem> {
         *pos += 1;
     } else {
         diags.push(
-            Diag::error("Expected IN keyword in FOR statement")
-                .with_primary_label(
-                    tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                    "expected 'IN' here"
-                )
+            Diag::error("Expected IN keyword in FOR statement").with_primary_label(
+                tokens
+                    .get(*pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or(start..start),
+                "expected 'IN' here",
+            ),
         );
         return (None, diags);
     }
@@ -958,76 +1177,188 @@ fn parse_for_item(tokens: &[Token], pos: &mut usize) -> ParseResult<ForItem> {
         Some(c) => c,
         None => {
             diags.push(
-                Diag::error("Expected collection expression in FOR statement")
-                    .with_primary_label(
-                        tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                        "expected expression here"
-                    )
+                Diag::error("Expected collection expression in FOR statement").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start..start),
+                    "expected expression here",
+                ),
             );
             return (None, diags);
         }
     };
 
-    let end = tokens.get(pos.saturating_sub(1)).map(|t| t.span.end).unwrap_or(start);
+    let end = tokens
+        .get(pos.saturating_sub(1))
+        .map(|t| t.span.end)
+        .unwrap_or(start);
 
-    (Some(ForItem {
-        binding_variable,
-        collection,
-        span: start..end,
-    }), diags)
+    (
+        Some(ForItem {
+            binding_variable,
+            collection,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 /// Parses WITH ORDINALITY or WITH OFFSET clause.
-fn parse_for_ordinality_or_offset(tokens: &[Token], pos: &mut usize) -> Option<ForOrdinalityOrOffset> {
+fn parse_for_ordinality_or_offset(
+    tokens: &[Token],
+    pos: &mut usize,
+) -> ParseResult<ForOrdinalityOrOffset> {
+    let mut diags = Vec::new();
+    let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
+
     if *pos >= tokens.len() {
-        return None;
+        diags.push(
+            Diag::error("Expected ORDINALITY or OFFSET after WITH")
+                .with_primary_label(start..start, "expected ORDINALITY or OFFSET here"),
+        );
+        return (None, diags);
     }
 
-    match &tokens[*pos].kind {
+    let expects_ordinality = match &tokens[*pos].kind {
         TokenKind::Ordinality => {
             *pos += 1;
-
-            // Expect AS keyword (optional in some contexts)
-            if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::As) {
-                *pos += 1;
-            }
-
-            // Parse variable
-            if let Some(token) = tokens.get(*pos) {
-                if let TokenKind::Identifier(name) = &token.kind {
-                    let variable = BindingVariable {
-                        name: name.clone(),
-                        span: token.span.clone(),
-                    };
-                    *pos += 1;
-                    return Some(ForOrdinalityOrOffset::Ordinality { variable });
-                }
-            }
-            None
+            true
         }
         TokenKind::Offset => {
             *pos += 1;
-
-            // Expect AS keyword (optional in some contexts)
-            if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::As) {
-                *pos += 1;
-            }
-
-            // Parse variable
-            if let Some(token) = tokens.get(*pos) {
-                if let TokenKind::Identifier(name) = &token.kind {
-                    let variable = BindingVariable {
-                        name: name.clone(),
-                        span: token.span.clone(),
-                    };
-                    *pos += 1;
-                    return Some(ForOrdinalityOrOffset::Offset { variable });
-                }
-            }
-            None
+            false
         }
-        _ => None,
+        _ => {
+            diags.push(
+                Diag::error("Expected ORDINALITY or OFFSET after WITH").with_primary_label(
+                    tokens[*pos].span.clone(),
+                    "expected ORDINALITY or OFFSET here",
+                ),
+            );
+            skip_to_query_clause_boundary(tokens, pos);
+            return (None, diags);
+        }
+    };
+
+    // AS is optional in this clause.
+    if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::As) {
+        *pos += 1;
     }
+
+    let Some(token) = tokens.get(*pos) else {
+        let keyword = if expects_ordinality {
+            "ORDINALITY"
+        } else {
+            "OFFSET"
+        };
+        diags.push(
+            Diag::error(format!("Expected variable name after WITH {keyword}"))
+                .with_primary_label(start..start, "expected identifier here"),
+        );
+        return (None, diags);
+    };
+
+    let variable = match &token.kind {
+        TokenKind::Identifier(name) => {
+            let variable = BindingVariable {
+                name: name.clone(),
+                span: token.span.clone(),
+            };
+            *pos += 1;
+            variable
+        }
+        _ => {
+            let keyword = if expects_ordinality {
+                "ORDINALITY"
+            } else {
+                "OFFSET"
+            };
+            diags.push(
+                Diag::error(format!("Expected variable name after WITH {keyword}"))
+                    .with_primary_label(token.span.clone(), "expected identifier here"),
+            );
+            if !is_query_clause_boundary(&token.kind) {
+                skip_to_query_clause_boundary(tokens, pos);
+            }
+            return (None, diags);
+        }
+    };
+
+    if expects_ordinality {
+        (Some(ForOrdinalityOrOffset::Ordinality { variable }), diags)
+    } else {
+        (Some(ForOrdinalityOrOffset::Offset { variable }), diags)
+    }
+}
+
+fn is_query_spec_start(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::LParen
+            | TokenKind::Use
+            | TokenKind::Match
+            | TokenKind::Optional
+            | TokenKind::Filter
+            | TokenKind::Let
+            | TokenKind::For
+            | TokenKind::Order
+            | TokenKind::Limit
+            | TokenKind::Offset
+            | TokenKind::Skip
+            | TokenKind::Select
+            | TokenKind::Return
+            | TokenKind::Finish
+    )
+}
+
+fn parse_from_graph_match_list(
+    tokens: &[Token],
+    pos: &mut usize,
+) -> (Vec<GraphPattern>, Vec<Diag>) {
+    let mut matches = Vec::new();
+    let mut diags = Vec::new();
+
+    while *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Match) {
+        let match_span = tokens[*pos].span.clone();
+        *pos += 1;
+
+        let pattern_start = *pos;
+        let (pattern_opt, mut pattern_diags) = parse_graph_pattern_checked(tokens, pos);
+        diags.append(&mut pattern_diags);
+
+        match pattern_opt {
+            Some(pattern) => matches.push(pattern),
+            None => {
+                diags.push(
+                    Diag::error("Expected graph pattern after MATCH in FROM clause")
+                        .with_primary_label(match_span, "expected graph pattern here"),
+                );
+                if *pos == pattern_start {
+                    skip_to_query_clause_boundary(tokens, pos);
+                }
+                break;
+            }
+        }
+
+        if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Comma) {
+            let comma_span = tokens[*pos].span.clone();
+            *pos += 1;
+            if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Match) {
+                diags.push(
+                    Diag::error("Expected MATCH after ',' in FROM clause")
+                        .with_primary_label(comma_span, "expected MATCH here"),
+                );
+                skip_to_query_clause_boundary(tokens, pos);
+                break;
+            }
+            continue;
+        }
+
+        break;
+    }
+
+    (matches, diags)
 }
 
 // ============================================================================
@@ -1056,11 +1387,13 @@ fn parse_select_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<Sele
         Some(items) => items,
         None => {
             diags.push(
-                Diag::error("Expected select items after SELECT")
-                    .with_primary_label(
-                        tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                        "expected items here"
-                    )
+                Diag::error("Expected select items after SELECT").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start..start),
+                    "expected items here",
+                ),
             );
             return (None, diags);
         }
@@ -1110,7 +1443,9 @@ fn parse_select_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<Sele
         None
     };
 
-    let offset = if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Offset | TokenKind::Skip) {
+    let offset = if *pos < tokens.len()
+        && matches!(tokens[*pos].kind, TokenKind::Offset | TokenKind::Skip)
+    {
         let (offset_opt, mut offset_diags) = parse_offset_clause(tokens, pos);
         diags.append(&mut offset_diags);
         offset_opt
@@ -1126,20 +1461,26 @@ fn parse_select_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<Sele
         None
     };
 
-    let end = tokens.get(pos.saturating_sub(1)).map(|t| t.span.end).unwrap_or(start);
+    let end = tokens
+        .get(pos.saturating_sub(1))
+        .map(|t| t.span.end)
+        .unwrap_or(start);
 
-    (Some(SelectStatement {
-        quantifier,
-        select_items,
-        from_clause,
-        where_clause,
-        group_by,
-        having,
-        order_by,
-        offset,
-        limit,
-        span: start..end,
-    }), diags)
+    (
+        Some(SelectStatement {
+            quantifier,
+            select_items,
+            from_clause,
+            where_clause,
+            group_by,
+            having,
+            order_by,
+            offset,
+            limit,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 /// Parses select items (SELECT * or item list).
@@ -1213,20 +1554,138 @@ fn parse_select_item(tokens: &[Token], pos: &mut usize) -> ParseResult<SelectIte
         None
     };
 
-    let end = tokens.get(pos.saturating_sub(1)).map(|t| t.span.end).unwrap_or(start);
+    let end = tokens
+        .get(pos.saturating_sub(1))
+        .map(|t| t.span.end)
+        .unwrap_or(start);
 
-    (Some(SelectItem {
-        expression,
-        alias,
-        span: start..end,
-    }), diags)
+    (
+        Some(SelectItem {
+            expression,
+            alias,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
-/// Parses SELECT FROM clause (placeholder - simplified).
-fn parse_select_from_clause(_tokens: &[Token], _pos: &mut usize) -> ParseResult<SelectFromClause> {
-    // Simplified - just skip for now
-    // Full implementation would parse graph matches, nested queries, etc.
-    (None, vec![])
+/// Parses SELECT FROM clause.
+fn parse_select_from_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<SelectFromClause> {
+    let mut diags = Vec::new();
+    let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
+
+    if *pos >= tokens.len() {
+        diags.push(
+            Diag::error("Expected FROM clause payload").with_primary_label(
+                tokens
+                    .get(*pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or(start..start),
+                "expected source after FROM",
+            ),
+        );
+        return (None, diags);
+    }
+
+    // Variant 1: FROM MATCH <pattern> [, MATCH <pattern> ...]
+    if matches!(tokens[*pos].kind, TokenKind::Match) {
+        let (matches, mut match_diags) = parse_from_graph_match_list(tokens, pos);
+        diags.append(&mut match_diags);
+
+        if matches.is_empty() {
+            return (None, diags);
+        }
+
+        return (Some(SelectFromClause::GraphMatchList { matches }), diags);
+    }
+
+    // Variant 2: FROM <query specification>
+    if is_query_spec_start(&tokens[*pos].kind) {
+        let query_start = *pos;
+        let (query_opt, mut query_diags) = parse_query(tokens, pos);
+        diags.append(&mut query_diags);
+
+        if let Some(query) = query_opt {
+            return (
+                Some(SelectFromClause::QuerySpecification {
+                    query: Box::new(query),
+                }),
+                diags,
+            );
+        }
+
+        if *pos == query_start {
+            skip_to_query_clause_boundary(tokens, pos);
+        }
+
+        if diags.is_empty() {
+            diags.push(
+                Diag::error("Expected query specification after FROM").with_primary_label(
+                    tokens
+                        .get(query_start)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start..start),
+                    "expected query here",
+                ),
+            );
+        }
+
+        return (None, diags);
+    }
+
+    // Variant 3: FROM <graph expression> <query specification>
+    let (graph_opt, mut graph_diags) = parse_expression_with_diags(tokens, pos);
+    diags.append(&mut graph_diags);
+
+    let graph = match graph_opt {
+        Some(graph) => graph,
+        None => {
+            if diags.is_empty() {
+                diags.push(
+                    Diag::error("Expected FROM clause payload").with_primary_label(
+                        tokens
+                            .get(*pos)
+                            .map(|t| t.span.clone())
+                            .unwrap_or(start..start),
+                        "expected source after FROM",
+                    ),
+                );
+            }
+            return (None, diags);
+        }
+    };
+
+    let query_start = *pos;
+    if query_start < tokens.len() && is_query_spec_start(&tokens[query_start].kind) {
+        let (query_opt, mut query_diags) = parse_query(tokens, pos);
+        diags.append(&mut query_diags);
+
+        if let Some(query) = query_opt {
+            return (
+                Some(SelectFromClause::GraphAndQuerySpecification {
+                    graph,
+                    query: Box::new(query),
+                }),
+                diags,
+            );
+        }
+    }
+
+    diags.push(
+        Diag::error("Expected query specification after graph expression in FROM clause")
+            .with_primary_label(
+                tokens
+                    .get(*pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or_else(|| graph.span().clone()),
+                "expected query specification here",
+            ),
+    );
+    if *pos == query_start {
+        skip_to_query_clause_boundary(tokens, pos);
+    }
+
+    (None, diags)
 }
 
 /// Parses WHERE clause.
@@ -1241,22 +1700,30 @@ fn parse_where_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<WhereCla
         Some(c) => c,
         None => {
             diags.push(
-                Diag::error("Expected condition after WHERE")
-                    .with_primary_label(
-                        tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                        "expected expression here"
-                    )
+                Diag::error("Expected condition after WHERE").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start..start),
+                    "expected expression here",
+                ),
             );
             return (None, diags);
         }
     };
 
-    let end = tokens.get(pos.saturating_sub(1)).map(|t| t.span.end).unwrap_or(start);
+    let end = tokens
+        .get(pos.saturating_sub(1))
+        .map(|t| t.span.end)
+        .unwrap_or(start);
 
-    (Some(WhereClause {
-        condition,
-        span: start..end,
-    }), diags)
+    (
+        Some(WhereClause {
+            condition,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 /// Parses HAVING clause.
@@ -1271,22 +1738,30 @@ fn parse_having_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<HavingC
         Some(c) => c,
         None => {
             diags.push(
-                Diag::error("Expected condition after HAVING")
-                    .with_primary_label(
-                        tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                        "expected expression here"
-                    )
+                Diag::error("Expected condition after HAVING").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start..start),
+                    "expected expression here",
+                ),
             );
             return (None, diags);
         }
     };
 
-    let end = tokens.get(pos.saturating_sub(1)).map(|t| t.span.end).unwrap_or(start);
+    let end = tokens
+        .get(pos.saturating_sub(1))
+        .map(|t| t.span.end)
+        .unwrap_or(start);
 
-    (Some(HavingClause {
-        condition,
-        span: start..end,
-    }), diags)
+    (
+        Some(HavingClause {
+            condition,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 // ============================================================================
@@ -1315,11 +1790,13 @@ fn parse_return_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<Retu
         Some(i) => i,
         None => {
             diags.push(
-                Diag::error("Expected return items after RETURN")
-                    .with_primary_label(
-                        tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                        "expected items here"
-                    )
+                Diag::error("Expected return items after RETURN").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start..start),
+                    "expected items here",
+                ),
             );
             return (None, diags);
         }
@@ -1334,14 +1811,20 @@ fn parse_return_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<Retu
         None
     };
 
-    let end = tokens.get(pos.saturating_sub(1)).map(|t| t.span.end).unwrap_or(start);
+    let end = tokens
+        .get(pos.saturating_sub(1))
+        .map(|t| t.span.end)
+        .unwrap_or(start);
 
-    (Some(ReturnStatement {
-        quantifier,
-        items,
-        group_by,
-        span: start..end,
-    }), diags)
+    (
+        Some(ReturnStatement {
+            quantifier,
+            items,
+            group_by,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 /// Parses return items (RETURN * or item list).
@@ -1415,13 +1898,19 @@ fn parse_return_item(tokens: &[Token], pos: &mut usize) -> ParseResult<ReturnIte
         None
     };
 
-    let end = tokens.get(pos.saturating_sub(1)).map(|t| t.span.end).unwrap_or(start);
+    let end = tokens
+        .get(pos.saturating_sub(1))
+        .map(|t| t.span.end)
+        .unwrap_or(start);
 
-    (Some(ReturnItem {
-        expression,
-        alias,
-        span: start..end,
-    }), diags)
+    (
+        Some(ReturnItem {
+            expression,
+            alias,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 // ============================================================================
@@ -1429,7 +1918,10 @@ fn parse_return_item(tokens: &[Token], pos: &mut usize) -> ParseResult<ReturnIte
 // ============================================================================
 
 /// Parses ORDER BY and pagination statement.
-fn parse_order_by_and_page_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<OrderByAndPageStatement> {
+fn parse_order_by_and_page_statement(
+    tokens: &[Token],
+    pos: &mut usize,
+) -> ParseResult<OrderByAndPageStatement> {
     let mut diags = Vec::new();
     let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
 
@@ -1441,7 +1933,9 @@ fn parse_order_by_and_page_statement(tokens: &[Token], pos: &mut usize) -> Parse
         None
     };
 
-    let offset = if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Offset | TokenKind::Skip) {
+    let offset = if *pos < tokens.len()
+        && matches!(tokens[*pos].kind, TokenKind::Offset | TokenKind::Skip)
+    {
         let (offset_opt, mut offset_diags) = parse_offset_clause(tokens, pos);
         diags.append(&mut offset_diags);
         offset_opt
@@ -1461,14 +1955,20 @@ fn parse_order_by_and_page_statement(tokens: &[Token], pos: &mut usize) -> Parse
         return (None, diags);
     }
 
-    let end = tokens.get(pos.saturating_sub(1)).map(|t| t.span.end).unwrap_or(start);
+    let end = tokens
+        .get(pos.saturating_sub(1))
+        .map(|t| t.span.end)
+        .unwrap_or(start);
 
-    (Some(OrderByAndPageStatement {
-        order_by,
-        offset,
-        limit,
-        span: start..end,
-    }), diags)
+    (
+        Some(OrderByAndPageStatement {
+            order_by,
+            offset,
+            limit,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 /// Parses ORDER BY clause.
@@ -1487,11 +1987,13 @@ fn parse_order_by_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<Order
         *pos += 1;
     } else {
         diags.push(
-            Diag::error("Expected BY after ORDER")
-                .with_primary_label(
-                    tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                    "expected 'BY' here"
-                )
+            Diag::error("Expected BY after ORDER").with_primary_label(
+                tokens
+                    .get(*pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or(start..start),
+                "expected 'BY' here",
+            ),
         );
         return (None, diags);
     }
@@ -1518,21 +2020,29 @@ fn parse_order_by_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<Order
 
     if sort_specifications.is_empty() {
         diags.push(
-            Diag::error("Expected sort specification after ORDER BY")
-                .with_primary_label(
-                    tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                    "expected expression here"
-                )
+            Diag::error("Expected sort specification after ORDER BY").with_primary_label(
+                tokens
+                    .get(*pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or(start..start),
+                "expected expression here",
+            ),
         );
         return (None, diags);
     }
 
-    let end = sort_specifications.last().map(|s| s.span.end).unwrap_or(start);
+    let end = sort_specifications
+        .last()
+        .map(|s| s.span.end)
+        .unwrap_or(start);
 
-    (Some(OrderByClause {
-        sort_specifications,
-        span: start..end,
-    }), diags)
+    (
+        Some(OrderByClause {
+            sort_specifications,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 /// Parses a single sort specification.
@@ -1589,14 +2099,20 @@ fn parse_sort_specification(tokens: &[Token], pos: &mut usize) -> ParseResult<So
         None
     };
 
-    let end = tokens.get(pos.saturating_sub(1)).map(|t| t.span.end).unwrap_or(start);
+    let end = tokens
+        .get(pos.saturating_sub(1))
+        .map(|t| t.span.end)
+        .unwrap_or(start);
 
-    (Some(SortSpecification {
-        key,
-        ordering,
-        null_ordering,
-        span: start..end,
-    }), diags)
+    (
+        Some(SortSpecification {
+            key,
+            ordering,
+            null_ordering,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 /// Parses LIMIT clause.
@@ -1618,22 +2134,30 @@ fn parse_limit_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<LimitCla
         Some(c) => c,
         None => {
             diags.push(
-                Diag::error("Expected count expression after LIMIT")
-                    .with_primary_label(
-                        tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                        "expected expression here"
-                    )
+                Diag::error("Expected count expression after LIMIT").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start..start),
+                    "expected expression here",
+                ),
             );
             return (None, diags);
         }
     };
 
-    let end = tokens.get(pos.saturating_sub(1)).map(|t| t.span.end).unwrap_or(start);
+    let end = tokens
+        .get(pos.saturating_sub(1))
+        .map(|t| t.span.end)
+        .unwrap_or(start);
 
-    (Some(LimitClause {
-        count,
-        span: start..end,
-    }), diags)
+    (
+        Some(LimitClause {
+            count,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 /// Parses OFFSET/SKIP clause.
@@ -1666,23 +2190,31 @@ fn parse_offset_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<OffsetC
                 "Expected count expression after OFFSET"
             };
             diags.push(
-                Diag::error(msg)
-                    .with_primary_label(
-                        tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                        "expected expression here"
-                    )
+                Diag::error(msg).with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start..start),
+                    "expected expression here",
+                ),
             );
             return (None, diags);
         }
     };
 
-    let end = tokens.get(pos.saturating_sub(1)).map(|t| t.span.end).unwrap_or(start);
+    let end = tokens
+        .get(pos.saturating_sub(1))
+        .map(|t| t.span.end)
+        .unwrap_or(start);
 
-    (Some(OffsetClause {
-        count,
-        use_skip_keyword,
-        span: start..end,
-    }), diags)
+    (
+        Some(OffsetClause {
+            count,
+            use_skip_keyword,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 // ============================================================================
@@ -1705,11 +2237,13 @@ fn parse_group_by_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<Group
         *pos += 1;
     } else {
         diags.push(
-            Diag::error("Expected BY after GROUP")
-                .with_primary_label(
-                    tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                    "expected 'BY' here"
-                )
+            Diag::error("Expected BY after GROUP").with_primary_label(
+                tokens
+                    .get(*pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or(start..start),
+                "expected 'BY' here",
+            ),
         );
         return (None, diags);
     }
@@ -1736,21 +2270,29 @@ fn parse_group_by_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<Group
 
     if elements.is_empty() {
         diags.push(
-            Diag::error("Expected grouping element after GROUP BY")
-                .with_primary_label(
-                    tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start..start),
-                    "expected expression here"
-                )
+            Diag::error("Expected grouping element after GROUP BY").with_primary_label(
+                tokens
+                    .get(*pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or(start..start),
+                "expected expression here",
+            ),
         );
         return (None, diags);
     }
 
-    let end = tokens.get(pos.saturating_sub(1)).map(|t| t.span.end).unwrap_or(start);
+    let end = tokens
+        .get(pos.saturating_sub(1))
+        .map(|t| t.span.end)
+        .unwrap_or(start);
 
-    (Some(GroupByClause {
-        elements,
-        span: start..end,
-    }), diags)
+    (
+        Some(GroupByClause {
+            elements,
+            span: start..end,
+        }),
+        diags,
+    )
 }
 
 /// Parses a grouping element (expression or empty set).
@@ -1897,7 +2439,40 @@ mod tests {
         assert!(result.is_some());
         assert!(diags.is_empty());
         let for_stmt = result.unwrap();
-        assert!(matches!(for_stmt.ordinality_or_offset, Some(ForOrdinalityOrOffset::Ordinality { .. })));
+        assert!(matches!(
+            for_stmt.ordinality_or_offset,
+            Some(ForOrdinalityOrOffset::Ordinality { .. })
+        ));
+    }
+
+    #[test]
+    fn test_parse_for_with_missing_modifier_reports_diagnostic() {
+        let tokens = lex("FOR item IN collection WITH");
+        let mut pos = 0;
+        let (result, diags) = parse_for_statement(&tokens, &mut pos);
+
+        assert!(result.is_some());
+        assert!(!diags.is_empty());
+    }
+
+    #[test]
+    fn test_parse_for_with_missing_target_reports_diagnostic() {
+        let tokens = lex("FOR item IN collection WITH OFFSET");
+        let mut pos = 0;
+        let (result, diags) = parse_for_statement(&tokens, &mut pos);
+
+        assert!(result.is_some());
+        assert!(!diags.is_empty());
+    }
+
+    #[test]
+    fn test_parse_for_with_invalid_with_payload_recovers_to_return() {
+        let tokens = lex("FOR item IN collection WITH junk RETURN item");
+        let mut pos = 0;
+        let (result, diags) = parse_query(&tokens, &mut pos);
+
+        assert!(result.is_some());
+        assert!(!diags.is_empty());
     }
 
     #[test]
@@ -1996,7 +2571,10 @@ mod tests {
         assert!(diags.is_empty());
         let group = result.unwrap();
         assert_eq!(group.elements.len(), 1);
-        assert!(matches!(group.elements[0], GroupingElement::EmptyGroupingSet));
+        assert!(matches!(
+            group.elements[0],
+            GroupingElement::EmptyGroupingSet
+        ));
     }
 
     #[test]
@@ -2013,11 +2591,16 @@ mod tests {
     fn test_parse_simple_match_statement() {
         let tokens = lex("MATCH (n)");
         let mut pos = 0;
-        let (result, _diags) = parse_match_statement(&tokens, &mut pos);
+        let (result, diags) = parse_match_statement(&tokens, &mut pos);
 
         assert!(result.is_some());
-        // Note: diags may contain warnings about incomplete pattern parsing (Sprint 8)
-        assert!(matches!(result.unwrap(), MatchStatement::Simple(_)));
+        assert!(diags.is_empty());
+        match result.unwrap() {
+            MatchStatement::Simple(simple) => {
+                assert!(!simple.pattern.paths.patterns.is_empty());
+            }
+            MatchStatement::Optional(_) => panic!("expected simple MATCH"),
+        }
     }
 
     #[test]
@@ -2037,14 +2620,53 @@ mod tests {
     fn test_parse_ambient_linear_query() {
         let tokens = lex("MATCH (n) RETURN n");
         let mut pos = 0;
-        let (result, _diags) = parse_ambient_linear_query(&tokens, &mut pos);
+        let (result, diags) = parse_ambient_linear_query(&tokens, &mut pos);
 
         assert!(result.is_some(), "Query failed to parse");
+        assert!(diags.is_empty());
         let query = result.unwrap();
-        assert_eq!(query.primitive_statements.len(), 1, "Should have 1 primitive statement");
-        // Note: Due to the GraphPattern placeholder in Sprint 7, RETURN might not be parsed correctly yet
-        // This will be fixed when Sprint 8 implements full graph pattern parsing
-        // assert!(query.result_statement.is_some(), "Should have result statement");
+        assert_eq!(
+            query.primitive_statements.len(),
+            1,
+            "Should have 1 primitive statement"
+        );
+        assert!(matches!(
+            query.result_statement.as_deref(),
+            Some(PrimitiveResultStatement::Return(_))
+        ));
+    }
+
+    #[test]
+    fn test_parse_query_rejects_non_query_token_without_progress() {
+        let tokens = lex("foo");
+        let mut pos = 0;
+        let (result, diags) = parse_query(&tokens, &mut pos);
+
+        assert!(result.is_none());
+        assert!(!diags.is_empty());
+        assert_eq!(pos, 0, "position must not advance on non-query input");
+    }
+
+    #[test]
+    fn test_parse_query_rejects_semicolon_without_progress() {
+        let tokens = lex(";");
+        let mut pos = 0;
+        let (result, diags) = parse_query(&tokens, &mut pos);
+
+        assert!(result.is_none());
+        assert!(!diags.is_empty());
+        assert_eq!(pos, 0, "position must not advance on semicolon");
+    }
+
+    #[test]
+    fn test_parse_query_requires_body_after_use_graph() {
+        let tokens = lex("USE GRAPH g");
+        let mut pos = 0;
+        let (result, diags) = parse_query(&tokens, &mut pos);
+
+        assert!(result.is_none());
+        assert!(!diags.is_empty());
+        assert!(pos > 0, "USE GRAPH clause should still be consumed");
     }
 
     #[test]
@@ -2073,6 +2695,61 @@ mod tests {
         } else {
             panic!("Expected Items variant");
         }
+    }
+
+    #[test]
+    fn test_parse_select_from_match_list() {
+        let tokens = lex("SELECT * FROM MATCH (n)");
+        let mut pos = 0;
+        let (result, diags) = parse_select_statement(&tokens, &mut pos);
+
+        assert!(result.is_some());
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let select = result.unwrap();
+        assert!(matches!(
+            select.from_clause,
+            Some(SelectFromClause::GraphMatchList { .. })
+        ));
+    }
+
+    #[test]
+    fn test_parse_select_from_query_specification() {
+        let tokens = lex("SELECT * FROM (MATCH (n) RETURN n)");
+        let mut pos = 0;
+        let (result, diags) = parse_select_statement(&tokens, &mut pos);
+
+        assert!(result.is_some());
+        assert!(diags.is_empty());
+        let select = result.unwrap();
+        assert!(matches!(
+            select.from_clause,
+            Some(SelectFromClause::QuerySpecification { .. })
+        ));
+    }
+
+    #[test]
+    fn test_parse_select_from_graph_and_query_specification() {
+        let tokens = lex("SELECT * FROM g MATCH (n) RETURN n");
+        let mut pos = 0;
+        let (result, diags) = parse_select_statement(&tokens, &mut pos);
+
+        assert!(result.is_some());
+        assert!(diags.is_empty());
+        let select = result.unwrap();
+        assert!(matches!(
+            select.from_clause,
+            Some(SelectFromClause::GraphAndQuerySpecification { .. })
+        ));
+    }
+
+    #[test]
+    fn test_parse_select_from_missing_payload_reports_diagnostic() {
+        let tokens = lex("SELECT * FROM");
+        let mut pos = 0;
+        let (result, diags) = parse_select_statement(&tokens, &mut pos);
+
+        assert!(result.is_some());
+        assert!(!diags.is_empty());
     }
 
     #[test]

@@ -4,13 +4,14 @@
 //! an AST while preserving diagnostics and recovering at statement boundaries.
 
 pub mod expression;
+pub mod patterns;
 mod program;
 pub mod query;
 pub mod references;
 pub mod types;
 
 use crate::ast::Program;
-use crate::diag::{Diag, SourceFile, convert_diagnostics_to_reports};
+use crate::diag::{Diag, DiagSeverity, SourceFile, convert_diagnostics_to_reports};
 use crate::lexer::token::{Token, TokenKind};
 use miette::Report;
 
@@ -52,11 +53,21 @@ impl<'source> Parser<'source> {
         let (program, parser_diags) =
             program::parse_program_tokens(&self.tokens, self.source.len());
         self.diagnostics.extend(parser_diags);
+        let has_error = self
+            .diagnostics
+            .iter()
+            .any(|diag| diag.severity == DiagSeverity::Error);
+        let ast = if has_error && program.statements.is_empty() {
+            None
+        } else {
+            Some(program)
+        };
+
         let source = SourceFile::new(self.source);
         let reports = convert_diagnostics_to_reports(&self.diagnostics, &source);
 
         ParseResult {
-            ast: Some(program),
+            ast,
             diagnostics: reports,
         }
     }
@@ -73,6 +84,7 @@ impl<'source> Parser<'source> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lexer::Lexer;
     use crate::lexer::token::TokenKind;
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -92,6 +104,30 @@ mod tests {
 
         assert!(result.ast.is_some());
         assert!(result.ast.unwrap().statements.is_empty());
+    }
+
+    #[test]
+    fn parse_returns_none_for_fatal_failure_without_statements() {
+        let tokens = vec![
+            Token::new(TokenKind::Identifier("invalid".into()), 0..7),
+            Token::new(TokenKind::Eof, 7..7),
+        ];
+        let parser = Parser::new(tokens, "invalid");
+        let result = parser.parse();
+
+        assert!(result.ast.is_none());
+        assert!(!result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn parse_keeps_partial_ast_when_recovery_produced_statements() {
+        let source = "RETURN 1; invalid";
+        let tokens = Lexer::new(source).tokenize().tokens;
+        let parser = Parser::new(tokens, source);
+        let result = parser.parse();
+
+        assert!(result.ast.is_some());
+        assert!(!result.diagnostics.is_empty());
     }
 
     #[test]
