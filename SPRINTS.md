@@ -10,6 +10,13 @@ This document is intentionally broad and will be refined into detailed sprint pl
 - Output contract: `parse(&str) -> { ast: Option<Ast>, diags: Vec<miette::Report> }`.
 - Parser must never panic on invalid input and should return partial AST where possible.
 
+## Architecture Direction Update (February 17, 2026)
+- The project has now committed to `logos` for lexing and `chumsky` for parser control flow/recovery.
+- Token payload storage is being standardized around `smol_str` to reduce allocation pressure.
+- Top-level semicolon handling no longer materializes empty statements in AST output.
+- Temporal values are tokenized structurally (`DATE` + string literal, etc.) and will be assembled in parser/AST layers.
+- Public `parse(&str)` diagnostics are emitted as `miette::Report` values at the API boundary.
+
 ## Completion Definition
 - All feature families from `GQL_FEATURES.md` are parsed with documented coverage status.
 - Recovery and diagnostics are stable for malformed input and large queries.
@@ -32,16 +39,19 @@ This document is intentionally broad and will be refined into detailed sprint pl
 - Goal: Implement robust lexical layer with error-tolerant scanning.
 - Scope: token kinds, keywords, identifiers, literals, operators, comments/whitespace, parameter tokens, lexer errors.
 - Exit Criteria: lexer emits `Vec<Token> + Vec<Diag>` with continuation after lexical errors.
+- Implementation note: lexer implementation is `logos`-based.
 
 ### Sprint 3: Parser Skeleton and Recovery Framework
 - Goal: Establish parser control flow, AST entry points, and recovery strategy.
 - Scope: parser context/state, clause-boundary recovery, partial AST policy, top-level program framing.
 - Exit Criteria: parser handles malformed inputs without panic and returns structured partial results.
+- Implementation note: statement skeleton parsing and recovery are `chumsky`-driven.
 
-### Sprint 4: Program, Session, Transaction, Catalog Statements
+### Sprint 4: Program, Session, Transaction, Catalog Statements (Completed February 17, 2026)
 - Goal: Cover operational statement surface outside query/pattern core.
 - Scope: program structure, session set/reset/close, transaction lifecycle, create/drop schema/graph/graph type, catalog calls.
 - Exit Criteria: all corresponding statement families parse with correct AST forms and diagnostics.
+- Status: ✅ **Completed** - All AST nodes defined, parser builds command-level AST variants for Sprint 4 statement families, and comprehensive tests pass.
 
 ### Sprint 5: Values, Literals, and Expression Core
 - Goal: Implement expression backbone used by nearly all clauses.

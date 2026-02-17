@@ -1,193 +1,1546 @@
 //! Program structure and statement parsing.
 
-use crate::ast::{CatalogStatement, MutationStatement, Program, QueryStatement, Statement};
-use crate::lexer::token::TokenKind;
-use crate::parser::Parser;
+use crate::ast::{
+    CallCatalogModifyingProcedureStatement, CatalogStatement, CatalogStatementKind, CommitCommand,
+    CreateGraphStatement, CreateGraphTypeStatement, CreateSchemaStatement, DropGraphStatement,
+    DropGraphTypeStatement, DropSchemaStatement, ExpressionPlaceholder, GraphReference,
+    GraphReferencePlaceholder, GraphTypeReference, GraphTypeSource, GraphTypeSpec,
+    MutationStatement, Program, QueryStatement, RollbackCommand, SchemaReference,
+    SchemaReferencePlaceholder, SessionCloseCommand, SessionCommand, SessionResetCommand,
+    SessionResetTarget, SessionSetCommand, SessionSetGraphClause, SessionSetParameterClause,
+    SessionSetSchemaClause, SessionSetTimeZoneClause, SessionStatement, Span,
+    StartTransactionCommand, Statement, TransactionAccessMode, TransactionCharacteristics,
+    TransactionCommand, TransactionMode, TransactionStatement,
+};
+use crate::diag::Diag;
+use crate::lexer::token::{Token, TokenKind};
+use smol_str::SmolStr;
 
-impl<'source> Parser<'source> {
-    /// Parses a complete GQL program.
-    ///
-    /// A program consists of zero or more statements. Errors in individual
-    /// statements are recovered at statement boundaries, allowing parsing
-    /// to continue.
-    pub(crate) fn parse_program(&mut self) -> Program {
-        let start = self.peek().span.start;
-        let mut statements = Vec::new();
+type ParseError = Box<Diag>;
+type ParseOutcome<T> = Result<T, ParseError>;
 
-        while !self.is_eof() {
-            match self.parse_statement() {
-                Ok(stmt) => statements.push(stmt),
-                Err(()) => {
-                    // Error already recorded, synchronize to next statement
-                    self.synchronize_at_statement();
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum SyntaxToken {
+    QueryStart,
+    MutationStart,
+    SessionStart,
+    TransactionStart,
+    CatalogStart,
+    Semicolon,
+    Eof,
+    Other,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum StatementClass {
+    Query,
+    Mutation,
+    Session,
+    Transaction,
+    Catalog,
+}
+
+pub(crate) fn parse_program_tokens(tokens: &[Token], source_len: usize) -> (Program, Vec<Diag>) {
+    let mut statements = Vec::new();
+    let mut diagnostics = Vec::new();
+    let mut cursor = 0usize;
+
+    while cursor < tokens.len() {
+        match classify(&tokens[cursor].kind) {
+            SyntaxToken::Eof => break,
+            SyntaxToken::Semicolon => {
+                cursor += 1;
+            }
+            SyntaxToken::Other => {
+                diagnostics.push(
+                    Diag::error("unexpected token in statement")
+                        .with_primary_label(
+                            tokens[cursor].span.clone(),
+                            format!("unexpected {}", tokens[cursor].kind),
+                        )
+                        .with_code("P003"),
+                );
+                cursor = synchronize_top_level(tokens, cursor + 1);
+            }
+            start => {
+                let class = syntax_to_statement_class(start);
+                let end = find_statement_end(tokens, cursor);
+                let statement_tokens = &tokens[cursor..end];
+                match parse_statement(class, statement_tokens) {
+                    Ok(statement) => statements.push(statement),
+                    Err(diag) => diagnostics.push(*diag),
                 }
+                cursor = end;
             }
         }
+    }
 
-        let end = if self.current > 0 {
-            self.tokens
-                .get(self.current - 1)
-                .map(|t| t.span.end)
-                .unwrap_or(start)
-        } else {
-            start
-        };
-
+    let program_span = compute_program_span(tokens, source_len);
+    (
         Program {
             statements,
-            span: start..end,
+            span: program_span,
+        },
+        diagnostics,
+    )
+}
+
+fn classify(kind: &TokenKind) -> SyntaxToken {
+    match kind {
+        TokenKind::Match | TokenKind::Select | TokenKind::From => SyntaxToken::QueryStart,
+        TokenKind::Insert | TokenKind::Delete => SyntaxToken::MutationStart,
+        TokenKind::Session => SyntaxToken::SessionStart,
+        TokenKind::Start | TokenKind::Commit | TokenKind::Rollback => SyntaxToken::TransactionStart,
+        TokenKind::Create | TokenKind::Drop | TokenKind::Call => SyntaxToken::CatalogStart,
+        TokenKind::Semicolon => SyntaxToken::Semicolon,
+        TokenKind::Eof => SyntaxToken::Eof,
+        _ => SyntaxToken::Other,
+    }
+}
+
+fn syntax_to_statement_class(token: SyntaxToken) -> StatementClass {
+    match token {
+        SyntaxToken::QueryStart => StatementClass::Query,
+        SyntaxToken::MutationStart => StatementClass::Mutation,
+        SyntaxToken::SessionStart => StatementClass::Session,
+        SyntaxToken::TransactionStart => StatementClass::Transaction,
+        SyntaxToken::CatalogStart => StatementClass::Catalog,
+        SyntaxToken::Semicolon | SyntaxToken::Eof | SyntaxToken::Other => {
+            unreachable!("only statement-start syntax tokens are converted")
+        }
+    }
+}
+
+fn find_statement_end(tokens: &[Token], start: usize) -> usize {
+    let mut cursor = start + 1;
+    while cursor < tokens.len() {
+        match classify(&tokens[cursor].kind) {
+            SyntaxToken::Semicolon
+            | SyntaxToken::Eof
+            | SyntaxToken::QueryStart
+            | SyntaxToken::MutationStart
+            | SyntaxToken::SessionStart
+            | SyntaxToken::TransactionStart
+            | SyntaxToken::CatalogStart => return cursor,
+            SyntaxToken::Other => {
+                cursor += 1;
+            }
+        }
+    }
+    cursor
+}
+
+fn parse_statement(class: StatementClass, tokens: &[Token]) -> ParseOutcome<Statement> {
+    match class {
+        StatementClass::Query => Ok(Statement::Query(Box::new(QueryStatement {
+            span: slice_span(tokens),
+        }))),
+        StatementClass::Mutation => Ok(Statement::Mutation(Box::new(MutationStatement {
+            span: slice_span(tokens),
+        }))),
+        StatementClass::Session => parse_session_statement(tokens),
+        StatementClass::Transaction => parse_transaction_statement(tokens),
+        StatementClass::Catalog => parse_catalog_statement(tokens),
+    }
+}
+
+fn parse_session_statement(tokens: &[Token]) -> ParseOutcome<Statement> {
+    let span = slice_span(tokens);
+    if tokens.len() < 2 {
+        return Err(expected_token_diag(
+            tokens,
+            1,
+            "SET, RESET, or CLOSE",
+            "SESSION statement",
+        ));
+    }
+
+    let command = match tokens[1].kind {
+        TokenKind::Set => parse_session_set_command(tokens, 2)?,
+        TokenKind::Reset => parse_session_reset_command(tokens, 2)?,
+        TokenKind::Close => {
+            if tokens.len() != 2 {
+                return Err(unexpected_token_diag(tokens, 2, "SESSION CLOSE"));
+            }
+            SessionCommand::Close(SessionCloseCommand { span: span.clone() })
+        }
+        _ => {
+            return Err(expected_token_diag(
+                tokens,
+                1,
+                "SET, RESET, or CLOSE",
+                "SESSION statement",
+            ));
+        }
+    };
+
+    Ok(Statement::Session(Box::new(SessionStatement {
+        command,
+        span,
+    })))
+}
+
+fn parse_session_set_command(tokens: &[Token], mut cursor: usize) -> ParseOutcome<SessionCommand> {
+    let stmt_span = slice_span(tokens);
+    if cursor >= tokens.len() {
+        return Err(expected_token_diag(
+            tokens,
+            cursor,
+            "SCHEMA, GRAPH, TIME ZONE, VALUE, or TABLE",
+            "SESSION SET",
+        ));
+    }
+
+    if matches!(tokens[cursor].kind, TokenKind::Schema) {
+        cursor += 1;
+        if cursor >= tokens.len() {
+            return Err(expected_token_diag(
+                tokens,
+                cursor,
+                "schema reference",
+                "SESSION SET SCHEMA",
+            ));
+        }
+        let schema_span = span_for_segment(tokens, cursor, tokens.len());
+        return Ok(SessionCommand::Set(SessionSetCommand::Schema(
+            SessionSetSchemaClause {
+                schema_reference: SchemaReferencePlaceholder {
+                    span: schema_span.clone(),
+                },
+                span: stmt_span,
+            },
+        )));
+    }
+
+    if matches!(tokens[cursor].kind, TokenKind::Time) {
+        cursor += 1;
+        if cursor >= tokens.len() || !matches!(tokens[cursor].kind, TokenKind::Zone) {
+            return Err(expected_token_diag(
+                tokens,
+                cursor,
+                "ZONE",
+                "SESSION SET TIME",
+            ));
+        }
+        cursor += 1;
+        if cursor >= tokens.len() {
+            return Err(expected_token_diag(
+                tokens,
+                cursor,
+                "time zone value",
+                "SESSION SET TIME ZONE",
+            ));
+        }
+        let value_span = span_for_segment(tokens, cursor, tokens.len());
+        return Ok(SessionCommand::Set(SessionSetCommand::TimeZone(
+            SessionSetTimeZoneClause {
+                value: ExpressionPlaceholder { span: value_span },
+                span: stmt_span,
+            },
+        )));
+    }
+
+    if is_identifier_word(&tokens[cursor].kind, "VALUE") {
+        return parse_session_set_value_parameter(tokens, cursor + 1);
+    }
+
+    if is_identifier_word(&tokens[cursor].kind, "BINDING")
+        || is_identifier_word(&tokens[cursor].kind, "TABLE")
+    {
+        return parse_session_set_binding_table_parameter(tokens, cursor);
+    }
+
+    if matches!(tokens[cursor].kind, TokenKind::Property | TokenKind::Graph) {
+        return parse_session_set_graph_or_graph_parameter(tokens, cursor);
+    }
+
+    Err(expected_token_diag(
+        tokens,
+        cursor,
+        "SCHEMA, GRAPH, TIME ZONE, VALUE, or TABLE",
+        "SESSION SET",
+    ))
+}
+
+fn parse_session_set_graph_or_graph_parameter(
+    tokens: &[Token],
+    mut cursor: usize,
+) -> ParseOutcome<SessionCommand> {
+    let stmt_span = slice_span(tokens);
+    let property = if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::Property) {
+        cursor += 1;
+        true
+    } else {
+        false
+    };
+
+    if cursor >= tokens.len() || !matches!(tokens[cursor].kind, TokenKind::Graph) {
+        return Err(expected_token_diag(
+            tokens,
+            cursor,
+            "GRAPH",
+            "SESSION SET GRAPH",
+        ));
+    }
+    cursor += 1;
+
+    if cursor >= tokens.len() {
+        return Err(expected_token_diag(
+            tokens,
+            cursor,
+            "graph reference or $parameter",
+            "SESSION SET GRAPH",
+        ));
+    }
+
+    if starts_session_parameter_name(tokens, cursor) {
+        let (name, next_cursor, name_span) =
+            parse_session_parameter_name(tokens, cursor, "SESSION SET GRAPH parameter")?;
+        let value_span = parse_initializer_span(tokens, next_cursor, name_span.end);
+        return Ok(SessionCommand::Set(SessionSetCommand::Parameter(
+            SessionSetParameterClause::GraphParameter {
+                name,
+                value: ExpressionPlaceholder { span: value_span },
+                span: stmt_span,
+            },
+        )));
+    }
+
+    let graph_span = span_for_segment(tokens, cursor, tokens.len());
+    Ok(SessionCommand::Set(SessionSetCommand::Graph(
+        SessionSetGraphClause {
+            property,
+            graph_reference: GraphReferencePlaceholder { span: graph_span },
+            span: stmt_span,
+        },
+    )))
+}
+
+fn parse_session_set_binding_table_parameter(
+    tokens: &[Token],
+    mut cursor: usize,
+) -> ParseOutcome<SessionCommand> {
+    let stmt_span = slice_span(tokens);
+    if cursor < tokens.len() && is_identifier_word(&tokens[cursor].kind, "BINDING") {
+        cursor += 1;
+    }
+
+    if cursor >= tokens.len() || !is_identifier_word(&tokens[cursor].kind, "TABLE") {
+        return Err(expected_token_diag(
+            tokens,
+            cursor,
+            "TABLE",
+            "SESSION SET TABLE",
+        ));
+    }
+    cursor += 1;
+
+    let (name, next_cursor, name_span) =
+        parse_session_parameter_name(tokens, cursor, "SESSION SET TABLE parameter")?;
+    let value_span = parse_initializer_span(tokens, next_cursor, name_span.end);
+
+    Ok(SessionCommand::Set(SessionSetCommand::Parameter(
+        SessionSetParameterClause::BindingTableParameter {
+            name,
+            value: ExpressionPlaceholder { span: value_span },
+            span: stmt_span,
+        },
+    )))
+}
+
+fn parse_session_set_value_parameter(
+    tokens: &[Token],
+    cursor: usize,
+) -> ParseOutcome<SessionCommand> {
+    let stmt_span = slice_span(tokens);
+    let (name, next_cursor, name_span) =
+        parse_session_parameter_name(tokens, cursor, "SESSION SET VALUE parameter")?;
+    let value_span = parse_initializer_span(tokens, next_cursor, name_span.end);
+
+    Ok(SessionCommand::Set(SessionSetCommand::Parameter(
+        SessionSetParameterClause::ValueParameter {
+            name,
+            value: ExpressionPlaceholder { span: value_span },
+            span: stmt_span,
+        },
+    )))
+}
+
+fn parse_session_reset_command(
+    tokens: &[Token],
+    mut cursor: usize,
+) -> ParseOutcome<SessionCommand> {
+    let stmt_span = slice_span(tokens);
+    let target = if cursor >= tokens.len() {
+        SessionResetTarget::All
+    } else if matches!(tokens[cursor].kind, TokenKind::All) {
+        cursor += 1;
+        if cursor >= tokens.len() {
+            SessionResetTarget::All
+        } else if is_identifier_word(&tokens[cursor].kind, "PARAMETERS") {
+            cursor += 1;
+            SessionResetTarget::Parameters
+        } else if matches!(tokens[cursor].kind, TokenKind::Characteristics) {
+            cursor += 1;
+            SessionResetTarget::Characteristics
+        } else {
+            return Err(expected_token_diag(
+                tokens,
+                cursor,
+                "PARAMETERS or CHARACTERISTICS",
+                "SESSION RESET ALL",
+            ));
+        }
+    } else if is_identifier_word(&tokens[cursor].kind, "PARAMETERS") {
+        cursor += 1;
+        SessionResetTarget::Parameters
+    } else if matches!(tokens[cursor].kind, TokenKind::Characteristics) {
+        cursor += 1;
+        SessionResetTarget::Characteristics
+    } else if matches!(tokens[cursor].kind, TokenKind::Schema) {
+        cursor += 1;
+        SessionResetTarget::Schema
+    } else if matches!(tokens[cursor].kind, TokenKind::Property) {
+        cursor += 1;
+        if cursor >= tokens.len() || !matches!(tokens[cursor].kind, TokenKind::Graph) {
+            return Err(expected_token_diag(
+                tokens,
+                cursor,
+                "GRAPH",
+                "SESSION RESET PROPERTY",
+            ));
+        }
+        cursor += 1;
+        SessionResetTarget::Graph
+    } else if matches!(tokens[cursor].kind, TokenKind::Graph) {
+        cursor += 1;
+        SessionResetTarget::Graph
+    } else if matches!(tokens[cursor].kind, TokenKind::Time) {
+        cursor += 1;
+        if cursor >= tokens.len() || !matches!(tokens[cursor].kind, TokenKind::Zone) {
+            return Err(expected_token_diag(
+                tokens,
+                cursor,
+                "ZONE",
+                "SESSION RESET TIME",
+            ));
+        }
+        cursor += 1;
+        SessionResetTarget::TimeZone
+    } else if is_identifier_word(&tokens[cursor].kind, "PARAMETER") {
+        cursor += 1;
+        if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::Parameter(_)) {
+            cursor += 1;
+        }
+        SessionResetTarget::Parameters
+    } else if matches!(tokens[cursor].kind, TokenKind::Parameter(_)) {
+        cursor += 1;
+        SessionResetTarget::Parameters
+    } else {
+        return Err(expected_token_diag(
+            tokens,
+            cursor,
+            "RESET target",
+            "SESSION RESET",
+        ));
+    };
+
+    if cursor < tokens.len() {
+        return Err(unexpected_token_diag(tokens, cursor, "SESSION RESET"));
+    }
+
+    Ok(SessionCommand::Reset(SessionResetCommand {
+        target,
+        span: stmt_span,
+    }))
+}
+
+fn starts_session_parameter_name(tokens: &[Token], cursor: usize) -> bool {
+    if cursor >= tokens.len() {
+        return false;
+    }
+    matches!(tokens[cursor].kind, TokenKind::Parameter(_))
+        || (cursor + 2 < tokens.len()
+            && matches!(tokens[cursor].kind, TokenKind::If)
+            && matches!(tokens[cursor + 1].kind, TokenKind::Not)
+            && matches!(tokens[cursor + 2].kind, TokenKind::Exists))
+}
+
+fn parse_session_parameter_name(
+    tokens: &[Token],
+    mut cursor: usize,
+    context: &str,
+) -> ParseOutcome<(SmolStr, usize, Span)> {
+    if cursor + 2 < tokens.len()
+        && matches!(tokens[cursor].kind, TokenKind::If)
+        && matches!(tokens[cursor + 1].kind, TokenKind::Not)
+        && matches!(tokens[cursor + 2].kind, TokenKind::Exists)
+    {
+        cursor += 3;
+    }
+
+    if cursor >= tokens.len() {
+        return Err(expected_token_diag(tokens, cursor, "$parameter", context));
+    }
+
+    match &tokens[cursor].kind {
+        TokenKind::Parameter(name) => Ok((name.clone(), cursor + 1, tokens[cursor].span.clone())),
+        _ => Err(expected_token_diag(tokens, cursor, "$parameter", context)),
+    }
+}
+
+fn parse_initializer_span(tokens: &[Token], cursor: usize, fallback_end: usize) -> Span {
+    if cursor >= tokens.len() {
+        return fallback_end..fallback_end;
+    }
+    let expr_start = if matches!(tokens[cursor].kind, TokenKind::Eq) {
+        cursor + 1
+    } else {
+        cursor
+    };
+    if expr_start >= tokens.len() {
+        let end = tokens[cursor].span.end;
+        return end..end;
+    }
+    span_for_segment(tokens, expr_start, tokens.len())
+}
+
+fn parse_transaction_statement(tokens: &[Token]) -> ParseOutcome<Statement> {
+    let span = slice_span(tokens);
+    if tokens.is_empty() {
+        return Err(expected_token_diag(
+            tokens,
+            0,
+            "transaction command",
+            "transaction statement",
+        ));
+    }
+
+    let command = match tokens[0].kind {
+        TokenKind::Start => parse_start_transaction_command(tokens)?,
+        TokenKind::Commit => parse_commit_command(tokens)?,
+        TokenKind::Rollback => parse_rollback_command(tokens)?,
+        _ => {
+            return Err(expected_token_diag(
+                tokens,
+                0,
+                "START, COMMIT, or ROLLBACK",
+                "transaction statement",
+            ));
+        }
+    };
+
+    Ok(Statement::Transaction(Box::new(TransactionStatement {
+        command,
+        span,
+    })))
+}
+
+fn parse_start_transaction_command(tokens: &[Token]) -> ParseOutcome<TransactionCommand> {
+    if tokens.len() < 2 || !matches!(tokens[1].kind, TokenKind::Transaction) {
+        return Err(expected_token_diag(
+            tokens,
+            1,
+            "TRANSACTION",
+            "START statement",
+        ));
+    }
+
+    let mut cursor = 2usize;
+    let characteristics = if cursor < tokens.len() {
+        let (characteristics, next_cursor) = parse_transaction_characteristics(tokens, cursor)?;
+        cursor = next_cursor;
+        Some(characteristics)
+    } else {
+        None
+    };
+
+    if cursor < tokens.len() {
+        return Err(unexpected_token_diag(tokens, cursor, "START TRANSACTION"));
+    }
+
+    Ok(TransactionCommand::Start(StartTransactionCommand {
+        characteristics,
+        span: slice_span(tokens),
+    }))
+}
+
+fn parse_transaction_characteristics(
+    tokens: &[Token],
+    mut cursor: usize,
+) -> ParseOutcome<(TransactionCharacteristics, usize)> {
+    let start = cursor;
+    let mut modes = Vec::new();
+
+    loop {
+        if cursor + 1 >= tokens.len() || !matches!(tokens[cursor].kind, TokenKind::Read) {
+            return Err(expected_token_diag(
+                tokens,
+                cursor,
+                "READ ONLY or READ WRITE",
+                "transaction characteristics",
+            ));
+        }
+
+        let access_mode = if matches!(tokens[cursor + 1].kind, TokenKind::Only) {
+            TransactionAccessMode::ReadOnly
+        } else if matches!(tokens[cursor + 1].kind, TokenKind::Write) {
+            TransactionAccessMode::ReadWrite
+        } else {
+            return Err(expected_token_diag(
+                tokens,
+                cursor + 1,
+                "ONLY or WRITE",
+                "READ mode",
+            ));
+        };
+
+        modes.push(TransactionMode::AccessMode(access_mode));
+        cursor += 2;
+
+        if cursor >= tokens.len() {
+            break;
+        }
+        if !matches!(tokens[cursor].kind, TokenKind::Comma) {
+            return Err(unexpected_token_diag(
+                tokens,
+                cursor,
+                "transaction characteristics",
+            ));
+        }
+        cursor += 1;
+        if cursor >= tokens.len() {
+            return Err(expected_token_diag(
+                tokens,
+                cursor,
+                "transaction mode",
+                "transaction characteristics",
+            ));
         }
     }
 
-    /// Parses a single statement.
-    ///
-    /// Dispatches to the appropriate statement parser based on the
-    /// leading keyword. Returns `Err(())` if the statement cannot be parsed.
-    fn parse_statement(&mut self) -> Result<Statement, ()> {
-        match self.peek_kind() {
-            TokenKind::Semicolon => {
-                let span = self.advance().span.clone();
-                Ok(Statement::Empty(span))
+    Ok((
+        TransactionCharacteristics {
+            modes,
+            span: span_for_segment(tokens, start, cursor),
+        },
+        cursor,
+    ))
+}
+
+fn parse_commit_command(tokens: &[Token]) -> ParseOutcome<TransactionCommand> {
+    let mut cursor = 1usize;
+    let work = if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::Work) {
+        cursor += 1;
+        true
+    } else {
+        false
+    };
+
+    if cursor < tokens.len() {
+        return Err(unexpected_token_diag(tokens, cursor, "COMMIT"));
+    }
+
+    Ok(TransactionCommand::Commit(CommitCommand {
+        work,
+        span: slice_span(tokens),
+    }))
+}
+
+fn parse_rollback_command(tokens: &[Token]) -> ParseOutcome<TransactionCommand> {
+    let mut cursor = 1usize;
+    let work = if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::Work) {
+        cursor += 1;
+        true
+    } else {
+        false
+    };
+
+    if cursor < tokens.len() {
+        return Err(unexpected_token_diag(tokens, cursor, "ROLLBACK"));
+    }
+
+    Ok(TransactionCommand::Rollback(RollbackCommand {
+        work,
+        span: slice_span(tokens),
+    }))
+}
+
+fn parse_catalog_statement(tokens: &[Token]) -> ParseOutcome<Statement> {
+    let span = slice_span(tokens);
+    if tokens.is_empty() {
+        return Err(expected_token_diag(
+            tokens,
+            0,
+            "catalog command",
+            "catalog statement",
+        ));
+    }
+
+    let kind = match tokens[0].kind {
+        TokenKind::Create => parse_create_catalog_statement(tokens)?,
+        TokenKind::Drop => parse_drop_catalog_statement(tokens)?,
+        TokenKind::Call => parse_call_catalog_statement(tokens)?,
+        _ => {
+            return Err(expected_token_diag(
+                tokens,
+                0,
+                "CREATE, DROP, or CALL",
+                "catalog statement",
+            ));
+        }
+    };
+
+    Ok(Statement::Catalog(Box::new(CatalogStatement {
+        kind,
+        span,
+    })))
+}
+
+fn parse_create_catalog_statement(tokens: &[Token]) -> ParseOutcome<CatalogStatementKind> {
+    let mut cursor = 1usize;
+    let mut or_replace = false;
+
+    if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::Or) {
+        or_replace = true;
+        cursor += 1;
+        if cursor >= tokens.len() || !matches!(tokens[cursor].kind, TokenKind::Replace) {
+            return Err(expected_token_diag(tokens, cursor, "REPLACE", "CREATE OR"));
+        }
+        cursor += 1;
+    }
+
+    if cursor >= tokens.len() {
+        return Err(expected_token_diag(
+            tokens,
+            cursor,
+            "SCHEMA or GRAPH",
+            "CREATE statement",
+        ));
+    }
+
+    if matches!(tokens[cursor].kind, TokenKind::Schema) {
+        cursor += 1;
+        let if_not_exists = consume_if_not_exists(tokens, &mut cursor);
+        let (schema, next_cursor) =
+            parse_schema_reference_until(tokens, cursor, |_| false, "schema reference")?;
+        if next_cursor < tokens.len() {
+            return Err(unexpected_token_diag(tokens, next_cursor, "CREATE SCHEMA"));
+        }
+        return Ok(CatalogStatementKind::CreateSchema(CreateSchemaStatement {
+            or_replace,
+            if_not_exists,
+            schema,
+            span: slice_span(tokens),
+        }));
+    }
+
+    let property = if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::Property) {
+        cursor += 1;
+        true
+    } else {
+        false
+    };
+
+    if cursor >= tokens.len() || !matches!(tokens[cursor].kind, TokenKind::Graph) {
+        return Err(expected_token_diag(
+            tokens,
+            cursor,
+            "GRAPH",
+            "CREATE statement",
+        ));
+    }
+    cursor += 1;
+
+    if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::Type) {
+        cursor += 1;
+        let if_not_exists = consume_if_not_exists(tokens, &mut cursor);
+        let (graph_type, next_cursor) = parse_graph_type_reference_until(
+            tokens,
+            cursor,
+            is_graph_type_source_start,
+            "graph type name",
+        )?;
+        cursor = next_cursor;
+
+        let mut source = None;
+        if cursor < tokens.len() {
+            let source_start = cursor;
+            if matches!(tokens[cursor].kind, TokenKind::As) {
+                cursor += 1;
             }
-            // Query statements
-            TokenKind::Match | TokenKind::Select | TokenKind::From => self.parse_query_statement(),
-            // Mutation statements
-            TokenKind::Insert | TokenKind::Delete | TokenKind::Set | TokenKind::Remove => {
-                self.parse_mutation_statement()
+
+            if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::Copy) {
+                cursor += 1;
+                if cursor >= tokens.len() || !matches!(tokens[cursor].kind, TokenKind::Of) {
+                    return Err(expected_token_diag(tokens, cursor, "OF", "COPY clause"));
+                }
+                cursor += 1;
+                let (copy_ref, next_cursor) =
+                    parse_graph_type_reference_until(tokens, cursor, |_| false, "graph type")?;
+                source = Some(GraphTypeSource::AsCopyOf {
+                    graph_type: copy_ref,
+                    span: span_for_segment(tokens, source_start, next_cursor),
+                });
+                cursor = next_cursor;
+            } else {
+                source = Some(GraphTypeSource::Detailed {
+                    span: span_for_segment(tokens, source_start, tokens.len()),
+                });
+                cursor = tokens.len();
             }
-            // Catalog statements
-            TokenKind::Create | TokenKind::Drop => self.parse_catalog_statement(),
-            // Note: Session and Transaction statements will be added in Sprint 4
-            // when the appropriate keywords are added to the lexer
-            TokenKind::Eof => {
-                // Gracefully handle EOF
-                Err(())
+        }
+
+        if cursor < tokens.len() {
+            return Err(unexpected_token_diag(tokens, cursor, "CREATE GRAPH TYPE"));
+        }
+
+        return Ok(CatalogStatementKind::CreateGraphType(
+            CreateGraphTypeStatement {
+                property,
+                or_replace,
+                if_not_exists,
+                graph_type,
+                source,
+                span: slice_span(tokens),
+            },
+        ));
+    }
+
+    let if_not_exists = consume_if_not_exists(tokens, &mut cursor);
+    let (graph, next_cursor) =
+        parse_graph_reference_until(tokens, cursor, is_graph_type_spec_start, "graph name")?;
+    cursor = next_cursor;
+
+    let mut graph_type_spec = None;
+    if cursor < tokens.len() && !matches!(tokens[cursor].kind, TokenKind::As) {
+        let (spec, next_cursor) = parse_graph_type_spec(tokens, cursor)?;
+        graph_type_spec = Some(spec);
+        cursor = next_cursor;
+    }
+
+    if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::As) {
+        let (source_graph, next_cursor, source_span) = parse_as_copy_of_graph(tokens, cursor)?;
+        graph_type_spec = Some(GraphTypeSpec::AsCopyOf {
+            graph: source_graph,
+            span: source_span,
+        });
+        cursor = next_cursor;
+    }
+
+    if graph_type_spec.is_none() {
+        return Err(expected_token_diag(
+            tokens,
+            cursor,
+            "graph type specification",
+            "CREATE GRAPH",
+        ));
+    }
+    if cursor < tokens.len() {
+        return Err(unexpected_token_diag(tokens, cursor, "CREATE GRAPH"));
+    }
+
+    Ok(CatalogStatementKind::CreateGraph(CreateGraphStatement {
+        property,
+        or_replace,
+        if_not_exists,
+        graph,
+        graph_type_spec,
+        span: slice_span(tokens),
+    }))
+}
+
+fn parse_graph_type_spec(
+    tokens: &[Token],
+    mut cursor: usize,
+) -> ParseOutcome<(GraphTypeSpec, usize)> {
+    let start = cursor;
+
+    if cursor < tokens.len() && is_identifier_word(&tokens[cursor].kind, "TYPED") {
+        cursor += 1;
+        if cursor >= tokens.len() {
+            return Err(expected_token_diag(
+                tokens,
+                cursor,
+                "graph type specification",
+                "TYPED clause",
+            ));
+        }
+    }
+
+    if matches!(tokens[cursor].kind, TokenKind::Any) {
+        cursor += 1;
+        if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::Property) {
+            cursor += 1;
+        }
+        if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::Graph) {
+            cursor += 1;
+        }
+        return Ok((
+            GraphTypeSpec::Open {
+                span: span_for_segment(tokens, start, cursor),
+            },
+            cursor,
+        ));
+    }
+
+    if matches!(tokens[cursor].kind, TokenKind::Like) {
+        cursor += 1;
+        let (graph, next_cursor) = parse_graph_reference_until(
+            tokens,
+            cursor,
+            |kind| matches!(kind, TokenKind::As),
+            "LIKE graph",
+        )?;
+        return Ok((
+            GraphTypeSpec::Like {
+                graph,
+                span: span_for_segment(tokens, start, next_cursor),
+            },
+            next_cursor,
+        ));
+    }
+
+    if matches!(tokens[cursor].kind, TokenKind::Of) {
+        cursor += 1;
+        let (graph_type, next_cursor) = parse_graph_type_reference_until(
+            tokens,
+            cursor,
+            |kind| matches!(kind, TokenKind::As),
+            "graph type reference",
+        )?;
+        return Ok((
+            GraphTypeSpec::Of {
+                graph_type,
+                span: span_for_segment(tokens, start, next_cursor),
+            },
+            next_cursor,
+        ));
+    }
+
+    if matches!(
+        tokens[cursor].kind,
+        TokenKind::DoubleColon | TokenKind::LBrace
+    ) {
+        cursor += 1;
+        while cursor < tokens.len() && !matches!(tokens[cursor].kind, TokenKind::As) {
+            cursor += 1;
+        }
+        return Ok((
+            GraphTypeSpec::Open {
+                span: span_for_segment(tokens, start, cursor),
+            },
+            cursor,
+        ));
+    }
+
+    let (graph_type, next_cursor) = parse_graph_type_reference_until(
+        tokens,
+        cursor,
+        |kind| matches!(kind, TokenKind::As),
+        "graph type reference",
+    )?;
+    Ok((
+        GraphTypeSpec::Of {
+            graph_type,
+            span: span_for_segment(tokens, start, next_cursor),
+        },
+        next_cursor,
+    ))
+}
+
+fn parse_as_copy_of_graph(
+    tokens: &[Token],
+    mut cursor: usize,
+) -> ParseOutcome<(GraphReference, usize, Span)> {
+    let start = cursor;
+    if cursor >= tokens.len() || !matches!(tokens[cursor].kind, TokenKind::As) {
+        return Err(expected_token_diag(
+            tokens,
+            cursor,
+            "AS",
+            "AS COPY OF clause",
+        ));
+    }
+    cursor += 1;
+    if cursor >= tokens.len() || !matches!(tokens[cursor].kind, TokenKind::Copy) {
+        return Err(expected_token_diag(tokens, cursor, "COPY", "AS clause"));
+    }
+    cursor += 1;
+    if cursor >= tokens.len() || !matches!(tokens[cursor].kind, TokenKind::Of) {
+        return Err(expected_token_diag(tokens, cursor, "OF", "COPY clause"));
+    }
+    cursor += 1;
+
+    let (graph, next_cursor) = parse_graph_reference_until(
+        tokens,
+        cursor,
+        |_| false,
+        "graph reference after AS COPY OF",
+    )?;
+    Ok((
+        graph,
+        next_cursor,
+        span_for_segment(tokens, start, next_cursor),
+    ))
+}
+
+fn parse_drop_catalog_statement(tokens: &[Token]) -> ParseOutcome<CatalogStatementKind> {
+    let mut cursor = 1usize;
+    if cursor >= tokens.len() {
+        return Err(expected_token_diag(
+            tokens,
+            cursor,
+            "SCHEMA or GRAPH",
+            "DROP statement",
+        ));
+    }
+
+    if matches!(tokens[cursor].kind, TokenKind::Schema) {
+        cursor += 1;
+        let if_exists = consume_if_exists(tokens, &mut cursor);
+        let (schema, next_cursor) =
+            parse_schema_reference_until(tokens, cursor, |_| false, "schema reference")?;
+        if next_cursor < tokens.len() {
+            return Err(unexpected_token_diag(tokens, next_cursor, "DROP SCHEMA"));
+        }
+        return Ok(CatalogStatementKind::DropSchema(DropSchemaStatement {
+            if_exists,
+            schema,
+            span: slice_span(tokens),
+        }));
+    }
+
+    let property = if matches!(tokens[cursor].kind, TokenKind::Property) {
+        cursor += 1;
+        true
+    } else {
+        false
+    };
+
+    if cursor >= tokens.len() || !matches!(tokens[cursor].kind, TokenKind::Graph) {
+        return Err(expected_token_diag(
+            tokens,
+            cursor,
+            "GRAPH",
+            "DROP statement",
+        ));
+    }
+    cursor += 1;
+
+    if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::Type) {
+        cursor += 1;
+        let if_exists = consume_if_exists(tokens, &mut cursor);
+        let (graph_type, next_cursor) =
+            parse_graph_type_reference_until(tokens, cursor, |_| false, "graph type reference")?;
+        if next_cursor < tokens.len() {
+            return Err(unexpected_token_diag(
+                tokens,
+                next_cursor,
+                "DROP GRAPH TYPE",
+            ));
+        }
+        return Ok(CatalogStatementKind::DropGraphType(
+            DropGraphTypeStatement {
+                property,
+                if_exists,
+                graph_type,
+                span: slice_span(tokens),
+            },
+        ));
+    }
+
+    let if_exists = consume_if_exists(tokens, &mut cursor);
+    let (graph, next_cursor) =
+        parse_graph_reference_until(tokens, cursor, |_| false, "graph reference")?;
+    if next_cursor < tokens.len() {
+        return Err(unexpected_token_diag(tokens, next_cursor, "DROP GRAPH"));
+    }
+
+    Ok(CatalogStatementKind::DropGraph(DropGraphStatement {
+        property,
+        if_exists,
+        graph,
+        span: slice_span(tokens),
+    }))
+}
+
+fn parse_call_catalog_statement(tokens: &[Token]) -> ParseOutcome<CatalogStatementKind> {
+    if tokens.len() < 2 {
+        return Err(expected_token_diag(
+            tokens,
+            1,
+            "procedure name",
+            "CALL statement",
+        ));
+    }
+
+    let procedure_name = token_name_value(&tokens[1].kind)
+        .ok_or_else(|| expected_token_diag(tokens, 1, "procedure name", "CALL statement"))?;
+
+    Ok(CatalogStatementKind::CallCatalogModifyingProcedure(
+        CallCatalogModifyingProcedureStatement {
+            procedure_name,
+            span: slice_span(tokens),
+        },
+    ))
+}
+
+fn parse_schema_reference_until<F>(
+    tokens: &[Token],
+    start: usize,
+    stop: F,
+    context: &str,
+) -> ParseOutcome<(SchemaReference, usize)>
+where
+    F: Fn(&TokenKind) -> bool,
+{
+    if start >= tokens.len() {
+        return Err(expected_token_diag(tokens, start, context, context));
+    }
+
+    match &tokens[start].kind {
+        TokenKind::ReferenceParameter(name) => {
+            return Ok((
+                SchemaReference::Parameter {
+                    name: name.clone(),
+                    span: tokens[start].span.clone(),
+                },
+                start + 1,
+            ));
+        }
+        TokenKind::Dot => {
+            return Ok((SchemaReference::Dot(tokens[start].span.clone()), start + 1));
+        }
+        TokenKind::Identifier(name) if name.eq_ignore_ascii_case("HOME_SCHEMA") => {
+            return Ok((
+                SchemaReference::HomeSchema(tokens[start].span.clone()),
+                start + 1,
+            ));
+        }
+        TokenKind::Identifier(name) if name.eq_ignore_ascii_case("CURRENT_SCHEMA") => {
+            return Ok((
+                SchemaReference::CurrentSchema(tokens[start].span.clone()),
+                start + 1,
+            ));
+        }
+        TokenKind::Slash => {
+            let (parts, next_cursor, span, _) =
+                collect_reference_parts(tokens, start, &stop, context, true)?;
+            return Ok((
+                SchemaReference::AbsolutePath { path: parts, span },
+                next_cursor,
+            ));
+        }
+        TokenKind::DotDot => {
+            let (parts, next_cursor, span, _) =
+                collect_reference_parts(tokens, start, &stop, context, false)?;
+            return Ok((
+                SchemaReference::RelativePath { path: parts, span },
+                next_cursor,
+            ));
+        }
+        _ => {}
+    }
+
+    if let Some(name) = token_name_value(&tokens[start].kind) {
+        return Ok((
+            SchemaReference::RelativePath {
+                path: vec![name],
+                span: tokens[start].span.clone(),
+            },
+            start + 1,
+        ));
+    }
+
+    Err(expected_token_diag(tokens, start, context, context))
+}
+
+fn parse_graph_reference_until<F>(
+    tokens: &[Token],
+    start: usize,
+    stop: F,
+    context: &str,
+) -> ParseOutcome<(GraphReference, usize)>
+where
+    F: Fn(&TokenKind) -> bool,
+{
+    if start >= tokens.len() {
+        return Err(expected_token_diag(tokens, start, context, context));
+    }
+
+    if let TokenKind::ReferenceParameter(name) = &tokens[start].kind {
+        return Ok((
+            GraphReference::Parameter {
+                name: name.clone(),
+                span: tokens[start].span.clone(),
+            },
+            start + 1,
+        ));
+    }
+
+    let (parts, next_cursor, span, delimited_single) =
+        collect_reference_parts(tokens, start, &stop, context, false)?;
+
+    if parts.len() == 1 {
+        let name = parts[0].clone();
+        if name.eq_ignore_ascii_case("HOME_PROPERTY_GRAPH")
+            || name.eq_ignore_ascii_case("CURRENT_PROPERTY_GRAPH")
+        {
+            return Ok((GraphReference::HomePropertyGraph(span), next_cursor));
+        }
+        if name.eq_ignore_ascii_case("HOME_GRAPH") || name.eq_ignore_ascii_case("CURRENT_GRAPH") {
+            return Ok((GraphReference::HomeGraph(span), next_cursor));
+        }
+        if delimited_single {
+            return Ok((GraphReference::Delimited { name, span }, next_cursor));
+        }
+        return Ok((
+            GraphReference::CatalogQualified {
+                catalog: None,
+                schema: None,
+                name,
+                span,
+            },
+            next_cursor,
+        ));
+    }
+
+    let len = parts.len();
+    Ok((
+        GraphReference::CatalogQualified {
+            catalog: if len >= 3 {
+                Some(parts[len - 3].clone())
+            } else {
+                None
+            },
+            schema: if len >= 2 {
+                Some(parts[len - 2].clone())
+            } else {
+                None
+            },
+            name: parts[len - 1].clone(),
+            span,
+        },
+        next_cursor,
+    ))
+}
+
+fn parse_graph_type_reference_until<F>(
+    tokens: &[Token],
+    start: usize,
+    stop: F,
+    context: &str,
+) -> ParseOutcome<(GraphTypeReference, usize)>
+where
+    F: Fn(&TokenKind) -> bool,
+{
+    if start >= tokens.len() {
+        return Err(expected_token_diag(tokens, start, context, context));
+    }
+
+    if let TokenKind::ReferenceParameter(name) = &tokens[start].kind {
+        return Ok((
+            GraphTypeReference::Parameter {
+                name: name.clone(),
+                span: tokens[start].span.clone(),
+            },
+            start + 1,
+        ));
+    }
+
+    let (parts, next_cursor, span, _) =
+        collect_reference_parts(tokens, start, &stop, context, false)?;
+    let len = parts.len();
+    Ok((
+        GraphTypeReference::CatalogQualified {
+            catalog: if len >= 3 {
+                Some(parts[len - 3].clone())
+            } else {
+                None
+            },
+            schema: if len >= 2 {
+                Some(parts[len - 2].clone())
+            } else {
+                None
+            },
+            name: parts[len - 1].clone(),
+            span,
+        },
+        next_cursor,
+    ))
+}
+
+fn collect_reference_parts<F>(
+    tokens: &[Token],
+    start: usize,
+    stop: &F,
+    context: &str,
+    allow_empty_after_root: bool,
+) -> ParseOutcome<(Vec<SmolStr>, usize, Span, bool)>
+where
+    F: Fn(&TokenKind) -> bool,
+{
+    let mut cursor = start;
+    let mut parts = Vec::new();
+    let mut consumed_any = false;
+    let mut last_was_separator = false;
+    let mut last_end = tokens[start].span.end;
+    let mut delimited_single = false;
+
+    while cursor < tokens.len() && !stop(&tokens[cursor].kind) {
+        match &tokens[cursor].kind {
+            TokenKind::Identifier(name) => {
+                if consumed_any && !last_was_separator {
+                    break;
+                }
+                parts.push(name.clone());
+                consumed_any = true;
+                last_was_separator = false;
+                last_end = tokens[cursor].span.end;
+                cursor += 1;
+                delimited_single = false;
+            }
+            TokenKind::DelimitedIdentifier(name) => {
+                if consumed_any && !last_was_separator {
+                    break;
+                }
+                parts.push(name.clone());
+                consumed_any = true;
+                last_was_separator = false;
+                last_end = tokens[cursor].span.end;
+                cursor += 1;
+                delimited_single = parts.len() == 1;
+            }
+            TokenKind::Slash | TokenKind::Dot | TokenKind::DotDot => {
+                consumed_any = true;
+                last_was_separator = true;
+                last_end = tokens[cursor].span.end;
+                cursor += 1;
+                delimited_single = false;
             }
             _ => {
-                self.unexpected_token("statement");
-                Err(())
+                if parts.is_empty() {
+                    return Err(expected_token_diag(tokens, cursor, context, context));
+                }
+                break;
             }
         }
     }
 
-    /// Parses a query statement (stub for Sprint 7).
-    fn parse_query_statement(&mut self) -> Result<Statement, ()> {
-        let start = self.peek().span.start;
-        // For now, just consume the leading keyword
-        self.advance();
-
-        // Stub: consume tokens until we hit a statement boundary or EOF
-        // In Sprint 7, this will be replaced with proper query parsing
-        while !self.is_eof() && !self.at_statement_start() && !self.at(&TokenKind::Semicolon) {
-            self.advance();
+    if parts.is_empty() {
+        if allow_empty_after_root && consumed_any {
+            let span = tokens[start].span.start..last_end;
+            return Ok((Vec::new(), cursor, span, false));
         }
-
-        let end = if self.current > 0 {
-            self.tokens
-                .get(self.current - 1)
-                .map(|t| t.span.end)
-                .unwrap_or(start)
-        } else {
-            start
-        };
-
-        Ok(Statement::Query(Box::new(QueryStatement {
-            span: start..end,
-        })))
+        return Err(expected_token_diag(tokens, start, context, context));
     }
 
-    /// Parses a mutation statement (stub for Sprint 10).
-    fn parse_mutation_statement(&mut self) -> Result<Statement, ()> {
-        let start = self.peek().span.start;
-        self.advance();
-
-        // Stub: consume tokens until statement boundary
-        while !self.is_eof() && !self.at_statement_start() && !self.at(&TokenKind::Semicolon) {
-            self.advance();
-        }
-
-        let end = if self.current > 0 {
-            self.tokens
-                .get(self.current - 1)
-                .map(|t| t.span.end)
-                .unwrap_or(start)
-        } else {
-            start
-        };
-
-        Ok(Statement::Mutation(Box::new(MutationStatement {
-            span: start..end,
-        })))
+    if last_was_separator {
+        return Err(expected_token_diag(
+            tokens,
+            cursor,
+            "identifier after separator",
+            context,
+        ));
     }
 
-    /// Parses a catalog statement (stub for Sprint 4).
-    fn parse_catalog_statement(&mut self) -> Result<Statement, ()> {
-        let start = self.peek().span.start;
-        self.advance();
+    let span = tokens[start].span.start..last_end;
+    Ok((parts, cursor, span, delimited_single))
+}
 
-        // Stub: consume tokens until statement boundary
-        while !self.is_eof() && !self.at_statement_start() && !self.at(&TokenKind::Semicolon) {
-            self.advance();
+fn is_graph_type_spec_start(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Any
+            | TokenKind::Like
+            | TokenKind::Of
+            | TokenKind::As
+            | TokenKind::LBrace
+            | TokenKind::DoubleColon
+    ) || is_identifier_word(kind, "TYPED")
+}
+
+fn is_graph_type_source_start(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::As
+            | TokenKind::Copy
+            | TokenKind::Like
+            | TokenKind::LBrace
+            | TokenKind::DoubleColon
+    )
+}
+
+fn consume_if_not_exists(tokens: &[Token], cursor: &mut usize) -> bool {
+    if *cursor + 2 < tokens.len()
+        && matches!(tokens[*cursor].kind, TokenKind::If)
+        && matches!(tokens[*cursor + 1].kind, TokenKind::Not)
+        && matches!(tokens[*cursor + 2].kind, TokenKind::Exists)
+    {
+        *cursor += 3;
+        true
+    } else {
+        false
+    }
+}
+
+fn consume_if_exists(tokens: &[Token], cursor: &mut usize) -> bool {
+    if *cursor + 1 < tokens.len()
+        && matches!(tokens[*cursor].kind, TokenKind::If)
+        && matches!(tokens[*cursor + 1].kind, TokenKind::Exists)
+    {
+        *cursor += 2;
+        true
+    } else {
+        false
+    }
+}
+
+fn token_name_value(kind: &TokenKind) -> Option<SmolStr> {
+    match kind {
+        TokenKind::Identifier(name)
+        | TokenKind::DelimitedIdentifier(name)
+        | TokenKind::ReferenceParameter(name) => Some(name.clone()),
+        _ => None,
+    }
+}
+
+fn is_identifier_word(kind: &TokenKind, word: &str) -> bool {
+    matches!(kind, TokenKind::Identifier(name) if name.eq_ignore_ascii_case(word))
+}
+
+fn expected_token_diag(
+    tokens: &[Token],
+    cursor: usize,
+    expected: &str,
+    context: &str,
+) -> ParseError {
+    let span = if cursor < tokens.len() {
+        tokens[cursor].span.clone()
+    } else {
+        empty_span_after(tokens)
+    };
+    Box::new(
+        Diag::error(format!("expected {expected} in {context}"))
+            .with_primary_label(span, format!("expected {expected}"))
+            .with_code("P004"),
+    )
+}
+
+fn unexpected_token_diag(tokens: &[Token], cursor: usize, context: &str) -> ParseError {
+    let (span, found) = if cursor < tokens.len() {
+        (tokens[cursor].span.clone(), tokens[cursor].kind.to_string())
+    } else {
+        (empty_span_after(tokens), "end of statement".to_string())
+    };
+    Box::new(
+        Diag::error(format!("unexpected token in {context}"))
+            .with_primary_label(span, format!("unexpected {found}"))
+            .with_code("P004"),
+    )
+}
+
+fn slice_span(tokens: &[Token]) -> Span {
+    if let (Some(first), Some(last)) = (tokens.first(), tokens.last()) {
+        first.span.start..last.span.end
+    } else {
+        0..0
+    }
+}
+
+fn empty_span_after(tokens: &[Token]) -> Span {
+    let end = tokens.last().map_or(0, |token| token.span.end);
+    end..end
+}
+
+fn span_for_segment(tokens: &[Token], start: usize, end: usize) -> Span {
+    if start < end {
+        tokens[start].span.start..tokens[end - 1].span.end
+    } else if start > 0 {
+        let edge = tokens[start - 1].span.end;
+        edge..edge
+    } else {
+        0..0
+    }
+}
+
+fn synchronize_top_level(tokens: &[Token], mut cursor: usize) -> usize {
+    while cursor < tokens.len() {
+        match classify(&tokens[cursor].kind) {
+            SyntaxToken::Semicolon => {
+                while cursor < tokens.len()
+                    && matches!(classify(&tokens[cursor].kind), SyntaxToken::Semicolon)
+                {
+                    cursor += 1;
+                }
+                return cursor;
+            }
+            SyntaxToken::QueryStart
+            | SyntaxToken::MutationStart
+            | SyntaxToken::SessionStart
+            | SyntaxToken::TransactionStart
+            | SyntaxToken::CatalogStart
+            | SyntaxToken::Eof => return cursor,
+            SyntaxToken::Other => {
+                cursor += 1;
+            }
         }
+    }
+    cursor
+}
 
-        let end = if self.current > 0 {
-            self.tokens
-                .get(self.current - 1)
-                .map(|t| t.span.end)
-                .unwrap_or(start)
-        } else {
-            start
-        };
+fn compute_program_span(tokens: &[Token], source_len: usize) -> Span {
+    let mut start = None;
+    let mut end = None;
 
-        Ok(Statement::Catalog(Box::new(CatalogStatement {
-            span: start..end,
-        })))
+    for token in tokens {
+        if matches!(token.kind, TokenKind::Eof) {
+            continue;
+        }
+        if start.is_none() {
+            start = Some(token.span.start);
+        }
+        end = Some(token.span.end);
+    }
+
+    match (start, end) {
+        (Some(start), Some(end)) => start..end,
+        _ => source_len..source_len,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexer::token::Token;
+    use crate::lexer::tokenize;
 
-    fn make_token(kind: TokenKind, start: usize, end: usize) -> Token {
-        Token::new(kind, start..end, "")
+    fn parse_source(source: &str) -> (Program, Vec<Diag>) {
+        let lex = tokenize(source);
+        parse_program_tokens(&lex.tokens, source.len())
     }
 
     #[test]
-    fn test_parse_empty_program() {
-        let tokens = vec![make_token(TokenKind::Eof, 0, 0)];
-        let mut parser = Parser::new(tokens, "");
-        let program = parser.parse_program();
-
-        assert_eq!(program.statements.len(), 0);
+    fn parse_empty_program() {
+        let (program, diagnostics) = parse_source("");
+        assert!(diagnostics.is_empty());
+        assert!(program.statements.is_empty());
         assert_eq!(program.span, 0..0);
     }
 
     #[test]
-    fn test_parse_single_query_statement() {
-        let tokens = vec![
-            make_token(TokenKind::Match, 0, 5),
-            make_token(TokenKind::Eof, 5, 5),
-        ];
-        let mut parser = Parser::new(tokens, "");
-        let program = parser.parse_program();
-
-        assert_eq!(program.statements.len(), 1);
-        assert!(matches!(program.statements[0], Statement::Query(_)));
+    fn parse_skips_semicolons_without_empty_nodes() {
+        let (program, diagnostics) = parse_source(";;;");
+        assert!(diagnostics.is_empty());
+        assert!(program.statements.is_empty());
     }
 
     #[test]
-    fn test_parse_multiple_statements() {
-        let tokens = vec![
-            make_token(TokenKind::Match, 0, 5),
-            make_token(TokenKind::Insert, 5, 11),
-            make_token(TokenKind::Create, 11, 17),
-            make_token(TokenKind::Eof, 17, 17),
-        ];
-        let mut parser = Parser::new(tokens, "");
-        let program = parser.parse_program();
+    fn parse_multiple_statements_without_semicolons() {
+        let source = "MATCH (n) RETURN n INSERT (n) CREATE SCHEMA /foo";
+        let (program, diagnostics) = parse_source(source);
 
+        assert!(diagnostics.is_empty());
         assert_eq!(program.statements.len(), 3);
         assert!(matches!(program.statements[0], Statement::Query(_)));
         assert!(matches!(program.statements[1], Statement::Mutation(_)));
@@ -195,69 +1548,174 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_with_invalid_token() {
-        let tokens = vec![
-            make_token(TokenKind::Identifier("x".to_string()), 0, 3),
-            make_token(TokenKind::Match, 3, 8),
-            make_token(TokenKind::Eof, 8, 8),
-        ];
-        let mut parser = Parser::new(tokens, "");
-        let program = parser.parse_program();
+    fn parse_recovers_after_invalid_top_level_token() {
+        let source = "x MATCH (n) RETURN n";
+        let (program, diagnostics) = parse_source(source);
 
-        // First invalid token produces error, then Match is parsed
         assert_eq!(program.statements.len(), 1);
-        assert!(!parser.diagnostics.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("unexpected token"));
     }
 
     #[test]
-    fn test_parse_mutation_statement() {
-        let tokens = vec![
-            make_token(TokenKind::Insert, 0, 6),
-            make_token(TokenKind::Eof, 6, 6),
-        ];
-        let mut parser = Parser::new(tokens, "");
-        let program = parser.parse_program();
-
+    fn parse_session_set_schema_statement() {
+        let (program, diagnostics) = parse_source("SESSION SET SCHEMA /myschema");
+        assert!(diagnostics.is_empty());
         assert_eq!(program.statements.len(), 1);
-        assert!(matches!(program.statements[0], Statement::Mutation(_)));
+
+        let Statement::Session(stmt) = &program.statements[0] else {
+            panic!("expected session statement");
+        };
+        let SessionCommand::Set(SessionSetCommand::Schema(_)) = &stmt.command else {
+            panic!("expected SESSION SET SCHEMA");
+        };
     }
 
     #[test]
-    fn test_parse_catalog_statement() {
-        let tokens = vec![
-            make_token(TokenKind::Create, 0, 6),
-            make_token(TokenKind::Eof, 6, 6),
-        ];
-        let mut parser = Parser::new(tokens, "");
-        let program = parser.parse_program();
+    fn parse_session_set_value_parameter_statement() {
+        let source = "SESSION SET VALUE IF NOT EXISTS $exampleProperty = DATE '2022-10-10'";
+        let (program, diagnostics) = parse_source(source);
+        assert!(diagnostics.is_empty());
 
-        assert_eq!(program.statements.len(), 1);
-        assert!(matches!(program.statements[0], Statement::Catalog(_)));
+        let Statement::Session(stmt) = &program.statements[0] else {
+            panic!("expected session statement");
+        };
+        let SessionCommand::Set(SessionSetCommand::Parameter(
+            SessionSetParameterClause::ValueParameter { name, .. },
+        )) = &stmt.command
+        else {
+            panic!("expected SESSION SET VALUE parameter");
+        };
+        assert_eq!(name, "exampleProperty");
     }
 
     #[test]
-    fn test_parse_from_as_query_statement() {
-        let tokens = vec![
-            make_token(TokenKind::From, 0, 4),
-            make_token(TokenKind::Eof, 4, 4),
-        ];
-        let mut parser = Parser::new(tokens, "");
-        let program = parser.parse_program();
+    fn parse_session_reset_and_close_statements() {
+        let source = "SESSION RESET TIME ZONE; SESSION CLOSE";
+        let (program, diagnostics) = parse_source(source);
+        assert!(diagnostics.is_empty());
+        assert_eq!(program.statements.len(), 2);
 
-        assert_eq!(program.statements.len(), 1);
-        assert!(matches!(program.statements[0], Statement::Query(_)));
+        let Statement::Session(reset) = &program.statements[0] else {
+            panic!("expected session reset");
+        };
+        let SessionCommand::Reset(SessionResetCommand { target, .. }) = &reset.command else {
+            panic!("expected SESSION RESET");
+        };
+        assert!(matches!(target, SessionResetTarget::TimeZone));
+
+        let Statement::Session(close) = &program.statements[1] else {
+            panic!("expected session close");
+        };
+        assert!(matches!(close.command, SessionCommand::Close(_)));
     }
 
     #[test]
-    fn test_parse_empty_statement_semicolon() {
-        let tokens = vec![
-            make_token(TokenKind::Semicolon, 0, 1),
-            make_token(TokenKind::Eof, 1, 1),
-        ];
-        let mut parser = Parser::new(tokens, "");
-        let program = parser.parse_program();
+    fn parse_invalid_session_statement_reports_diagnostic() {
+        let (program, diagnostics) = parse_source("SESSION banana");
+        assert!(program.statements.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("expected"));
+    }
 
+    #[test]
+    fn parse_transaction_statements() {
+        let source = "START TRANSACTION READ ONLY, READ WRITE; COMMIT WORK; ROLLBACK WORK";
+        let (program, diagnostics) = parse_source(source);
+        assert!(diagnostics.is_empty());
+        assert_eq!(program.statements.len(), 3);
+
+        let Statement::Transaction(start_stmt) = &program.statements[0] else {
+            panic!("expected transaction statement");
+        };
+        let TransactionCommand::Start(start) = &start_stmt.command else {
+            panic!("expected START TRANSACTION");
+        };
+        assert!(start.characteristics.is_some());
+        assert_eq!(start.characteristics.as_ref().unwrap().modes.len(), 2);
+
+        let Statement::Transaction(commit_stmt) = &program.statements[1] else {
+            panic!("expected transaction statement");
+        };
+        let TransactionCommand::Commit(commit) = &commit_stmt.command else {
+            panic!("expected COMMIT");
+        };
+        assert!(commit.work);
+
+        let Statement::Transaction(rollback_stmt) = &program.statements[2] else {
+            panic!("expected transaction statement");
+        };
+        let TransactionCommand::Rollback(rollback) = &rollback_stmt.command else {
+            panic!("expected ROLLBACK");
+        };
+        assert!(rollback.work);
+    }
+
+    #[test]
+    fn parse_create_drop_schema_statements() {
+        let source = "CREATE OR REPLACE SCHEMA IF NOT EXISTS /foo; DROP SCHEMA IF EXISTS /foo";
+        let (program, diagnostics) = parse_source(source);
+        assert!(diagnostics.is_empty());
+        assert_eq!(program.statements.len(), 2);
+
+        let Statement::Catalog(create_stmt) = &program.statements[0] else {
+            panic!("expected catalog statement");
+        };
+        let CatalogStatementKind::CreateSchema(create_schema) = &create_stmt.kind else {
+            panic!("expected CREATE SCHEMA");
+        };
+        assert!(create_schema.or_replace);
+        assert!(create_schema.if_not_exists);
+
+        let Statement::Catalog(drop_stmt) = &program.statements[1] else {
+            panic!("expected catalog statement");
+        };
+        let CatalogStatementKind::DropSchema(drop_schema) = &drop_stmt.kind else {
+            panic!("expected DROP SCHEMA");
+        };
+        assert!(drop_schema.if_exists);
+    }
+
+    #[test]
+    fn parse_create_graph_and_drop_graph_type_statements() {
+        let source =
+            "CREATE GRAPH mygraph ANY AS COPY OF srcgraph; DROP GRAPH TYPE IF EXISTS mytype";
+        let (program, diagnostics) = parse_source(source);
+        assert!(diagnostics.is_empty());
+        assert_eq!(program.statements.len(), 2);
+
+        let Statement::Catalog(create_stmt) = &program.statements[0] else {
+            panic!("expected catalog statement");
+        };
+        let CatalogStatementKind::CreateGraph(create_graph) = &create_stmt.kind else {
+            panic!("expected CREATE GRAPH");
+        };
+        assert!(matches!(
+            create_graph.graph_type_spec,
+            Some(GraphTypeSpec::AsCopyOf { .. })
+        ));
+
+        let Statement::Catalog(drop_stmt) = &program.statements[1] else {
+            panic!("expected catalog statement");
+        };
+        let CatalogStatementKind::DropGraphType(drop_graph_type) = &drop_stmt.kind else {
+            panic!("expected DROP GRAPH TYPE");
+        };
+        assert!(drop_graph_type.if_exists);
+    }
+
+    #[test]
+    fn parse_call_catalog_procedure_statement() {
+        let (program, diagnostics) = parse_source("CALL doMaintenance()");
+        assert!(diagnostics.is_empty());
         assert_eq!(program.statements.len(), 1);
-        assert!(matches!(program.statements[0], Statement::Empty(_)));
+
+        let Statement::Catalog(stmt) = &program.statements[0] else {
+            panic!("expected catalog statement");
+        };
+        let CatalogStatementKind::CallCatalogModifyingProcedure(call) = &stmt.kind else {
+            panic!("expected CALL");
+        };
+        assert_eq!(call.procedure_name, "doMaintenance");
     }
 }

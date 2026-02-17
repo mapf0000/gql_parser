@@ -1,13 +1,11 @@
 //! Token types and representations for GQL lexical analysis.
 
 use crate::ast::Span;
+use smol_str::SmolStr;
 use std::fmt;
 
 /// The kind of a lexical token in GQL.
-///
-/// This enum covers all lexical categories defined in the GQL ISO standard,
-/// including keywords, identifiers, literals, operators, and punctuation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TokenKind {
     // Keywords - Reserved
     Match,
@@ -90,6 +88,29 @@ pub enum TokenKind {
     Alter,
     Property,
     Label,
+    Type,
+    Replace,
+    Of,
+    Like,
+    Copy,
+
+    // Session/Transaction keywords
+    Session,
+    Transaction,
+    Start,
+    Commit,
+    Rollback,
+    Reset,
+    Close,
+    Work,
+    Zone,
+    Characteristics,
+    Read,
+    Write,
+    Only,
+    Modifying,
+    Current,
+    Home,
 
     // Temporal keywords
     Date,
@@ -114,22 +135,17 @@ pub enum TokenKind {
     Record,
 
     // Identifiers
-    Identifier(String),
-    DelimitedIdentifier(String),
+    Identifier(SmolStr),
+    DelimitedIdentifier(SmolStr),
 
     // Literals
-    StringLiteral(String),
-    IntegerLiteral(String),
-    FloatLiteral(String),
-
-    // Temporal literals (keyword + string pattern)
-    DateLiteral(String),
-    TimeLiteral(String),
-    TimestampLiteral(String),
-    DurationLiteral(String),
+    StringLiteral(SmolStr),
+    IntegerLiteral(SmolStr),
+    FloatLiteral(SmolStr),
 
     // Parameters
-    Parameter(String), // $name or $1
+    Parameter(SmolStr),          // $name or $1
+    ReferenceParameter(SmolStr), // $$name (for catalog references)
 
     // Operators
     Plus,        // +
@@ -249,6 +265,27 @@ impl TokenKind {
                 | TokenKind::Alter
                 | TokenKind::Property
                 | TokenKind::Label
+                | TokenKind::Type
+                | TokenKind::Replace
+                | TokenKind::Of
+                | TokenKind::Like
+                | TokenKind::Copy
+                | TokenKind::Session
+                | TokenKind::Transaction
+                | TokenKind::Start
+                | TokenKind::Commit
+                | TokenKind::Rollback
+                | TokenKind::Reset
+                | TokenKind::Close
+                | TokenKind::Work
+                | TokenKind::Zone
+                | TokenKind::Characteristics
+                | TokenKind::Read
+                | TokenKind::Write
+                | TokenKind::Only
+                | TokenKind::Modifying
+                | TokenKind::Current
+                | TokenKind::Home
                 | TokenKind::Date
                 | TokenKind::Time
                 | TokenKind::Timestamp
@@ -259,6 +296,10 @@ impl TokenKind {
                 | TokenKind::Boolean
                 | TokenKind::List
                 | TokenKind::Record
+                | TokenKind::True
+                | TokenKind::False
+                | TokenKind::Null
+                | TokenKind::Unknown
         )
     }
 
@@ -273,10 +314,6 @@ impl TokenKind {
                 | TokenKind::False
                 | TokenKind::Null
                 | TokenKind::Unknown
-                | TokenKind::DateLiteral(_)
-                | TokenKind::TimeLiteral(_)
-                | TokenKind::TimestampLiteral(_)
-                | TokenKind::DurationLiteral(_)
         )
     }
 
@@ -386,6 +423,27 @@ impl fmt::Display for TokenKind {
             TokenKind::Alter => write!(f, "ALTER"),
             TokenKind::Property => write!(f, "PROPERTY"),
             TokenKind::Label => write!(f, "LABEL"),
+            TokenKind::Type => write!(f, "TYPE"),
+            TokenKind::Replace => write!(f, "REPLACE"),
+            TokenKind::Of => write!(f, "OF"),
+            TokenKind::Like => write!(f, "LIKE"),
+            TokenKind::Copy => write!(f, "COPY"),
+            TokenKind::Session => write!(f, "SESSION"),
+            TokenKind::Transaction => write!(f, "TRANSACTION"),
+            TokenKind::Start => write!(f, "START"),
+            TokenKind::Commit => write!(f, "COMMIT"),
+            TokenKind::Rollback => write!(f, "ROLLBACK"),
+            TokenKind::Reset => write!(f, "RESET"),
+            TokenKind::Close => write!(f, "CLOSE"),
+            TokenKind::Work => write!(f, "WORK"),
+            TokenKind::Zone => write!(f, "ZONE"),
+            TokenKind::Characteristics => write!(f, "CHARACTERISTICS"),
+            TokenKind::Read => write!(f, "READ"),
+            TokenKind::Write => write!(f, "WRITE"),
+            TokenKind::Only => write!(f, "ONLY"),
+            TokenKind::Modifying => write!(f, "MODIFYING"),
+            TokenKind::Current => write!(f, "CURRENT"),
+            TokenKind::Home => write!(f, "HOME"),
             TokenKind::Date => write!(f, "DATE"),
             TokenKind::Time => write!(f, "TIME"),
             TokenKind::Timestamp => write!(f, "TIMESTAMP"),
@@ -400,16 +458,13 @@ impl fmt::Display for TokenKind {
             TokenKind::Boolean => write!(f, "BOOLEAN"),
             TokenKind::List => write!(f, "LIST"),
             TokenKind::Record => write!(f, "RECORD"),
-            TokenKind::Identifier(name) => write!(f, "{}", name),
-            TokenKind::DelimitedIdentifier(name) => write!(f, "`{}`", name),
-            TokenKind::StringLiteral(s) => write!(f, "'{}'", s),
-            TokenKind::IntegerLiteral(n) => write!(f, "{}", n),
-            TokenKind::FloatLiteral(n) => write!(f, "{}", n),
-            TokenKind::DateLiteral(d) => write!(f, "DATE '{}'", d),
-            TokenKind::TimeLiteral(t) => write!(f, "TIME '{}'", t),
-            TokenKind::TimestampLiteral(ts) => write!(f, "TIMESTAMP '{}'", ts),
-            TokenKind::DurationLiteral(dur) => write!(f, "DURATION '{}'", dur),
-            TokenKind::Parameter(name) => write!(f, "${}", name),
+            TokenKind::Identifier(name) => write!(f, "{name}"),
+            TokenKind::DelimitedIdentifier(name) => write!(f, "`{name}`"),
+            TokenKind::StringLiteral(s) => write!(f, "'{s}'"),
+            TokenKind::IntegerLiteral(n) => write!(f, "{n}"),
+            TokenKind::FloatLiteral(n) => write!(f, "{n}"),
+            TokenKind::Parameter(name) => write!(f, "${name}"),
+            TokenKind::ReferenceParameter(name) => write!(f, "$${name}"),
             TokenKind::Plus => write!(f, "+"),
             TokenKind::Minus => write!(f, "-"),
             TokenKind::Star => write!(f, "*"),
@@ -448,30 +503,24 @@ impl fmt::Display for TokenKind {
     }
 }
 
-/// A lexical token with its kind, span, and original text.
+/// A lexical token with its kind and source span.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     /// The kind of token.
     pub kind: TokenKind,
     /// The span in source text.
     pub span: Span,
-    /// The original text of the token.
-    pub text: String,
 }
 
 impl Token {
     /// Creates a new token.
-    pub fn new(kind: TokenKind, span: Span, text: impl Into<String>) -> Self {
-        Self {
-            kind,
-            span,
-            text: text.into(),
-        }
+    pub fn new(kind: TokenKind, span: Span) -> Self {
+        Self { kind, span }
     }
 
-    /// Returns a reference to the token's text.
-    pub fn text(&self) -> &str {
-        &self.text
+    /// Returns the source slice covered by this token.
+    pub fn slice<'a>(&self, source: &'a str) -> &'a str {
+        &source[self.span.clone()]
     }
 }
 
@@ -481,10 +530,9 @@ mod tests {
 
     #[test]
     fn token_creation() {
-        let token = Token::new(TokenKind::Match, 0..5, "MATCH");
+        let token = Token::new(TokenKind::Match, 0..5);
         assert_eq!(token.kind, TokenKind::Match);
         assert_eq!(token.span, 0..5);
-        assert_eq!(token.text, "MATCH");
     }
 
     #[test]
@@ -492,14 +540,14 @@ mod tests {
         assert!(TokenKind::Match.is_keyword());
         assert!(TokenKind::Where.is_keyword());
         assert!(TokenKind::And.is_keyword());
-        assert!(!TokenKind::Identifier("foo".to_string()).is_keyword());
+        assert!(!TokenKind::Identifier("foo".into()).is_keyword());
         assert!(!TokenKind::Plus.is_keyword());
     }
 
     #[test]
     fn token_kind_is_literal() {
-        assert!(TokenKind::StringLiteral("test".to_string()).is_literal());
-        assert!(TokenKind::IntegerLiteral("42".to_string()).is_literal());
+        assert!(TokenKind::StringLiteral("test".into()).is_literal());
+        assert!(TokenKind::IntegerLiteral("42".into()).is_literal());
         assert!(TokenKind::True.is_literal());
         assert!(TokenKind::Null.is_literal());
         assert!(!TokenKind::Match.is_literal());
@@ -521,9 +569,9 @@ mod tests {
         assert_eq!(TokenKind::Plus.to_string(), "+");
         assert_eq!(TokenKind::Arrow.to_string(), "->");
         assert_eq!(
-            TokenKind::StringLiteral("hello".to_string()).to_string(),
+            TokenKind::StringLiteral("hello".into()).to_string(),
             "'hello'"
         );
-        assert_eq!(TokenKind::Identifier("foo".to_string()).to_string(), "foo");
+        assert_eq!(TokenKind::Identifier("foo".into()).to_string(), "foo");
     }
 }

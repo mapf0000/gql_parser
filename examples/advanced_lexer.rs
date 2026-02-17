@@ -177,21 +177,23 @@ RETURN event
     println!("Source: {}", source.trim());
     println!("\nTemporal literals found:");
 
-    for token in &result.tokens {
-        match &token.kind {
-            TokenKind::DateLiteral(d) => {
-                println!("  DATE '{}' at position {}", d, token.span.start);
+    for window in result.tokens.windows(2) {
+        if let [kw, value] = window {
+            match (&kw.kind, &value.kind) {
+                (TokenKind::Date, TokenKind::StringLiteral(d)) => {
+                    println!("  DATE '{}' at position {}", d, kw.span.start);
+                }
+                (TokenKind::Time, TokenKind::StringLiteral(t)) => {
+                    println!("  TIME '{}' at position {}", t, kw.span.start);
+                }
+                (TokenKind::Timestamp, TokenKind::StringLiteral(ts)) => {
+                    println!("  TIMESTAMP '{}' at position {}", ts, kw.span.start);
+                }
+                (TokenKind::Duration, TokenKind::StringLiteral(dur)) => {
+                    println!("  DURATION '{}' at position {}", dur, kw.span.start);
+                }
+                _ => {}
             }
-            TokenKind::TimeLiteral(t) => {
-                println!("  TIME '{}' at position {}", t, token.span.start);
-            }
-            TokenKind::TimestampLiteral(ts) => {
-                println!("  TIMESTAMP '{}' at position {}", ts, token.span.start);
-            }
-            TokenKind::DurationLiteral(dur) => {
-                println!("  DURATION '{}' at position {}", dur, token.span.start);
-            }
-            _ => {}
         }
     }
 

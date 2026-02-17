@@ -13,7 +13,10 @@ fn main() {
     for token in &result.tokens {
         println!(
             "  {:?} at {}..{} => '{}'",
-            token.kind, token.span.start, token.span.end, token.text
+            token.kind,
+            token.span.start,
+            token.span.end,
+            token.slice(source)
         );
     }
     println!("Diagnostics: {}", result.diagnostics.len());
@@ -42,7 +45,7 @@ fn main() {
     println!("String literals found:");
     for token in &result.tokens {
         if let TokenKind::StringLiteral(content) = &token.kind {
-            println!("  '{}' => \"{}\"", token.text, content);
+            println!("  '{}' => \"{}\"", token.slice(source), content);
         }
     }
     println!();
@@ -54,23 +57,29 @@ fn main() {
 
     println!("Source: {}", source);
     println!("Temporal literals found:");
-    for token in &result.tokens {
-        match &token.kind {
-            TokenKind::DateLiteral(d) => {
-                println!("  DATE '{}' at {}..{}", d, token.span.start, token.span.end)
+    for window in result.tokens.windows(2) {
+        if let [kw, value] = window {
+            match (&kw.kind, &value.kind) {
+                (TokenKind::Date, TokenKind::StringLiteral(d)) => {
+                    println!("  DATE '{}' at {}..{}", d, kw.span.start, value.span.end)
+                }
+                (TokenKind::Time, TokenKind::StringLiteral(t)) => {
+                    println!("  TIME '{}' at {}..{}", t, kw.span.start, value.span.end)
+                }
+                (TokenKind::Timestamp, TokenKind::StringLiteral(ts)) => {
+                    println!(
+                        "  TIMESTAMP '{}' at {}..{}",
+                        ts, kw.span.start, value.span.end
+                    )
+                }
+                (TokenKind::Duration, TokenKind::StringLiteral(dur)) => {
+                    println!(
+                        "  DURATION '{}' at {}..{}",
+                        dur, kw.span.start, value.span.end
+                    )
+                }
+                _ => {}
             }
-            TokenKind::TimeLiteral(t) => {
-                println!("  TIME '{}' at {}..{}", t, token.span.start, token.span.end)
-            }
-            TokenKind::TimestampLiteral(ts) => println!(
-                "  TIMESTAMP '{}' at {}..{}",
-                ts, token.span.start, token.span.end
-            ),
-            TokenKind::DurationLiteral(dur) => println!(
-                "  DURATION '{}' at {}..{}",
-                dur, token.span.start, token.span.end
-            ),
-            _ => {}
         }
     }
     println!();
@@ -101,7 +110,7 @@ MATCH (n) /* block comment */ RETURN n
     println!("Tokens (comments are stripped):");
     for token in &result.tokens {
         if token.kind != TokenKind::Eof {
-            println!("  {:?} => '{}'", token.kind, token.text);
+            println!("  {:?} => '{}'", token.kind, token.slice(source));
         }
     }
     println!();

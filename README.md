@@ -14,6 +14,8 @@ let source = "MATCH (n:Person) RETURN n";
 let result = parse(source);
 
 assert!(result.ast.is_some());
+// Diagnostics are miette::Report values with source context.
+assert!(result.diagnostics.is_empty());
 ```
 
 ## Advanced API
@@ -29,6 +31,10 @@ let lex_result = tokenize(source);
 let result = Parser::new(lex_result.tokens, source)
     .with_lexer_diagnostics(lex_result.diagnostics)
     .parse();
+
+for report in &result.diagnostics {
+    eprintln!("{report}");
+}
 ```
 
 ## Examples

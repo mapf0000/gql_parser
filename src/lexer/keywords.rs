@@ -1,138 +1,148 @@
 //! Keyword recognition and classification for GQL.
 //!
 //! GQL keywords are case-insensitive per the ISO standard.
-//! This module provides efficient keyword lookup and classification.
 
 use super::token::TokenKind;
-use std::collections::HashMap;
 
 /// Looks up a keyword by name (case-insensitive).
-///
-/// Returns the corresponding TokenKind if the input is a keyword,
-/// or None if it's a regular identifier.
 pub fn lookup_keyword(name: &str) -> Option<TokenKind> {
-    // Convert to uppercase for case-insensitive comparison
-    let upper = name.to_uppercase();
-    KEYWORD_MAP.get(upper.as_str()).cloned()
+    match name.to_ascii_uppercase().as_str() {
+        // Reserved keywords
+        "MATCH" => Some(TokenKind::Match),
+        "WHERE" => Some(TokenKind::Where),
+        "RETURN" => Some(TokenKind::Return),
+        "CREATE" => Some(TokenKind::Create),
+        "DELETE" => Some(TokenKind::Delete),
+        "INSERT" => Some(TokenKind::Insert),
+        "SET" => Some(TokenKind::Set),
+        "REMOVE" => Some(TokenKind::Remove),
+        "WITH" => Some(TokenKind::With),
+        "CALL" => Some(TokenKind::Call),
+        "YIELD" => Some(TokenKind::Yield),
+        "UNION" => Some(TokenKind::Union),
+        "INTERSECT" => Some(TokenKind::Intersect),
+        "EXCEPT" => Some(TokenKind::Except),
+        "OTHERWISE" => Some(TokenKind::Otherwise),
+        "OPTIONAL" => Some(TokenKind::Optional),
+        "USE" => Some(TokenKind::Use),
+        "AT" => Some(TokenKind::At),
+        "NEXT" => Some(TokenKind::Next),
+        "FINISH" => Some(TokenKind::Finish),
+        "LET" => Some(TokenKind::Let),
+        "FOR" => Some(TokenKind::For),
+        "FILTER" => Some(TokenKind::Filter),
+        "ORDER" => Some(TokenKind::Order),
+        "BY" => Some(TokenKind::By),
+        "ASC" => Some(TokenKind::Asc),
+        "ASCENDING" => Some(TokenKind::Ascending),
+        "DESC" => Some(TokenKind::Desc),
+        "DESCENDING" => Some(TokenKind::Descending),
+        "SKIP" => Some(TokenKind::Skip),
+        "LIMIT" => Some(TokenKind::Limit),
+        "OFFSET" => Some(TokenKind::Offset),
+        "SELECT" => Some(TokenKind::Select),
+        "DISTINCT" => Some(TokenKind::Distinct),
+        "GROUP" => Some(TokenKind::Group),
+        "HAVING" => Some(TokenKind::Having),
+        "AS" => Some(TokenKind::As),
+        "FROM" => Some(TokenKind::From),
+        "WHEN" => Some(TokenKind::When),
+        "THEN" => Some(TokenKind::Then),
+        "ELSE" => Some(TokenKind::Else),
+        "END" => Some(TokenKind::End),
+        "CASE" => Some(TokenKind::Case),
+        "IF" => Some(TokenKind::If),
+        "CAST" => Some(TokenKind::Cast),
+
+        // Logical operators
+        "AND" => Some(TokenKind::And),
+        "OR" => Some(TokenKind::Or),
+        "NOT" => Some(TokenKind::Not),
+        "XOR" => Some(TokenKind::Xor),
+        "IS" => Some(TokenKind::Is),
+        "IN" => Some(TokenKind::In),
+
+        // Quantifiers
+        "ANY" => Some(TokenKind::Any),
+        "ALL" => Some(TokenKind::All),
+        "SOME" => Some(TokenKind::Some),
+        "EXISTS" => Some(TokenKind::Exists),
+
+        // Graph keywords
+        "GRAPH" => Some(TokenKind::Graph),
+        "NODE" => Some(TokenKind::Node),
+        "EDGE" => Some(TokenKind::Edge),
+        "PATH" => Some(TokenKind::Path),
+        "RELATIONSHIP" => Some(TokenKind::Relationship),
+        "WALK" => Some(TokenKind::Walk),
+        "TRAIL" => Some(TokenKind::Trail),
+        "ACYCLIC" => Some(TokenKind::Acyclic),
+        "SIMPLE" => Some(TokenKind::Simple),
+
+        // Schema/catalog keywords
+        "SCHEMA" => Some(TokenKind::Schema),
+        "CATALOG" => Some(TokenKind::Catalog),
+        "DROP" => Some(TokenKind::Drop),
+        "ALTER" => Some(TokenKind::Alter),
+        "PROPERTY" => Some(TokenKind::Property),
+        "LABEL" => Some(TokenKind::Label),
+        "TYPE" => Some(TokenKind::Type),
+        "REPLACE" => Some(TokenKind::Replace),
+        "OF" => Some(TokenKind::Of),
+        "LIKE" => Some(TokenKind::Like),
+        "COPY" => Some(TokenKind::Copy),
+
+        // Session/Transaction keywords
+        "SESSION" => Some(TokenKind::Session),
+        "TRANSACTION" => Some(TokenKind::Transaction),
+        "START" => Some(TokenKind::Start),
+        "COMMIT" => Some(TokenKind::Commit),
+        "ROLLBACK" => Some(TokenKind::Rollback),
+        "RESET" => Some(TokenKind::Reset),
+        "CLOSE" => Some(TokenKind::Close),
+        "WORK" => Some(TokenKind::Work),
+        "ZONE" => Some(TokenKind::Zone),
+        "CHARACTERISTICS" => Some(TokenKind::Characteristics),
+        "READ" => Some(TokenKind::Read),
+        "WRITE" => Some(TokenKind::Write),
+        "ONLY" => Some(TokenKind::Only),
+        "MODIFYING" => Some(TokenKind::Modifying),
+        "CURRENT" => Some(TokenKind::Current),
+        "HOME" => Some(TokenKind::Home),
+
+        // Temporal keywords
+        "DATE" => Some(TokenKind::Date),
+        "TIME" => Some(TokenKind::Time),
+        "TIMESTAMP" => Some(TokenKind::Timestamp),
+        "DURATION" => Some(TokenKind::Duration),
+
+        // Boolean literals
+        "TRUE" => Some(TokenKind::True),
+        "FALSE" => Some(TokenKind::False),
+
+        // Null literals
+        "NULL" => Some(TokenKind::Null),
+        "UNKNOWN" => Some(TokenKind::Unknown),
+
+        // Type names
+        "STRING" => Some(TokenKind::String),
+        "INTEGER" => Some(TokenKind::Integer),
+        "FLOAT" => Some(TokenKind::Float),
+        "BOOLEAN" => Some(TokenKind::Boolean),
+        "LIST" => Some(TokenKind::List),
+        "RECORD" => Some(TokenKind::Record),
+
+        // Standalone keywords
+        "DETACH" => Some(TokenKind::Detach),
+        "NODETACH" => Some(TokenKind::Nodetach),
+
+        _ => None,
+    }
 }
 
 /// Returns true if the given name is a keyword (case-insensitive).
 pub fn is_keyword(name: &str) -> bool {
     lookup_keyword(name).is_some()
-}
-
-lazy_static::lazy_static! {
-    static ref KEYWORD_MAP: HashMap<&'static str, TokenKind> = {
-        let mut m = HashMap::new();
-
-        // Reserved keywords
-        m.insert("MATCH", TokenKind::Match);
-        m.insert("WHERE", TokenKind::Where);
-        m.insert("RETURN", TokenKind::Return);
-        m.insert("CREATE", TokenKind::Create);
-        m.insert("DELETE", TokenKind::Delete);
-        m.insert("INSERT", TokenKind::Insert);
-        m.insert("SET", TokenKind::Set);
-        m.insert("REMOVE", TokenKind::Remove);
-        m.insert("WITH", TokenKind::With);
-        m.insert("CALL", TokenKind::Call);
-        m.insert("YIELD", TokenKind::Yield);
-        m.insert("UNION", TokenKind::Union);
-        m.insert("INTERSECT", TokenKind::Intersect);
-        m.insert("EXCEPT", TokenKind::Except);
-        m.insert("OTHERWISE", TokenKind::Otherwise);
-        m.insert("OPTIONAL", TokenKind::Optional);
-        m.insert("USE", TokenKind::Use);
-        m.insert("AT", TokenKind::At);
-        m.insert("NEXT", TokenKind::Next);
-        m.insert("FINISH", TokenKind::Finish);
-        m.insert("LET", TokenKind::Let);
-        m.insert("FOR", TokenKind::For);
-        m.insert("FILTER", TokenKind::Filter);
-        m.insert("ORDER", TokenKind::Order);
-        m.insert("BY", TokenKind::By);
-        m.insert("ASC", TokenKind::Asc);
-        m.insert("ASCENDING", TokenKind::Ascending);
-        m.insert("DESC", TokenKind::Desc);
-        m.insert("DESCENDING", TokenKind::Descending);
-        m.insert("SKIP", TokenKind::Skip);
-        m.insert("LIMIT", TokenKind::Limit);
-        m.insert("OFFSET", TokenKind::Offset);
-        m.insert("SELECT", TokenKind::Select);
-        m.insert("DISTINCT", TokenKind::Distinct);
-        m.insert("GROUP", TokenKind::Group);
-        m.insert("HAVING", TokenKind::Having);
-        m.insert("AS", TokenKind::As);
-        m.insert("FROM", TokenKind::From);
-        m.insert("WHEN", TokenKind::When);
-        m.insert("THEN", TokenKind::Then);
-        m.insert("ELSE", TokenKind::Else);
-        m.insert("END", TokenKind::End);
-        m.insert("CASE", TokenKind::Case);
-        m.insert("IF", TokenKind::If);
-        m.insert("CAST", TokenKind::Cast);
-
-        // Logical operators
-        m.insert("AND", TokenKind::And);
-        m.insert("OR", TokenKind::Or);
-        m.insert("NOT", TokenKind::Not);
-        m.insert("XOR", TokenKind::Xor);
-        m.insert("IS", TokenKind::Is);
-        m.insert("IN", TokenKind::In);
-
-        // Quantifiers
-        m.insert("ANY", TokenKind::Any);
-        m.insert("ALL", TokenKind::All);
-        m.insert("SOME", TokenKind::Some);
-        m.insert("EXISTS", TokenKind::Exists);
-
-        // Graph keywords
-        m.insert("GRAPH", TokenKind::Graph);
-        m.insert("NODE", TokenKind::Node);
-        m.insert("EDGE", TokenKind::Edge);
-        m.insert("PATH", TokenKind::Path);
-        m.insert("RELATIONSHIP", TokenKind::Relationship);
-        m.insert("WALK", TokenKind::Walk);
-        m.insert("TRAIL", TokenKind::Trail);
-        m.insert("ACYCLIC", TokenKind::Acyclic);
-        m.insert("SIMPLE", TokenKind::Simple);
-
-        // Schema/catalog keywords
-        m.insert("SCHEMA", TokenKind::Schema);
-        m.insert("CATALOG", TokenKind::Catalog);
-        m.insert("DROP", TokenKind::Drop);
-        m.insert("ALTER", TokenKind::Alter);
-        m.insert("PROPERTY", TokenKind::Property);
-        m.insert("LABEL", TokenKind::Label);
-
-        // Temporal keywords
-        m.insert("DATE", TokenKind::Date);
-        m.insert("TIME", TokenKind::Time);
-        m.insert("TIMESTAMP", TokenKind::Timestamp);
-        m.insert("DURATION", TokenKind::Duration);
-
-        // Boolean literals
-        m.insert("TRUE", TokenKind::True);
-        m.insert("FALSE", TokenKind::False);
-
-        // Null literals
-        m.insert("NULL", TokenKind::Null);
-        m.insert("UNKNOWN", TokenKind::Unknown);
-
-        // Type names
-        m.insert("STRING", TokenKind::String);
-        m.insert("INTEGER", TokenKind::Integer);
-        m.insert("FLOAT", TokenKind::Float);
-        m.insert("BOOLEAN", TokenKind::Boolean);
-        m.insert("LIST", TokenKind::List);
-        m.insert("RECORD", TokenKind::Record);
-
-        // Standalone keywords
-        m.insert("DETACH", TokenKind::Detach);
-        m.insert("NODETACH", TokenKind::Nodetach);
-
-        m
-    };
 }
 
 #[cfg(test)]
