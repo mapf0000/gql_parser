@@ -1,5 +1,10 @@
 # Sprint 1 Plan: Diagnostics and Span Infrastructure
 
+## Status
+- Completed on February 17, 2026.
+- Exit checks passed: `cargo test` and `cargo clippy --all-targets --all-features -- -D warnings`.
+- Unresolved technical debt from Sprint 1: none.
+
 ## Sprint Intent
 Build the reusable diagnostics and span foundation that all later lexer/parser work will depend on.
 

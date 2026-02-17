@@ -23,7 +23,7 @@ This document is intentionally broad and will be refined into detailed sprint pl
 - Scope: crate layout, module boundaries (`lexer`, `parser`, `ast`, `diag`, `lib`), CI, lint/test baseline.
 - Exit Criteria: baseline crate builds cleanly, strict clippy/test wiring in place, developer workflow documented.
 
-### Sprint 1: Diagnostics and Span Infrastructure
+### Sprint 1: Diagnostics and Span Infrastructure (Completed February 17, 2026)
 - Goal: Build reusable diagnostics model before language breadth.
 - Scope: `Span`, `Spanned<T>`, internal `Diag`, severity/help/labels/notes, `miette` conversion.
 - Exit Criteria: diagnostic pipeline supports multi-label errors and source snippets end-to-end.

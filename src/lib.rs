@@ -1,17 +1,35 @@
-//! GraphQL parser with rich diagnostics.
+//! GQL parser with rich diagnostics.
 //!
-//! This library provides a GraphQL parser with comprehensive error reporting
-//! built on miette for beautiful diagnostic messages.
+//! This library provides a GQL (Graph Query Language) parser with comprehensive
+//! error reporting built on miette for beautiful diagnostic messages.
+//!
+//! # Example
+//!
+//! ```
+//! use gql_parser::{tokenize, TokenKind};
+//!
+//! let source = "MATCH (n:Person) WHERE n.age > 18 RETURN n";
+//! let result = tokenize(source);
+//!
+//! // Check that we got tokens
+//! assert!(result.tokens.len() > 0);
+//! assert_eq!(result.tokens[0].kind, TokenKind::Match);
+//!
+//! // Check for any lexical errors
+//! assert!(result.diagnostics.is_empty());
+//! ```
 
 pub mod ast;
 pub mod diag;
+pub mod lexer;
 
-// Re-export key types for convenience
+// Re-export syntax span primitives.
 pub use ast::{Span, Spanned};
-pub use diag::{
-    convert_diag_to_report, convert_diagnostics_to_reports, Diag, DiagLabel, DiagSeverity,
-    LabelRole, SourceFile,
-};
+
+// Re-export lexer types for convenience.
+pub use diag::{Diag, DiagLabel, DiagSeverity, LabelRole};
+pub use lexer::token::{Token, TokenKind};
+pub use lexer::{Lexer, LexerResult, tokenize};
 
 #[cfg(test)]
 mod tests {
@@ -19,11 +37,8 @@ mod tests {
 
     #[test]
     fn public_api_accessible() {
-        // Verify that key types are accessible through the public API
+        // Verify that syntax span primitives are accessible through the public API.
         let _span: Span = 0..5;
         let _spanned = Spanned::new(42, 0..5);
-        let _diag = Diag::error("test").with_primary_label(0..5, "here");
-        let _source = SourceFile::new("test");
     }
 }
-

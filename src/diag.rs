@@ -217,10 +217,7 @@ impl SourceFile {
 /// This function provides the bridge from our internal diagnostic model
 /// to miette's rich error reporting. It safely handles invalid spans and
 /// preserves all diagnostic information (labels, help, notes, severity).
-pub fn convert_diagnostics_to_reports(
-    diagnostics: &[Diag],
-    source: &SourceFile,
-) -> Vec<Report> {
+pub fn convert_diagnostics_to_reports(diagnostics: &[Diag], source: &SourceFile) -> Vec<Report> {
     diagnostics
         .iter()
         .map(|diag| convert_diag_to_report(diag, source))
@@ -236,19 +233,39 @@ pub fn convert_diagnostics_to_reports(
 /// - Including diagnostic codes
 /// - Safely handling out-of-bounds spans
 pub fn convert_diag_to_report(diag: &Diag, source: &SourceFile) -> Report {
+    let diagnostic = build_diagnostic(diag, source);
+
+    // Create the report with source context
+    let mut report = Report::new(diagnostic);
+
+    // Attach source code if we have a filename
+    if let Some(name) = source.name() {
+        report =
+            report.with_source_code(miette::NamedSource::new(name, source.content().to_string()));
+    } else {
+        report = report.with_source_code(source.content().to_string());
+    }
+
+    report
+}
+
+fn build_diagnostic(diag: &Diag, source: &SourceFile) -> BuiltDiagnostic {
     // Build the labels first
     let mut labels = Vec::new();
     for label in &diag.labels {
         let clamped_span = source.clamp_span(&label.span);
-        let labeled_span = LabeledSpan::new_with_span(
-            Some(label.message.clone()),
-            (clamped_span.start, clamped_span.end - clamped_span.start),
-        );
+        let span = (clamped_span.start, clamped_span.end - clamped_span.start);
+        let labeled_span = match label.role {
+            LabelRole::Primary => {
+                LabeledSpan::new_primary_with_span(Some(label.message.clone()), span)
+            }
+            LabelRole::Secondary => LabeledSpan::new_with_span(Some(label.message.clone()), span),
+        };
         labels.push(labeled_span);
     }
 
     // Create the diagnostic struct
-    let diagnostic = BuiltDiagnostic {
+    BuiltDiagnostic {
         message: diag.message.clone(),
         severity: match diag.severity {
             DiagSeverity::Error => Severity::Error,
@@ -258,22 +275,13 @@ pub fn convert_diag_to_report(diag: &Diag, source: &SourceFile) -> Report {
         code: diag.code.clone(),
         help: diag.help.clone(),
         labels,
-    };
-
-    // Create the report with source context
-    let mut report = Report::new(diagnostic);
-
-    // Attach source code if we have a filename
-    if let Some(name) = source.name() {
-        report = report.with_source_code(miette::NamedSource::new(
-            name,
-            source.content().to_string(),
-        ));
-    } else {
-        report = report.with_source_code(source.content().to_string());
+        related: diag
+            .notes
+            .iter()
+            .cloned()
+            .map(NoteDiagnostic::new)
+            .collect(),
     }
-
-    report
 }
 
 /// The final diagnostic type that implements miette's Diagnostic trait.
@@ -284,6 +292,24 @@ struct BuiltDiagnostic {
     code: Option<String>,
     help: Option<String>,
     labels: Vec<LabeledSpan>,
+    related: Vec<NoteDiagnostic>,
+}
+
+#[derive(Debug)]
+struct NoteDiagnostic {
+    message: String,
+}
+
+impl NoteDiagnostic {
+    fn new(message: String) -> Self {
+        Self { message }
+    }
+}
+
+impl fmt::Display for NoteDiagnostic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
 }
 
 impl fmt::Display for BuiltDiagnostic {
@@ -293,6 +319,7 @@ impl fmt::Display for BuiltDiagnostic {
 }
 
 impl std::error::Error for BuiltDiagnostic {}
+impl std::error::Error for NoteDiagnostic {}
 
 impl Diagnostic for BuiltDiagnostic {
     fn severity(&self) -> Option<Severity> {
@@ -317,6 +344,22 @@ impl Diagnostic for BuiltDiagnostic {
         } else {
             Some(Box::new(self.labels.clone().into_iter()))
         }
+    }
+
+    fn related<'a>(&'a self) -> Option<Box<dyn Iterator<Item = &'a dyn Diagnostic> + 'a>> {
+        if self.related.is_empty() {
+            None
+        } else {
+            Some(Box::new(
+                self.related.iter().map(|diag| diag as &dyn Diagnostic),
+            ))
+        }
+    }
+}
+
+impl Diagnostic for NoteDiagnostic {
+    fn severity(&self) -> Option<Severity> {
+        Some(Severity::Advice)
     }
 }
 
@@ -399,14 +442,16 @@ mod tests {
         assert!(src.is_valid_span(&(0..0)));
         assert!(src.is_valid_span(&(2..4)));
         assert!(!src.is_valid_span(&(0..6))); // past end
-        assert!(!src.is_valid_span(&(3..2))); // inverted
+        let inverted = std::ops::Range { start: 3, end: 2 };
+        assert!(!src.is_valid_span(&inverted));
     }
 
     #[test]
     fn source_file_clamp_span() {
         let src = SourceFile::new("hello");
         assert_eq!(src.clamp_span(&(0..10)), 0..5);
-        assert_eq!(src.clamp_span(&(3..2)), 3..3);
+        let inverted = std::ops::Range { start: 3, end: 2 };
+        assert_eq!(src.clamp_span(&inverted), 3..3);
         assert_eq!(src.clamp_span(&(2..4)), 2..4);
         assert_eq!(src.clamp_span(&(10..20)), 5..5);
     }
@@ -423,8 +468,7 @@ mod tests {
     #[test]
     fn convert_simple_error() {
         let source = SourceFile::with_name("hello world", "test.gql");
-        let diag = Diag::error("unexpected token")
-            .with_primary_label(6..11, "this token");
+        let diag = Diag::error("unexpected token").with_primary_label(6..11, "this token");
 
         // Should not panic and should produce a valid report
         let report = convert_diag_to_report(&diag, &source);
@@ -451,9 +495,13 @@ mod tests {
             .with_help("try adding quotes")
             .with_code("E0001");
 
-        // Should not panic and should produce a valid report
         let report = convert_diag_to_report(&diag, &source);
         assert_eq!(report.to_string(), "parse error");
+        let built = build_diagnostic(&diag, &source);
+        assert_eq!(built.message, "parse error");
+        assert_eq!(built.help.as_deref(), Some("try adding quotes"));
+        assert_eq!(built.code.as_deref(), Some("E0001"));
+        assert_eq!(built.severity, Severity::Error);
     }
 
     #[test]
@@ -471,9 +519,48 @@ mod tests {
         let source = SourceFile::new("info");
         let diag = Diag::note("informational").with_primary_label(0..4, "here");
 
-        // Should not panic and should produce a valid report
         let report = convert_diag_to_report(&diag, &source);
         assert_eq!(report.to_string(), "informational");
+        let built = build_diagnostic(&diag, &source);
+        assert_eq!(built.message, "informational");
+        assert_eq!(built.severity, Severity::Advice);
+    }
+
+    #[test]
+    fn convert_preserves_label_roles() {
+        let source = SourceFile::new("abcdefghij");
+        let diag = Diag::error("role check")
+            .with_primary_label(2..5, "primary label")
+            .with_secondary_label(7..9, "secondary label");
+
+        let report = convert_diag_to_report(&diag, &source);
+        assert_eq!(report.to_string(), "role check");
+        let built = build_diagnostic(&diag, &source);
+        assert_eq!(built.labels.len(), 2);
+        assert!(built.labels[0].primary());
+        assert!(!built.labels[1].primary());
+        assert_eq!(built.labels[0].label(), Some("primary label"));
+        assert_eq!(built.labels[1].label(), Some("secondary label"));
+    }
+
+    #[test]
+    fn convert_exposes_notes_as_related_diagnostics() {
+        let source = SourceFile::new("content");
+        let diag = Diag::error("root issue")
+            .with_note("first note")
+            .with_note("second note");
+
+        let report = convert_diag_to_report(&diag, &source);
+        assert_eq!(report.to_string(), "root issue");
+        let built = build_diagnostic(&diag, &source);
+        let related = built
+            .related()
+            .expect("expected related diagnostics")
+            .collect::<Vec<_>>();
+        assert_eq!(related.len(), 2);
+        assert_eq!(related[0].to_string(), "first note");
+        assert_eq!(related[1].to_string(), "second note");
+        assert_eq!(related[0].severity(), Some(Severity::Advice));
     }
 
     #[test]
