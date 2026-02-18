@@ -6,8 +6,8 @@ use gql_parser::ast::query::{
     AbbreviatedEdgePattern, EdgeDirection, EdgePattern, ElementPattern, GraphPattern,
     GraphPatternQuantifier, LabelExpression, LinearQuery, MatchMode, MatchStatement,
     OptionalOperand, PathMode, PathPatternExpression, PathPatternPrefix, PathPrimary, PathSearch,
-    PrimitiveQueryStatement, PrimitiveResultStatement, Query, SelectFromClause,
-    ShortestPathSearch, SimplifiedPathPatternExpression,
+    PrimitiveQueryStatement, PrimitiveResultStatement, Query, SelectFromClause, ShortestPathSearch,
+    SimplifiedPathPatternExpression,
 };
 use gql_parser::lexer::Lexer;
 use gql_parser::lexer::token::TokenKind;
@@ -111,9 +111,7 @@ fn extract_abbreviated_edge(source: &str) -> AbbreviatedEdgePattern {
     }
 }
 
-fn extract_simplified_inner(
-    source: &str,
-) -> (EdgeDirection, SimplifiedPathPatternExpression) {
+fn extract_simplified_inner(source: &str) -> (EdgeDirection, SimplifiedPathPatternExpression) {
     let factor = first_factor_from_match(source);
     let PathPrimary::SimplifiedExpression(expr) = factor.primary else {
         panic!("expected simplified expression as first factor");
@@ -123,7 +121,10 @@ fn extract_simplified_inner(
         panic!("expected top-level simplified direction override");
     };
 
-    (override_expr.direction, override_expr.pattern.as_ref().clone())
+    (
+        override_expr.direction,
+        override_expr.pattern.as_ref().clone(),
+    )
 }
 
 #[test]
@@ -256,10 +257,9 @@ fn parse_path_search_prefix_variants() {
 
     let all_shortest =
         parse_first_simple_match_pattern("MATCH ALL SHORTEST SIMPLE PATH (n) RETURN n");
-    let Some(PathPatternPrefix::PathSearch(PathSearch::Shortest(ShortestPathSearch::AllShortest {
-        mode,
-        ..
-    }))) = all_shortest.paths.patterns[0].prefix.as_ref()
+    let Some(PathPatternPrefix::PathSearch(PathSearch::Shortest(
+        ShortestPathSearch::AllShortest { mode, .. },
+    ))) = all_shortest.paths.patterns[0].prefix.as_ref()
     else {
         panic!("expected ALL SHORTEST search");
     };
@@ -267,10 +267,9 @@ fn parse_path_search_prefix_variants() {
 
     let any_shortest =
         parse_first_simple_match_pattern("MATCH ANY SHORTEST ACYCLIC PATH (n) RETURN n");
-    let Some(PathPatternPrefix::PathSearch(PathSearch::Shortest(ShortestPathSearch::AnyShortest {
-        mode,
-        ..
-    }))) = any_shortest.paths.patterns[0].prefix.as_ref()
+    let Some(PathPatternPrefix::PathSearch(PathSearch::Shortest(
+        ShortestPathSearch::AnyShortest { mode, .. },
+    ))) = any_shortest.paths.patterns[0].prefix.as_ref()
     else {
         panic!("expected ANY SHORTEST search");
     };
@@ -312,7 +311,8 @@ fn parse_path_expression_union_and_multiset_alternation() {
     ));
 
     let alternation = parse_first_simple_match_pattern("MATCH (a)|+|(b)|+|(c) RETURN a");
-    let PathPatternExpression::Alternation { alternatives, .. } = &alternation.paths.patterns[0].expression
+    let PathPatternExpression::Alternation { alternatives, .. } =
+        &alternation.paths.patterns[0].expression
     else {
         panic!("expected |+| alternation");
     };
@@ -393,7 +393,10 @@ fn parse_abbreviated_edge_pattern_variants() {
     assert!(matches!(right, AbbreviatedEdgePattern::RightArrow { .. }));
 
     let undirected = extract_abbreviated_edge("MATCH ~ RETURN 1");
-    assert!(matches!(undirected, AbbreviatedEdgePattern::Undirected { .. }));
+    assert!(matches!(
+        undirected,
+        AbbreviatedEdgePattern::Undirected { .. }
+    ));
 
     let any = extract_abbreviated_edge("MATCH - RETURN 1");
     assert!(matches!(any, AbbreviatedEdgePattern::AnyDirection { .. }));

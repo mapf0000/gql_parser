@@ -42,8 +42,9 @@ pub use catalog::{
 
 // Re-export expression types
 pub use expression::{
-    BinaryOperator, BooleanValue, CaseExpression, CastExpression, ComparisonOperator,
-    ExistsExpression, ExistsVariant, Expression, FunctionCall, FunctionName,
+    AggregateFunction, BinaryOperator, BinarySetFunction, BinarySetFunctionType, BooleanValue,
+    CaseExpression, CastExpression, ComparisonOperator, ExistsExpression, ExistsVariant,
+    Expression, FunctionCall, FunctionName, GeneralSetFunction, GeneralSetFunctionType,
     GraphPatternPlaceholder, LabelExpression, Literal, LogicalOperator, Predicate, RecordField,
     SearchedCaseExpression, SearchedWhenClause, SimpleCaseExpression, SimpleWhenClause,
     TrimSpecification, TruthValue, UnaryOperator,

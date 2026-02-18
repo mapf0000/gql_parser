@@ -76,6 +76,7 @@ This document is intentionally broad and will be refined into detailed sprint pl
 ### Sprint 9: Result Shaping and Aggregation
 - Goal: Complete result production features.
 - Scope: `RETURN`, `FINISH`, grouping, ordering, pagination, aggregate functions, set quantifiers, having/yield interactions.
+- Standards note: percentile aggregates follow OpenGQL `binarySetFunction` comma-argument form (`PERCENTILE_CONT(a, b)`, `PERCENTILE_DISC(a, b)`); property names follow identifier/non-reserved rules with delimited escape for reserved words.
 - Exit Criteria: result-shaping clauses compose correctly with query and procedure constructs.
 
 ### Sprint 10: Data Modification Statements

@@ -3,9 +3,11 @@
 //! This module implements expression parsing with precedence handling,
 //! literal/function/predicate support, and structured diagnostics.
 
+use crate::ast::query::SetQuantifier;
 use crate::ast::{
-    BinaryOperator, BooleanValue, CaseExpression, CastExpression, ComparisonOperator,
-    ExistsExpression, ExistsVariant, Expression, FunctionCall, FunctionName,
+    AggregateFunction, BinaryOperator, BinarySetFunction, BinarySetFunctionType, BooleanValue,
+    CaseExpression, CastExpression, ComparisonOperator, ExistsExpression, ExistsVariant,
+    Expression, FunctionCall, FunctionName, GeneralSetFunction, GeneralSetFunctionType,
     GraphPatternPlaceholder, LabelExpression, Literal, LogicalOperator, Predicate, RecordField,
     SearchedCaseExpression, SearchedWhenClause, SimpleCaseExpression, SimpleWhenClause, Span,
     TrimSpecification, TruthValue, TypeAnnotation, TypeAnnotationOperator, UnaryOperator,
@@ -376,19 +378,13 @@ impl<'a> ExpressionParser<'a> {
         loop {
             if matches!(self.current().kind, TokenKind::Dot) {
                 self.advance();
-                let name = match &self.current().kind {
-                    TokenKind::Identifier(n) | TokenKind::DelimitedIdentifier(n) => {
-                        let name = n.clone();
-                        self.advance();
-                        name
-                    }
-                    _ => {
-                        return Err(self.error_here(format!(
-                            "expected property name, found {}",
-                            self.current().kind
-                        )));
-                    }
+                let Some(name) = self.token_name_for_property_name() else {
+                    return Err(self.error_here(format!(
+                        "expected property name, found {}",
+                        self.current().kind
+                    )));
                 };
+                self.advance();
                 let span = expr.span().start..self.tokens[self.pos - 1].span.end;
                 expr = Expression::PropertyReference(Box::new(expr), name, span);
                 continue;
@@ -469,6 +465,23 @@ impl<'a> ExpressionParser<'a> {
             TokenKind::AllDifferent => self.parse_all_different_predicate(),
             TokenKind::Same => self.parse_same_predicate(),
             TokenKind::PropertyExists => self.parse_property_exists_predicate(),
+
+            // Aggregate functions (Sprint 9)
+            TokenKind::Count
+            | TokenKind::Avg
+            | TokenKind::Max
+            | TokenKind::Min
+            | TokenKind::Sum
+            | TokenKind::CollectList
+            | TokenKind::StddevSamp
+            | TokenKind::StddevPop
+            | TokenKind::PercentileCont
+            | TokenKind::PercentileDisc
+                if self.peek().map(|t| &t.kind) == Some(&TokenKind::LParen) =>
+            {
+                let agg_func = self.parse_aggregate_function()?;
+                Ok(Expression::AggregateFunction(Box::new(agg_func)))
+            }
 
             TokenKind::Path if self.peek().map(|t| &t.kind) == Some(&TokenKind::LBracket) => {
                 self.parse_path_constructor()
@@ -865,6 +878,18 @@ impl<'a> ExpressionParser<'a> {
         }
     }
 
+    fn token_name_for_property_name(&self) -> Option<SmolStr> {
+        match &self.current().kind {
+            TokenKind::Identifier(name) | TokenKind::DelimitedIdentifier(name) => {
+                Some(name.clone())
+            }
+            kind if kind.is_non_reserved_identifier_keyword() => {
+                Some(SmolStr::new(kind.to_string()))
+            }
+            _ => None,
+        }
+    }
+
     fn classify_function_name(&self, raw_name: SmolStr) -> FunctionName {
         let upper = raw_name.to_ascii_uppercase();
         match upper.as_str() {
@@ -1115,15 +1140,12 @@ impl<'a> ExpressionParser<'a> {
         let element = Box::new(self.parse_expression()?);
         self.expect(TokenKind::Comma)?;
 
-        let property_name = match &self.current().kind {
-            TokenKind::Identifier(name)
-            | TokenKind::DelimitedIdentifier(name)
-            | TokenKind::StringLiteral(name) => {
-                let prop = name.clone();
+        let property_name = match self.token_name_for_property_name() {
+            Some(name) => {
                 self.advance();
-                prop
+                name
             }
-            _ => return Err(self.error_here("expected property name")),
+            None => return Err(self.error_here("expected property name")),
         };
 
         let end = self.expect(TokenKind::RParen)?.end;
@@ -1185,6 +1207,160 @@ impl<'a> ExpressionParser<'a> {
         };
         self.advance();
         Some(op)
+    }
+
+    // ============================================================================
+    // Aggregate Function Parsing (Sprint 9)
+    // ============================================================================
+
+    /// Parses an aggregate function expression.
+    ///
+    /// # Grammar
+    ///
+    /// ```text
+    /// aggregateFunction:
+    ///     COUNT '(' '*' ')'
+    ///     | generalSetFunction
+    ///     | binarySetFunction
+    /// ```
+    fn parse_aggregate_function(&mut self) -> ParseResult<AggregateFunction> {
+        match &self.current().kind {
+            TokenKind::Count => {
+                let start = self.current().span.start;
+                let count_pos = self.pos;
+                self.advance();
+                self.expect(TokenKind::LParen)?;
+
+                // Check for COUNT(*)
+                if self.check(&TokenKind::Star) {
+                    self.advance();
+                    let end = self.expect(TokenKind::RParen)?.end;
+                    return Ok(AggregateFunction::CountStar { span: start..end });
+                }
+
+                // Otherwise, it's COUNT(expr) which is a general set function
+                // Restore parser position and parse as a general set function.
+                self.pos = count_pos;
+                self.parse_general_set_function()
+            }
+            TokenKind::PercentileCont | TokenKind::PercentileDisc => {
+                self.parse_binary_set_function()
+            }
+            _ => self.parse_general_set_function(),
+        }
+    }
+
+    /// Parses a general set function (AVG, COUNT, MAX, MIN, SUM, etc.).
+    ///
+    /// # Grammar
+    ///
+    /// ```text
+    /// generalSetFunction:
+    ///     generalSetFunctionType '(' [setQuantifier] expression ')'
+    /// ```
+    fn parse_general_set_function(&mut self) -> ParseResult<AggregateFunction> {
+        let start = self.current().span.start;
+
+        let function_type = match &self.current().kind {
+            TokenKind::Avg => GeneralSetFunctionType::Avg,
+            TokenKind::Count => GeneralSetFunctionType::Count,
+            TokenKind::Max => GeneralSetFunctionType::Max,
+            TokenKind::Min => GeneralSetFunctionType::Min,
+            TokenKind::Sum => GeneralSetFunctionType::Sum,
+            TokenKind::CollectList => GeneralSetFunctionType::CollectList,
+            TokenKind::StddevSamp => GeneralSetFunctionType::StddevSamp,
+            TokenKind::StddevPop => GeneralSetFunctionType::StddevPop,
+            _ => {
+                return Err(self.error_here(format!(
+                    "expected aggregate function name, found {}",
+                    self.current().kind
+                )));
+            }
+        };
+
+        self.advance();
+        self.expect(TokenKind::LParen)?;
+
+        // Parse optional set quantifier (DISTINCT or ALL)
+        let quantifier = self.parse_set_quantifier_opt();
+
+        // Parse the expression to aggregate
+        let expression = Box::new(self.parse_expression()?);
+
+        let end = self.expect(TokenKind::RParen)?.end;
+
+        Ok(AggregateFunction::GeneralSetFunction(GeneralSetFunction {
+            function_type,
+            quantifier,
+            expression,
+            span: start..end,
+        }))
+    }
+
+    /// Parses a binary set function (PERCENTILE_CONT, PERCENTILE_DISC).
+    ///
+    /// # Grammar
+    ///
+    /// ```text
+    /// binarySetFunction:
+    ///     binarySetFunctionType '(' dependentValueExpression ',' independentValueExpression ')'
+    /// ```
+    fn parse_binary_set_function(&mut self) -> ParseResult<AggregateFunction> {
+        let start = self.current().span.start;
+
+        let function_type = match &self.current().kind {
+            TokenKind::PercentileCont => BinarySetFunctionType::PercentileCont,
+            TokenKind::PercentileDisc => BinarySetFunctionType::PercentileDisc,
+            _ => {
+                return Err(self.error_here(format!(
+                    "expected PERCENTILE_CONT or PERCENTILE_DISC, found {}",
+                    self.current().kind
+                )));
+            }
+        };
+
+        self.advance();
+        self.expect(TokenKind::LParen)?;
+
+        // dependentValueExpression: [setQuantifier] numericValueExpression
+        let quantifier = self.parse_set_quantifier_opt();
+        let inverse_distribution_argument = Box::new(self.parse_expression()?);
+
+        self.expect(TokenKind::Comma)?;
+        // independentValueExpression: numericValueExpression
+        let expression = Box::new(self.parse_expression()?);
+
+        let end = self.expect(TokenKind::RParen)?.end;
+
+        Ok(AggregateFunction::BinarySetFunction(BinarySetFunction {
+            function_type,
+            quantifier,
+            inverse_distribution_argument,
+            expression,
+            span: start..end,
+        }))
+    }
+
+    /// Parses an optional set quantifier (DISTINCT or ALL).
+    ///
+    /// # Grammar
+    ///
+    /// ```text
+    /// setQuantifier:
+    ///     DISTINCT | ALL
+    /// ```
+    fn parse_set_quantifier_opt(&mut self) -> Option<SetQuantifier> {
+        match &self.current().kind {
+            TokenKind::Distinct => {
+                self.advance();
+                Some(SetQuantifier::Distinct)
+            }
+            TokenKind::All => {
+                self.advance();
+                Some(SetQuantifier::All)
+            }
+            _ => None,
+        }
     }
 }
 
@@ -1317,6 +1493,49 @@ mod tests {
             }
             _ => panic!("expected property reference"),
         }
+    }
+
+    #[test]
+    fn property_reference_accepts_non_reserved_keyword_name() {
+        let expr = parse_expr("n.type").unwrap();
+        assert!(matches!(expr, Expression::PropertyReference(_, _, _)));
+    }
+
+    #[test]
+    fn property_reference_rejects_reserved_keyword_name() {
+        let err = parse_expr("n.count").unwrap_err();
+        assert!(err.message.contains("expected property name"));
+    }
+
+    #[test]
+    fn property_reference_accepts_delimited_reserved_keyword_name() {
+        let expr = parse_expr("n.`count`").unwrap();
+        assert!(matches!(expr, Expression::PropertyReference(_, _, _)));
+    }
+
+    #[test]
+    fn parses_binary_set_function_with_two_arguments() {
+        let source = "PERCENTILE_CONT(0.5, n.age)";
+        let expr = parse_expr(source).unwrap();
+
+        match expr {
+            Expression::AggregateFunction(agg) => match *agg {
+                AggregateFunction::BinarySetFunction(func) => {
+                    assert_eq!(func.function_type, BinarySetFunctionType::PercentileCont);
+                    assert_eq!(func.quantifier, None);
+                    assert_eq!(func.span, 0..source.len());
+                }
+                _ => panic!("expected binary set function"),
+            },
+            _ => panic!("expected aggregate function"),
+        }
+    }
+
+    #[test]
+    fn rejects_non_standard_within_group_percentile_syntax() {
+        let err =
+            parse_expr("PERCENTILE_CONT(0.5, n.age) WITHIN GROUP (ORDER BY n.age)").unwrap_err();
+        assert!(err.message.contains("unexpected trailing tokens"));
     }
 
     #[test]

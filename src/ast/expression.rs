@@ -5,10 +5,12 @@
 //! - Value expressions (operators, function calls, property access)
 //! - Predicates (comparison, IS NULL, EXISTS, etc.)
 //! - Case and Cast expressions
+//! - Aggregate functions (COUNT, AVG, MAX, MIN, SUM, etc.)
 //!
 //! Expressions form the computational backbone of GQL queries.
 
 use crate::ast::Span;
+use crate::ast::query::SetQuantifier;
 use crate::ast::types::{TypeAnnotation, ValueType};
 use smol_str::SmolStr;
 
@@ -58,6 +60,9 @@ pub enum Expression {
     /// CAST expression
     Cast(CastExpression),
 
+    /// Aggregate function (COUNT, SUM, AVG, etc.)
+    AggregateFunction(Box<AggregateFunction>),
+
     /// Type annotation expression (expr :: type, expr TYPED type)
     TypeAnnotation(Box<Expression>, TypeAnnotation, Span),
 
@@ -102,6 +107,7 @@ impl Expression {
             Expression::FunctionCall(fc) => fc.span.clone(),
             Expression::Case(ce) => ce.span(),
             Expression::Cast(ce) => ce.span.clone(),
+            Expression::AggregateFunction(af) => af.span(),
             Expression::TypeAnnotation(_, _, span) => span.clone(),
             Expression::ListConstructor(_, span) => span.clone(),
             Expression::RecordConstructor(_, span) => span.clone(),
@@ -528,4 +534,114 @@ pub struct CastExpression {
     pub target_type: ValueType,
     /// Span covering the entire CAST expression
     pub span: Span,
+}
+
+// ============================================================================
+// Aggregate Functions (Sprint 9)
+// ============================================================================
+
+/// Aggregate function expression.
+///
+/// # Examples
+///
+/// ```text
+/// COUNT(*)
+/// COUNT(DISTINCT n.id)
+/// AVG(n.age)
+/// SUM(n.salary)
+/// PERCENTILE_CONT(0.5, n.salary)
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub enum AggregateFunction {
+    /// COUNT(*) - special case for counting all rows.
+    CountStar { span: Span },
+    /// General set function (AVG, COUNT, MAX, MIN, SUM, COLLECT_LIST, STDDEV_SAMP, STDDEV_POP).
+    GeneralSetFunction(GeneralSetFunction),
+    /// Binary set function (PERCENTILE_CONT, PERCENTILE_DISC).
+    BinarySetFunction(BinarySetFunction),
+}
+
+impl AggregateFunction {
+    /// Returns the span of this aggregate function.
+    pub fn span(&self) -> Span {
+        match self {
+            AggregateFunction::CountStar { span } => span.clone(),
+            AggregateFunction::GeneralSetFunction(f) => f.span.clone(),
+            AggregateFunction::BinarySetFunction(f) => f.span.clone(),
+        }
+    }
+}
+
+/// General set function (AVG, COUNT, MAX, MIN, SUM, etc.).
+///
+/// # Examples
+///
+/// ```text
+/// AVG(n.age)
+/// COUNT(DISTINCT n.id)
+/// MAX(n.salary)
+/// COLLECT_LIST(n.name)
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct GeneralSetFunction {
+    /// Function type (AVG, COUNT, MAX, MIN, SUM, etc.).
+    pub function_type: GeneralSetFunctionType,
+    /// Optional set quantifier (DISTINCT or ALL).
+    pub quantifier: Option<SetQuantifier>,
+    /// Expression to aggregate.
+    pub expression: Box<Expression>,
+    /// Span covering the entire function call.
+    pub span: Span,
+}
+
+/// General set function type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneralSetFunctionType {
+    /// AVG - average value.
+    Avg,
+    /// COUNT - count values.
+    Count,
+    /// MAX - maximum value.
+    Max,
+    /// MIN - minimum value.
+    Min,
+    /// SUM - sum of values.
+    Sum,
+    /// COLLECT_LIST - collect values into a list.
+    CollectList,
+    /// STDDEV_SAMP - sample standard deviation.
+    StddevSamp,
+    /// STDDEV_POP - population standard deviation.
+    StddevPop,
+}
+
+/// Binary set function (PERCENTILE_CONT, PERCENTILE_DISC).
+///
+/// # Example
+///
+/// ```text
+/// PERCENTILE_CONT(0.5, n.salary)
+/// PERCENTILE_DISC(DISTINCT 0.95, n.age)
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct BinarySetFunction {
+    /// Function type (PERCENTILE_CONT or PERCENTILE_DISC).
+    pub function_type: BinarySetFunctionType,
+    /// Optional set quantifier for the dependent argument.
+    pub quantifier: Option<SetQuantifier>,
+    /// Dependent value expression (usually percentile value).
+    pub inverse_distribution_argument: Box<Expression>,
+    /// Independent value expression.
+    pub expression: Box<Expression>,
+    /// Span covering the entire function call.
+    pub span: Span,
+}
+
+/// Binary set function type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinarySetFunctionType {
+    /// PERCENTILE_CONT - continuous percentile (interpolates).
+    PercentileCont,
+    /// PERCENTILE_DISC - discrete percentile (picks value).
+    PercentileDisc,
 }

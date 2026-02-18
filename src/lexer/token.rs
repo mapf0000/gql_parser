@@ -227,6 +227,18 @@ pub enum TokenKind {
     Source,
     Destination,
 
+    // Aggregate function keywords
+    Avg,
+    Count,
+    Max,
+    Min,
+    Sum,
+    CollectList,
+    StddevSamp,
+    StddevPop,
+    PercentileCont,
+    PercentileDisc,
+
     // Built-in function keywords (common ones as tokens)
     // Numeric
     Abs,
@@ -510,6 +522,16 @@ impl TokenKind {
                 | TokenKind::Labeled
                 | TokenKind::Source
                 | TokenKind::Destination
+                | TokenKind::Avg
+                | TokenKind::Count
+                | TokenKind::Max
+                | TokenKind::Min
+                | TokenKind::Sum
+                | TokenKind::CollectList
+                | TokenKind::StddevSamp
+                | TokenKind::StddevPop
+                | TokenKind::PercentileCont
+                | TokenKind::PercentileDisc
                 | TokenKind::Abs
                 | TokenKind::Mod
                 | TokenKind::Floor
@@ -586,6 +608,51 @@ impl TokenKind {
                 | TokenKind::Ampersand
                 | TokenKind::DoubleColon
                 | TokenKind::DotDot
+        )
+    }
+
+    /// Returns true if this token belongs to the grammar's
+    /// `nonReservedWords` set and can be used as a regular identifier.
+    pub fn is_non_reserved_identifier_keyword(&self) -> bool {
+        matches!(
+            self,
+            TokenKind::Acyclic
+                | TokenKind::Binding
+                | TokenKind::Destination
+                | TokenKind::Different
+                | TokenKind::Directed
+                | TokenKind::Edge
+                | TokenKind::Element
+                | TokenKind::Elements
+                | TokenKind::First
+                | TokenKind::Graph
+                | TokenKind::Groups
+                | TokenKind::Keep
+                | TokenKind::Label
+                | TokenKind::Labeled
+                | TokenKind::Labels
+                | TokenKind::Last
+                | TokenKind::Node
+                | TokenKind::Normalized
+                | TokenKind::Only
+                | TokenKind::Ordinality
+                | TokenKind::Property
+                | TokenKind::Read
+                | TokenKind::Relationship
+                | TokenKind::Repeatable
+                | TokenKind::Shortest
+                | TokenKind::Simple
+                | TokenKind::Source
+                | TokenKind::Table
+                | TokenKind::To
+                | TokenKind::Trail
+                | TokenKind::Transaction
+                | TokenKind::Type
+                | TokenKind::Vertex
+                | TokenKind::Walk
+                | TokenKind::Without
+                | TokenKind::Write
+                | TokenKind::Zone
         )
     }
 }
@@ -770,6 +837,16 @@ impl fmt::Display for TokenKind {
             TokenKind::Labeled => write!(f, "LABELED"),
             TokenKind::Source => write!(f, "SOURCE"),
             TokenKind::Destination => write!(f, "DESTINATION"),
+            TokenKind::Avg => write!(f, "AVG"),
+            TokenKind::Count => write!(f, "COUNT"),
+            TokenKind::Max => write!(f, "MAX"),
+            TokenKind::Min => write!(f, "MIN"),
+            TokenKind::Sum => write!(f, "SUM"),
+            TokenKind::CollectList => write!(f, "COLLECT_LIST"),
+            TokenKind::StddevSamp => write!(f, "STDDEV_SAMP"),
+            TokenKind::StddevPop => write!(f, "STDDEV_POP"),
+            TokenKind::PercentileCont => write!(f, "PERCENTILE_CONT"),
+            TokenKind::PercentileDisc => write!(f, "PERCENTILE_DISC"),
             TokenKind::Abs => write!(f, "ABS"),
             TokenKind::Mod => write!(f, "MOD"),
             TokenKind::Floor => write!(f, "FLOOR"),
@@ -912,6 +989,14 @@ mod tests {
         assert!(TokenKind::Eq.is_operator());
         assert!(!TokenKind::Match.is_operator());
         assert!(!TokenKind::LParen.is_operator());
+    }
+
+    #[test]
+    fn token_kind_non_reserved_identifier_keyword() {
+        assert!(TokenKind::Type.is_non_reserved_identifier_keyword());
+        assert!(TokenKind::Graph.is_non_reserved_identifier_keyword());
+        assert!(!TokenKind::Count.is_non_reserved_identifier_keyword());
+        assert!(!TokenKind::Return.is_non_reserved_identifier_keyword());
     }
 
     #[test]

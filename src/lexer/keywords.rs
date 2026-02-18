@@ -88,6 +88,18 @@ pub fn lookup_keyword(name: &str) -> Option<TokenKind> {
         "GROUPS" => Some(TokenKind::Groups),
         "LABELS" => Some(TokenKind::Labels),
 
+        // Aggregate function keywords
+        "AVG" => Some(TokenKind::Avg),
+        "COUNT" => Some(TokenKind::Count),
+        "MAX" => Some(TokenKind::Max),
+        "MIN" => Some(TokenKind::Min),
+        "SUM" => Some(TokenKind::Sum),
+        "COLLECT_LIST" => Some(TokenKind::CollectList),
+        "STDDEV_SAMP" => Some(TokenKind::StddevSamp),
+        "STDDEV_POP" => Some(TokenKind::StddevPop),
+        "PERCENTILE_CONT" => Some(TokenKind::PercentileCont),
+        "PERCENTILE_DISC" => Some(TokenKind::PercentileDisc),
+
         // Schema/catalog keywords
         "SCHEMA" => Some(TokenKind::Schema),
         "CATALOG" => Some(TokenKind::Catalog),

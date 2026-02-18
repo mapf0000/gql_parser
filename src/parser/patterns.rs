@@ -302,7 +302,8 @@ impl<'a> PatternParser<'a> {
             return Some(PathPatternPrefix::PathSearch(search));
         }
 
-        self.parse_path_mode_prefix().map(PathPatternPrefix::PathMode)
+        self.parse_path_mode_prefix()
+            .map(PathPatternPrefix::PathMode)
     }
 
     fn parse_path_mode_prefix(&mut self) -> Option<PathMode> {
@@ -378,7 +379,10 @@ impl<'a> PatternParser<'a> {
                 let mode = self.parse_path_mode();
                 let use_paths_keyword = self.consume_path_or_paths();
 
-                if matches!(self.current_kind(), Some(TokenKind::Group | TokenKind::Groups)) {
+                if matches!(
+                    self.current_kind(),
+                    Some(TokenKind::Group | TokenKind::Groups)
+                ) {
                     self.pos += 1;
                     let end = self.last_consumed_end(start);
                     let count = count.unwrap_or_else(|| {
@@ -387,11 +391,13 @@ impl<'a> PatternParser<'a> {
                             start..start.saturating_add(1),
                         )
                     });
-                    return Some(PathSearch::Shortest(ShortestPathSearch::CountedShortestGroups {
-                        count,
-                        mode,
-                        span: start..end,
-                    }));
+                    return Some(PathSearch::Shortest(
+                        ShortestPathSearch::CountedShortestGroups {
+                            count,
+                            mode,
+                            span: start..end,
+                        },
+                    ));
                 }
 
                 if let Some(count) = count {
@@ -438,8 +444,10 @@ impl<'a> PatternParser<'a> {
                 self.pos += 3;
                 let Some(term) = self.parse_path_term() else {
                     self.diags.push(
-                        Diag::error("Expected path term after '|+|'")
-                            .with_primary_label(self.current_span_or(self.pos), "expected term here"),
+                        Diag::error("Expected path term after '|+|'").with_primary_label(
+                            self.current_span_or(self.pos),
+                            "expected term here",
+                        ),
                     );
                     break;
                 };
@@ -465,8 +473,10 @@ impl<'a> PatternParser<'a> {
                 self.pos += 1;
                 let Some(right_term) = self.parse_path_term() else {
                     self.diags.push(
-                        Diag::error("Expected path term after '|'")
-                            .with_primary_label(self.current_span_or(self.pos), "expected term here"),
+                        Diag::error("Expected path term after '|'").with_primary_label(
+                            self.current_span_or(self.pos),
+                            "expected term here",
+                        ),
                     );
                     break;
                 };
@@ -522,19 +532,17 @@ impl<'a> PatternParser<'a> {
         };
 
         let quantifier = self.parse_graph_pattern_quantifier();
-        let end = quantifier
-            .as_ref()
-            .map_or_else(
-                || match &primary {
-                    PathPrimary::ElementPattern(element) => match element.as_ref() {
-                        ElementPattern::Node(node) => node.span.end,
-                        ElementPattern::Edge(edge) => edge_pattern_span(edge).end,
-                    },
-                    PathPrimary::ParenthesizedExpression(expr) => expr.span().end,
-                    PathPrimary::SimplifiedExpression(expr) => simplified_expression_span(expr).end,
+        let end = quantifier.as_ref().map_or_else(
+            || match &primary {
+                PathPrimary::ElementPattern(element) => match element.as_ref() {
+                    ElementPattern::Node(node) => node.span.end,
+                    ElementPattern::Edge(edge) => edge_pattern_span(edge).end,
                 },
-                |q| q.span().end,
-            );
+                PathPrimary::ParenthesizedExpression(expr) => expr.span().end,
+                PathPrimary::SimplifiedExpression(expr) => simplified_expression_span(expr).end,
+            },
+            |q| q.span().end,
+        );
 
         Some(PathFactor {
             primary,
@@ -552,12 +560,13 @@ impl<'a> PatternParser<'a> {
 
         if matches!(self.current_kind(), Some(TokenKind::LParen)) {
             if let Some(node) = self.try_parse(|p| p.parse_node_pattern()) {
-                return Some(PathPrimary::ElementPattern(Box::new(ElementPattern::Node(Box::new(
-                    node,
-                )))));
+                return Some(PathPrimary::ElementPattern(Box::new(ElementPattern::Node(
+                    Box::new(node),
+                ))));
             }
 
-            if let Some(expr) = self.try_parse(|p| p.parse_parenthesized_path_pattern_expression()) {
+            if let Some(expr) = self.try_parse(|p| p.parse_parenthesized_path_pattern_expression())
+            {
                 return Some(PathPrimary::ParenthesizedExpression(Box::new(expr)));
             }
 
@@ -566,7 +575,9 @@ impl<'a> PatternParser<'a> {
 
         if matches!(self.current_kind(), Some(kind) if is_edge_pattern_start(kind)) {
             let edge = self.parse_edge_pattern()?;
-            return Some(PathPrimary::ElementPattern(Box::new(ElementPattern::Edge(edge))));
+            return Some(PathPrimary::ElementPattern(Box::new(ElementPattern::Edge(
+                edge,
+            ))));
         }
 
         None
@@ -586,7 +597,10 @@ impl<'a> PatternParser<'a> {
         let Some(expression) = self.parse_path_pattern_expression() else {
             self.diags.push(
                 Diag::error("Expected path pattern expression inside parentheses")
-                    .with_primary_label(self.current_span_or(start), "expected path expression here"),
+                    .with_primary_label(
+                        self.current_span_or(start),
+                        "expected path expression here",
+                    ),
             );
             return None;
         };
@@ -594,9 +608,8 @@ impl<'a> PatternParser<'a> {
         if matches!(self.current_kind(), Some(TokenKind::Where)) {
             self.pos += 1;
             let expr_start = self.pos;
-            let expr_end = self.find_expression_end(expr_start, |kind| {
-                matches!(kind, TokenKind::RParen)
-            });
+            let expr_end =
+                self.find_expression_end(expr_start, |kind| matches!(kind, TokenKind::RParen));
             let _ = self.parse_expression_range(expr_start, expr_end, "condition after WHERE");
         }
 
@@ -620,7 +633,10 @@ impl<'a> PatternParser<'a> {
         if identifier_from_kind(&token.kind).is_none() {
             return;
         }
-        if !matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokenKind::Eq)) {
+        if !matches!(
+            self.tokens.get(self.pos + 1).map(|t| &t.kind),
+            Some(TokenKind::Eq)
+        ) {
             return;
         }
         self.pos += 2;
@@ -667,11 +683,14 @@ impl<'a> PatternParser<'a> {
                 self.pos += 1;
                 if matches!(self.current_kind(), Some(TokenKind::LBracket)) {
                     self.pos += 1;
-                    let filler = self.parse_element_pattern_filler(FillerTerminator::RBracket, start);
+                    let filler =
+                        self.parse_element_pattern_filler(FillerTerminator::RBracket, start);
                     if !matches!(self.current_kind(), Some(TokenKind::RBracket)) {
                         self.diags.push(
-                            Diag::error("Expected ']' in edge pattern")
-                                .with_primary_label(self.current_span_or(start), "expected ']' here"),
+                            Diag::error("Expected ']' in edge pattern").with_primary_label(
+                                self.current_span_or(start),
+                                "expected ']' here",
+                            ),
                         );
                         return None;
                     }
@@ -707,20 +726,23 @@ impl<'a> PatternParser<'a> {
                     })))
                 } else {
                     let end = self.last_consumed_end(start);
-                    Some(EdgePattern::Abbreviated(AbbreviatedEdgePattern::LeftArrow {
-                        span: start..end,
-                    }))
+                    Some(EdgePattern::Abbreviated(
+                        AbbreviatedEdgePattern::LeftArrow { span: start..end },
+                    ))
                 }
             }
             Some(TokenKind::Minus) => {
                 self.pos += 1;
                 if matches!(self.current_kind(), Some(TokenKind::LBracket)) {
                     self.pos += 1;
-                    let filler = self.parse_element_pattern_filler(FillerTerminator::RBracket, start);
+                    let filler =
+                        self.parse_element_pattern_filler(FillerTerminator::RBracket, start);
                     if !matches!(self.current_kind(), Some(TokenKind::RBracket)) {
                         self.diags.push(
-                            Diag::error("Expected ']' in edge pattern")
-                                .with_primary_label(self.current_span_or(start), "expected ']' here"),
+                            Diag::error("Expected ']' in edge pattern").with_primary_label(
+                                self.current_span_or(start),
+                                "expected ']' here",
+                            ),
                         );
                         return None;
                     }
@@ -756,20 +778,23 @@ impl<'a> PatternParser<'a> {
                     })))
                 } else {
                     let end = self.last_consumed_end(start);
-                    Some(EdgePattern::Abbreviated(AbbreviatedEdgePattern::AnyDirection {
-                        span: start..end,
-                    }))
+                    Some(EdgePattern::Abbreviated(
+                        AbbreviatedEdgePattern::AnyDirection { span: start..end },
+                    ))
                 }
             }
             Some(TokenKind::Tilde) => {
                 self.pos += 1;
                 if matches!(self.current_kind(), Some(TokenKind::LBracket)) {
                     self.pos += 1;
-                    let filler = self.parse_element_pattern_filler(FillerTerminator::RBracket, start);
+                    let filler =
+                        self.parse_element_pattern_filler(FillerTerminator::RBracket, start);
                     if !matches!(self.current_kind(), Some(TokenKind::RBracket)) {
                         self.diags.push(
-                            Diag::error("Expected ']' in edge pattern")
-                                .with_primary_label(self.current_span_or(start), "expected ']' here"),
+                            Diag::error("Expected ']' in edge pattern").with_primary_label(
+                                self.current_span_or(start),
+                                "expected ']' here",
+                            ),
                         );
                         return None;
                     }
@@ -805,20 +830,23 @@ impl<'a> PatternParser<'a> {
                     })))
                 } else {
                     let end = self.last_consumed_end(start);
-                    Some(EdgePattern::Abbreviated(AbbreviatedEdgePattern::Undirected {
-                        span: start..end,
-                    }))
+                    Some(EdgePattern::Abbreviated(
+                        AbbreviatedEdgePattern::Undirected { span: start..end },
+                    ))
                 }
             }
             Some(TokenKind::LeftTilde) => {
                 self.pos += 1;
                 if matches!(self.current_kind(), Some(TokenKind::LBracket)) {
                     self.pos += 1;
-                    let filler = self.parse_element_pattern_filler(FillerTerminator::RBracket, start);
+                    let filler =
+                        self.parse_element_pattern_filler(FillerTerminator::RBracket, start);
                     if !matches!(self.current_kind(), Some(TokenKind::RBracket)) {
                         self.diags.push(
-                            Diag::error("Expected ']' in edge pattern")
-                                .with_primary_label(self.current_span_or(start), "expected ']' here"),
+                            Diag::error("Expected ']' in edge pattern").with_primary_label(
+                                self.current_span_or(start),
+                                "expected ']' here",
+                            ),
                         );
                         return None;
                     }
@@ -826,8 +854,10 @@ impl<'a> PatternParser<'a> {
 
                     if !matches!(self.current_kind(), Some(TokenKind::Tilde)) {
                         self.diags.push(
-                            Diag::error("Expected '~' after <~[ ... ]")
-                                .with_primary_label(self.current_span_or(start), "expected '~' here"),
+                            Diag::error("Expected '~' after <~[ ... ]").with_primary_label(
+                                self.current_span_or(start),
+                                "expected '~' here",
+                            ),
                         );
                         return None;
                     }
@@ -863,9 +893,9 @@ impl<'a> PatternParser<'a> {
             Some(TokenKind::Arrow) => {
                 self.pos += 1;
                 let end = self.last_consumed_end(start);
-                Some(EdgePattern::Abbreviated(AbbreviatedEdgePattern::RightArrow {
-                    span: start..end,
-                }))
+                Some(EdgePattern::Abbreviated(
+                    AbbreviatedEdgePattern::RightArrow { span: start..end },
+                ))
             }
             Some(TokenKind::RightTilde) => {
                 self.pos += 1;
@@ -893,7 +923,10 @@ impl<'a> PatternParser<'a> {
     ) -> ParsedElementFiller {
         let start = self.current_start().unwrap_or(fallback_start);
 
-        let variable = if matches!(self.current_kind(), Some(TokenKind::Identifier(_) | TokenKind::DelimitedIdentifier(_))) {
+        let variable = if matches!(
+            self.current_kind(),
+            Some(TokenKind::Identifier(_) | TokenKind::DelimitedIdentifier(_))
+        ) {
             let token = self.tokens[self.pos].clone();
             self.pos += 1;
             identifier_from_kind(&token.kind).map(|name| ElementVariableDeclaration {
@@ -904,11 +937,12 @@ impl<'a> PatternParser<'a> {
             None
         };
 
-        let label_expression = if matches!(self.current_kind(), Some(TokenKind::Is | TokenKind::Colon)) {
-            self.parse_is_label_expression()
-        } else {
-            None
-        };
+        let label_expression =
+            if matches!(self.current_kind(), Some(TokenKind::Is | TokenKind::Colon)) {
+                self.parse_is_label_expression()
+            } else {
+                None
+            };
 
         let mut properties = None;
         let mut where_clause = None;
@@ -953,10 +987,11 @@ impl<'a> PatternParser<'a> {
         self.pos += 1;
 
         let Some(expr) = self.parse_label_expression() else {
-            self.diags.push(
-                Diag::error("Expected label expression")
-                    .with_primary_label(self.current_span_or(self.pos), "expected label expression here"),
-            );
+            self.diags
+                .push(Diag::error("Expected label expression").with_primary_label(
+                    self.current_span_or(self.pos),
+                    "expected label expression here",
+                ));
             return None;
         };
 
@@ -1061,8 +1096,10 @@ impl<'a> PatternParser<'a> {
 
                 let Some((name, span)) = self.parse_label_name() else {
                     self.diags.push(
-                        Diag::error("Expected label name after LABEL/LABELS")
-                            .with_primary_label(self.current_span_or(phrase_start), "expected label name here"),
+                        Diag::error("Expected label name after LABEL/LABELS").with_primary_label(
+                            self.current_span_or(phrase_start),
+                            "expected label name here",
+                        ),
                     );
                     return None;
                 };
@@ -1072,8 +1109,10 @@ impl<'a> PatternParser<'a> {
                     self.pos += 1;
                     let Some((next_name, next_span)) = self.parse_label_name() else {
                         self.diags.push(
-                            Diag::error("Expected label name after '&'")
-                                .with_primary_label(self.current_span_or(phrase_start), "expected label name here"),
+                            Diag::error("Expected label name after '&'").with_primary_label(
+                                self.current_span_or(phrase_start),
+                                "expected label name here",
+                            ),
                         );
                         break;
                     };
@@ -1118,7 +1157,10 @@ impl<'a> PatternParser<'a> {
 
         let mut properties = Vec::new();
 
-        while !matches!(self.current_kind(), Some(TokenKind::RBrace | TokenKind::Eof)) {
+        while !matches!(
+            self.current_kind(),
+            Some(TokenKind::RBrace | TokenKind::Eof)
+        ) {
             let Some(pair) = self.parse_property_key_value_pair() else {
                 self.skip_to_token(|kind| matches!(kind, TokenKind::Comma | TokenKind::RBrace));
                 if matches!(self.current_kind(), Some(TokenKind::Comma)) {
@@ -1203,7 +1245,8 @@ impl<'a> PatternParser<'a> {
 
         let expr_start = self.pos;
         let expr_end = self.find_expression_end(expr_start, |kind| terminator.matches(kind));
-        let condition = self.parse_expression_range(expr_start, expr_end, "condition after WHERE")?;
+        let condition =
+            self.parse_expression_range(expr_start, expr_end, "condition after WHERE")?;
         let end = condition.span().end;
 
         Some(ElementPatternPredicate {
@@ -1212,14 +1255,18 @@ impl<'a> PatternParser<'a> {
         })
     }
 
-    fn parse_simplified_path_pattern_expression(&mut self) -> Option<SimplifiedPathPatternExpression> {
+    fn parse_simplified_path_pattern_expression(
+        &mut self,
+    ) -> Option<SimplifiedPathPatternExpression> {
         let start = self.current_start()?;
         let opening = self.parse_simplified_opening()?;
 
         let Some(contents) = self.parse_simplified_contents() else {
             self.diags.push(
-                Diag::error("Expected simplified path contents")
-                    .with_primary_label(self.current_span_or(start), "expected simplified path content here"),
+                Diag::error("Expected simplified path contents").with_primary_label(
+                    self.current_span_or(start),
+                    "expected simplified path content here",
+                ),
             );
             return None;
         };
@@ -1239,7 +1286,10 @@ impl<'a> PatternParser<'a> {
         let Some(direction) = opening_closing_direction(opening, closing) else {
             self.diags.push(
                 Diag::error("Unsupported simplified direction delimiter combination")
-                    .with_primary_label(self.current_span_or(start), "invalid simplified direction here"),
+                    .with_primary_label(
+                        self.current_span_or(start),
+                        "invalid simplified direction here",
+                    ),
             );
             return Some(contents);
         };
@@ -1254,7 +1304,10 @@ impl<'a> PatternParser<'a> {
     }
 
     fn parse_simplified_opening(&mut self) -> Option<SimplifiedOpening> {
-        match (self.current_kind(), self.tokens.get(self.pos + 1).map(|t| &t.kind)) {
+        match (
+            self.current_kind(),
+            self.tokens.get(self.pos + 1).map(|t| &t.kind),
+        ) {
             (Some(TokenKind::LeftArrow), Some(TokenKind::Slash)) => {
                 self.pos += 2;
                 Some(SimplifiedOpening::LeftArrow)
@@ -1297,8 +1350,10 @@ impl<'a> PatternParser<'a> {
                 self.pos += 3;
                 let Some(term) = self.parse_simplified_term() else {
                     self.diags.push(
-                        Diag::error("Expected simplified term after '|+|'")
-                            .with_primary_label(self.current_span_or(self.pos), "expected term here"),
+                        Diag::error("Expected simplified term after '|+|'").with_primary_label(
+                            self.current_span_or(self.pos),
+                            "expected term here",
+                        ),
                     );
                     break;
                 };
@@ -1322,12 +1377,15 @@ impl<'a> PatternParser<'a> {
                 self.pos += 1;
                 let Some(right) = self.parse_simplified_term() else {
                     self.diags.push(
-                        Diag::error("Expected simplified term after '|'")
-                            .with_primary_label(self.current_span_or(self.pos), "expected term here"),
+                        Diag::error("Expected simplified term after '|'").with_primary_label(
+                            self.current_span_or(self.pos),
+                            "expected term here",
+                        ),
                     );
                     break;
                 };
-                let span = simplified_expression_span(&expr).start..simplified_expression_span(&right).end;
+                let span =
+                    simplified_expression_span(&expr).start..simplified_expression_span(&right).end;
                 expr = SimplifiedPathPatternExpression::Union(SimplifiedPathUnion {
                     left: Box::new(expr),
                     right: Box::new(right),
@@ -1345,8 +1403,10 @@ impl<'a> PatternParser<'a> {
         let mut parts = Vec::new();
 
         loop {
-            if matches!(self.current_kind(), Some(TokenKind::Pipe | TokenKind::Slash | TokenKind::RParen | TokenKind::Eof))
-            {
+            if matches!(
+                self.current_kind(),
+                Some(TokenKind::Pipe | TokenKind::Slash | TokenKind::RParen | TokenKind::Eof)
+            ) {
                 break;
             }
             if self.is_multiset_alternation_operator() {
@@ -1392,7 +1452,8 @@ impl<'a> PatternParser<'a> {
                 break;
             };
 
-            let span = simplified_expression_span(&expr).start..simplified_expression_span(&right).end;
+            let span =
+                simplified_expression_span(&expr).start..simplified_expression_span(&right).end;
             expr = SimplifiedPathPatternExpression::Conjunction(SimplifiedConjunction {
                 left: Box::new(expr),
                 right: Box::new(right),
@@ -1420,11 +1481,13 @@ impl<'a> PatternParser<'a> {
 
         if let Some(quantifier) = self.parse_graph_pattern_quantifier() {
             let end = quantifier.span().end;
-            return Some(SimplifiedPathPatternExpression::Quantified(SimplifiedQuantified {
-                pattern: Box::new(tertiary),
-                quantifier,
-                span: start..end,
-            }));
+            return Some(SimplifiedPathPatternExpression::Quantified(
+                SimplifiedQuantified {
+                    pattern: Box::new(tertiary),
+                    quantifier,
+                    span: start..end,
+                },
+            ));
         }
 
         Some(tertiary)
@@ -1474,7 +1537,10 @@ impl<'a> PatternParser<'a> {
         }
 
         if matches!(self.current_kind(), Some(TokenKind::Tilde))
-            && !matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokenKind::Slash))
+            && !matches!(
+                self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                Some(TokenKind::Slash)
+            )
         {
             let start = self.current_start().unwrap_or(self.pos);
             self.pos += 1;
@@ -1496,7 +1562,10 @@ impl<'a> PatternParser<'a> {
         }
 
         if matches!(self.current_kind(), Some(TokenKind::Minus))
-            && !matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokenKind::Slash))
+            && !matches!(
+                self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                Some(TokenKind::Slash)
+            )
         {
             let start = self.current_start().unwrap_or(self.pos);
             self.pos += 1;
@@ -1536,10 +1605,12 @@ impl<'a> PatternParser<'a> {
             self.pos += 1;
             let inner = self.parse_simplified_primary()?;
             let end = simplified_expression_span(&inner).end;
-            return Some(SimplifiedPathPatternExpression::Negation(SimplifiedNegation {
-                pattern: Box::new(inner),
-                span: start..end,
-            }));
+            return Some(SimplifiedPathPatternExpression::Negation(
+                SimplifiedNegation {
+                    pattern: Box::new(inner),
+                    span: start..end,
+                },
+            ));
         }
 
         self.parse_simplified_primary()
@@ -1569,10 +1640,12 @@ impl<'a> PatternParser<'a> {
         let span = token.span.clone();
         self.pos += 1;
 
-        Some(SimplifiedPathPatternExpression::Contents(SimplifiedContents {
-            labels: vec![label],
-            span,
-        }))
+        Some(SimplifiedPathPatternExpression::Contents(
+            SimplifiedContents {
+                labels: vec![label],
+                span,
+            },
+        ))
     }
 
     fn parse_graph_pattern_quantifier(&mut self) -> Option<GraphPatternQuantifier> {
@@ -1728,11 +1801,14 @@ impl<'a> PatternParser<'a> {
 
         let expr_start = self.pos;
         let expr_end = self.find_expression_end(expr_start, |kind| {
-            matches!(kind, TokenKind::Comma | TokenKind::Where | TokenKind::Keep | TokenKind::Yield)
-                || is_query_boundary(kind)
+            matches!(
+                kind,
+                TokenKind::Comma | TokenKind::Where | TokenKind::Keep | TokenKind::Yield
+            ) || is_query_boundary(kind)
         });
 
-        let condition = self.parse_expression_range(expr_start, expr_end, "condition after WHERE")?;
+        let condition =
+            self.parse_expression_range(expr_start, expr_end, "condition after WHERE")?;
         let end = condition.span().end;
 
         Some(GraphPatternWhereClause {
@@ -1764,8 +1840,10 @@ impl<'a> PatternParser<'a> {
             self.pos += 1;
             let Some(item) = self.parse_graph_pattern_yield_item() else {
                 self.diags.push(
-                    Diag::error("Expected YIELD item after ','")
-                        .with_primary_label(self.current_span_or(start), "expected YIELD item here"),
+                    Diag::error("Expected YIELD item after ','").with_primary_label(
+                        self.current_span_or(start),
+                        "expected YIELD item here",
+                    ),
                 );
                 break;
             };
@@ -1789,14 +1867,17 @@ impl<'a> PatternParser<'a> {
 
         if item_end <= start_index {
             self.diags.push(
-                Diag::error("Expected YIELD item")
-                    .with_primary_label(self.current_span_or(start_span), "expected YIELD item here"),
+                Diag::error("Expected YIELD item").with_primary_label(
+                    self.current_span_or(start_span),
+                    "expected YIELD item here",
+                ),
             );
             return None;
         }
 
         let (expr_end, alias) = self.find_trailing_alias(start_index, item_end);
-        let expression = self.parse_expression_range(start_index, expr_end, "YIELD item expression")?;
+        let expression =
+            self.parse_expression_range(start_index, expr_end, "YIELD item expression")?;
 
         self.pos = item_end;
 
@@ -1854,8 +1935,10 @@ impl<'a> PatternParser<'a> {
     ) -> Option<Expression> {
         if end <= start {
             self.diags.push(
-                Diag::error(format!("Expected {context}"))
-                    .with_primary_label(self.current_span_or(start), format!("expected {context} here")),
+                Diag::error(format!("Expected {context}")).with_primary_label(
+                    self.current_span_or(start),
+                    format!("expected {context} here"),
+                ),
             );
             self.pos = end;
             return None;
@@ -1918,7 +2001,10 @@ impl<'a> PatternParser<'a> {
 
     fn looks_like_simplified_opening(&self) -> bool {
         matches!(
-            (self.current_kind(), self.tokens.get(self.pos + 1).map(|t| &t.kind)),
+            (
+                self.current_kind(),
+                self.tokens.get(self.pos + 1).map(|t| &t.kind)
+            ),
             (Some(TokenKind::LeftArrow), Some(TokenKind::Slash))
                 | (Some(TokenKind::LeftTilde), Some(TokenKind::Slash))
                 | (Some(TokenKind::Tilde), Some(TokenKind::Slash))
@@ -1928,8 +2014,14 @@ impl<'a> PatternParser<'a> {
 
     fn is_multiset_alternation_operator(&self) -> bool {
         matches!(self.current_kind(), Some(TokenKind::Pipe))
-            && matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokenKind::Plus))
-            && matches!(self.tokens.get(self.pos + 2).map(|t| &t.kind), Some(TokenKind::Pipe))
+            && matches!(
+                self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                Some(TokenKind::Plus)
+            )
+            && matches!(
+                self.tokens.get(self.pos + 2).map(|t| &t.kind),
+                Some(TokenKind::Pipe)
+            )
     }
 
     fn skip_to_where_or_statement_boundary(&mut self) {
@@ -2057,19 +2149,27 @@ fn opening_closing_direction(
     closing: Option<SimplifiedClosing>,
 ) -> Option<EdgeDirection> {
     match (opening, closing?) {
-        (SimplifiedOpening::LeftArrow, SimplifiedClosing::Minus) => Some(EdgeDirection::PointingLeft),
-        (SimplifiedOpening::LeftArrow, SimplifiedClosing::Arrow) => Some(EdgeDirection::AnyDirected),
+        (SimplifiedOpening::LeftArrow, SimplifiedClosing::Minus) => {
+            Some(EdgeDirection::PointingLeft)
+        }
+        (SimplifiedOpening::LeftArrow, SimplifiedClosing::Arrow) => {
+            Some(EdgeDirection::AnyDirected)
+        }
         (SimplifiedOpening::LeftOrUndirected, SimplifiedClosing::Tilde) => {
             Some(EdgeDirection::LeftOrUndirected)
         }
-        (SimplifiedOpening::Undirected, SimplifiedClosing::Tilde) => Some(EdgeDirection::Undirected),
+        (SimplifiedOpening::Undirected, SimplifiedClosing::Tilde) => {
+            Some(EdgeDirection::Undirected)
+        }
         (SimplifiedOpening::Undirected, SimplifiedClosing::RightTilde) => {
             Some(EdgeDirection::RightOrUndirected)
         }
         (SimplifiedOpening::AnyOrRight, SimplifiedClosing::Arrow) => {
             Some(EdgeDirection::PointingRight)
         }
-        (SimplifiedOpening::AnyOrRight, SimplifiedClosing::Minus) => Some(EdgeDirection::AnyDirection),
+        (SimplifiedOpening::AnyOrRight, SimplifiedClosing::Minus) => {
+            Some(EdgeDirection::AnyDirection)
+        }
         _ => None,
     }
 }
@@ -2087,8 +2187,10 @@ fn is_edge_pattern_start(kind: &TokenKind) -> bool {
 }
 
 fn is_path_pattern_delimiter(kind: &TokenKind) -> bool {
-    matches!(kind, TokenKind::Comma | TokenKind::Keep | TokenKind::Where | TokenKind::Yield)
-        || is_query_boundary(kind)
+    matches!(
+        kind,
+        TokenKind::Comma | TokenKind::Keep | TokenKind::Where | TokenKind::Yield
+    ) || is_query_boundary(kind)
 }
 
 fn is_query_boundary(kind: &TokenKind) -> bool {
