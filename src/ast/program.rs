@@ -2,6 +2,7 @@
 
 use crate::ast::Span;
 use crate::ast::catalog::CatalogStatementKind;
+use crate::ast::mutation::LinearDataModifyingStatement;
 use crate::ast::query::Query;
 use crate::ast::session::SessionCommand;
 use crate::ast::transaction::TransactionCommand;
@@ -37,11 +38,11 @@ pub struct QueryStatement {
     pub span: Span,
 }
 
-/// Mutation statement AST node (placeholder for Sprint 10).
+/// Mutation statement AST node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MutationStatement {
+    pub statement: LinearDataModifyingStatement,
     pub span: Span,
-    // Body to be implemented in Sprint 10
 }
 
 /// Session statement AST node (Sprint 4 - implemented).
@@ -69,6 +70,7 @@ pub struct CatalogStatement {
 mod tests {
     use super::*;
     use crate::ast::catalog::{CallCatalogModifyingProcedureStatement, CatalogStatementKind};
+    use crate::ast::mutation::{AmbientLinearDataModifyingStatement, LinearDataModifyingStatement};
     use crate::ast::query::{AmbientLinearQuery, LinearQuery, Query};
     use crate::ast::references::ProcedureReference;
     use crate::ast::session::{SessionCloseCommand, SessionCommand};
@@ -95,7 +97,14 @@ mod tests {
         }));
         assert!(matches!(query, Statement::Query(_)));
 
-        let mutation = Statement::Mutation(Box::new(MutationStatement { span: 0..5 }));
+        let mutation = Statement::Mutation(Box::new(MutationStatement {
+            statement: LinearDataModifyingStatement::Ambient(AmbientLinearDataModifyingStatement {
+                statements: vec![],
+                primitive_result_statement: None,
+                span: 0..5,
+            }),
+            span: 0..5,
+        }));
         assert!(matches!(mutation, Statement::Mutation(_)));
 
         let session = Statement::Session(Box::new(SessionStatement {

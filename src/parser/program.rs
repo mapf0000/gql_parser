@@ -13,6 +13,7 @@ use crate::ast::{
 };
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
+use crate::parser::mutation::parse_linear_data_modifying_statement;
 use crate::parser::query::parse_query;
 use crate::parser::references as reference_parser;
 use smol_str::SmolStr;
@@ -109,7 +110,12 @@ fn classify(kind: &TokenKind) -> SyntaxToken {
         | TokenKind::Finish
         | TokenKind::Select
         | TokenKind::From => SyntaxToken::QueryStart,
-        TokenKind::Insert | TokenKind::Delete => SyntaxToken::MutationStart,
+        TokenKind::Insert
+        | TokenKind::Delete
+        | TokenKind::Set
+        | TokenKind::Remove
+        | TokenKind::Detach
+        | TokenKind::Nodetach => SyntaxToken::MutationStart,
         TokenKind::Session => SyntaxToken::SessionStart,
         TokenKind::Start | TokenKind::Commit | TokenKind::Rollback => SyntaxToken::TransactionStart,
         TokenKind::Create | TokenKind::Drop | TokenKind::Call => SyntaxToken::CatalogStart,
@@ -134,20 +140,67 @@ fn syntax_to_statement_class(token: SyntaxToken) -> StatementClass {
 
 fn find_statement_end(tokens: &[Token], start: usize, class: StatementClass) -> usize {
     let mut cursor = start + 1;
+    let starts_with_use = matches!(tokens.get(start).map(|t| &t.kind), Some(TokenKind::Use));
+
+    if matches!(
+        class,
+        StatementClass::Session | StatementClass::Transaction | StatementClass::Catalog
+    ) {
+        while cursor < tokens.len() {
+            if matches!(tokens[cursor].kind, TokenKind::Semicolon | TokenKind::Eof) {
+                return cursor;
+            }
+            cursor += 1;
+        }
+        return cursor;
+    }
+
     while cursor < tokens.len() {
-        match classify(&tokens[cursor].kind) {
-            SyntaxToken::Semicolon | SyntaxToken::Eof => return cursor,
+        let kind = &tokens[cursor].kind;
+        if matches!(kind, TokenKind::Semicolon | TokenKind::Eof) {
+            return cursor;
+        }
+
+        if matches!(class, StatementClass::Query) && starts_with_use {
+            if matches!(
+                kind,
+                TokenKind::Session
+                    | TokenKind::Start
+                    | TokenKind::Commit
+                    | TokenKind::Rollback
+                    | TokenKind::Create
+                    | TokenKind::Drop
+            ) {
+                return cursor;
+            }
+            cursor += 1;
+            continue;
+        }
+
+        if matches!(class, StatementClass::Mutation) {
+            if matches!(
+                kind,
+                TokenKind::Session
+                    | TokenKind::Start
+                    | TokenKind::Commit
+                    | TokenKind::Rollback
+                    | TokenKind::Create
+                    | TokenKind::Drop
+            ) {
+                return cursor;
+            }
+            cursor += 1;
+            continue;
+        }
+
+        match classify(kind) {
             SyntaxToken::MutationStart
             | SyntaxToken::SessionStart
             | SyntaxToken::TransactionStart
             | SyntaxToken::CatalogStart => return cursor,
             SyntaxToken::QueryStart if !matches!(class, StatementClass::Query) => return cursor,
-            SyntaxToken::Other => {
-                cursor += 1;
-            }
-            SyntaxToken::QueryStart => {
-                cursor += 1;
-            }
+            SyntaxToken::Semicolon | SyntaxToken::Eof => return cursor,
+            SyntaxToken::Other | SyntaxToken::QueryStart => cursor += 1,
         }
     }
     cursor
@@ -156,12 +209,7 @@ fn find_statement_end(tokens: &[Token], start: usize, class: StatementClass) -> 
 fn parse_statement(class: StatementClass, tokens: &[Token]) -> StatementParseOutcome {
     match class {
         StatementClass::Query => parse_query_statement(tokens),
-        StatementClass::Mutation => (
-            Some(Statement::Mutation(Box::new(MutationStatement {
-                span: slice_span(tokens),
-            }))),
-            Vec::new(),
-        ),
+        StatementClass::Mutation => parse_mutation_statement(tokens),
         StatementClass::Session => parse_non_query_statement(tokens, parse_session_statement),
         StatementClass::Transaction => {
             parse_non_query_statement(tokens, parse_transaction_statement)
@@ -172,7 +220,7 @@ fn parse_statement(class: StatementClass, tokens: &[Token]) -> StatementParseOut
 
 fn parse_query_statement(tokens: &[Token]) -> StatementParseOutcome {
     let mut pos = 0usize;
-    let (query_opt, mut diags) = parse_query(tokens, &mut pos);
+    let (query_opt, diags) = parse_query(tokens, &mut pos);
 
     match query_opt {
         Some(query) => {
@@ -183,11 +231,63 @@ fn parse_query_statement(tokens: &[Token]) -> StatementParseOutcome {
             )
         }
         None => {
-            if diags.is_empty() {
-                diags.push(
+            if matches!(tokens.first().map(|t| &t.kind), Some(TokenKind::Use)) {
+                let (mutation_opt, mut mutation_diags) = parse_mutation_statement(tokens);
+                if mutation_opt.is_some() {
+                    return (mutation_opt, mutation_diags);
+                }
+                if mutation_diags.is_empty() {
+                    mutation_diags.push(
+                        Diag::error("expected query or data-modifying statement after USE")
+                            .with_primary_label(slice_span(tokens), "expected statement")
+                            .with_code("P004"),
+                    );
+                }
+                return (None, mutation_diags);
+            }
+
+            let mut out_diags = diags;
+            if out_diags.is_empty() {
+                out_diags.push(
                     Diag::error("expected query statement")
                         .with_primary_label(slice_span(tokens), "expected query statement")
                         .with_code("P004"),
+                );
+            }
+            (None, out_diags)
+        }
+    }
+}
+
+fn parse_mutation_statement(tokens: &[Token]) -> StatementParseOutcome {
+    let mut pos = 0usize;
+    let (mutation_opt, mut diags) = parse_linear_data_modifying_statement(tokens, &mut pos);
+
+    match mutation_opt {
+        Some(statement) => {
+            if pos < tokens.len() {
+                diags.push(
+                    Diag::error("unexpected token in data-modifying statement")
+                        .with_primary_label(
+                            tokens[pos].span.clone(),
+                            format!("unexpected {}", tokens[pos].kind),
+                        )
+                        .with_code("P_MUT"),
+                );
+            }
+
+            let span = statement.span().clone();
+            (
+                Some(Statement::Mutation(Box::new(MutationStatement { statement, span }))),
+                diags,
+            )
+        }
+        None => {
+            if diags.is_empty() {
+                diags.push(
+                    Diag::error("expected data-modifying statement")
+                        .with_primary_label(slice_span(tokens), "expected mutation statement")
+                        .with_code("P_MUT"),
                 );
             }
             (None, diags)

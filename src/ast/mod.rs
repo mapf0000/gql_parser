@@ -2,7 +2,7 @@
 
 mod catalog;
 pub mod expression;
-mod mutation;
+pub mod mutation;
 pub mod program;
 pub mod query;
 pub mod references;
@@ -80,4 +80,16 @@ pub use query::{
     ReturnItem, ReturnItemList, ReturnStatement, SelectFromClause, SelectItem, SelectItemList,
     SelectStatement, SetOperator, SetQuantifier, SimpleMatchStatement, SortSpecification,
     UseGraphClause, WhereClause,
+};
+
+// Re-export mutation types
+pub use mutation::{
+    AmbientLinearDataModifyingStatement, CallDataModifyingProcedureStatement, DeleteItem,
+    DeleteItemList, DeleteStatement, DetachOption, FocusedLinearDataModifyingStatement,
+    InsertEdgePattern, InsertEdgePointingLeft, InsertEdgePointingRight, InsertEdgeUndirected,
+    InsertElementPattern, InsertElementPatternFiller, InsertGraphPattern, InsertNodePattern,
+    InsertPathPattern, InsertStatement, LinearDataModifyingStatement, PrimitiveDataModifyingStatement,
+    RemoveItem, RemoveItemList, RemoveLabelItem, RemovePropertyItem, RemoveStatement,
+    SetAllPropertiesItem, SetItem, SetItemList, SetLabelItem, SetPropertyItem, SetStatement,
+    SimpleDataAccessingStatement, SimpleDataModifyingStatement,
 };

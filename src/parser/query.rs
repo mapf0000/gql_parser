@@ -17,7 +17,7 @@ use crate::parser::patterns::parse_graph_pattern;
 use crate::parser::types::parse_value_type_prefix;
 
 /// Parse result with optional value and diagnostics.
-type ParseResult<T> = (Option<T>, Vec<Diag>);
+pub(crate) type ParseResult<T> = (Option<T>, Vec<Diag>);
 
 // ============================================================================
 // Expression Parser Adapter
@@ -54,14 +54,17 @@ fn find_expression_boundary(tokens: &[Token], start_pos: usize) -> usize {
 
         // At depth 0, check for statement keywords that terminate expressions
         if depth == 0 {
-            match &token.kind {
-                // Statement keywords
-                TokenKind::Match | TokenKind::Filter | TokenKind::Let | TokenKind::For |
-                TokenKind::Order | TokenKind::Limit | TokenKind::Offset | TokenKind::Skip |
-                TokenKind::Return | TokenKind::Select | TokenKind::Finish |
-                // Set operators
-                TokenKind::Union | TokenKind::Except | TokenKind::Intersect | TokenKind::Otherwise |
-                // Clause keywords
+                match &token.kind {
+                    // Statement keywords
+                    TokenKind::Match | TokenKind::Filter | TokenKind::Let | TokenKind::For |
+                    TokenKind::Order | TokenKind::Limit | TokenKind::Offset | TokenKind::Skip |
+                    TokenKind::Return | TokenKind::Select | TokenKind::Finish |
+                    // Mutation keywords (for USE graph in data-modifying statements)
+                    TokenKind::Insert | TokenKind::Set | TokenKind::Remove | TokenKind::Delete |
+                    TokenKind::Detach | TokenKind::Nodetach | TokenKind::Call |
+                    // Set operators
+                    TokenKind::Union | TokenKind::Except | TokenKind::Intersect | TokenKind::Otherwise |
+                    // Clause keywords
                 TokenKind::From | TokenKind::Where | TokenKind::Group | TokenKind::Having |
                 TokenKind::By | TokenKind::With | TokenKind::As |
                 TokenKind::Asc | TokenKind::Ascending | TokenKind::Desc | TokenKind::Descending |
@@ -120,7 +123,10 @@ fn parse_expression_at(tokens: &[Token], pos: &mut usize) -> Result<Expression, 
 }
 
 /// Helper to wrap expression parsing errors into diagnostics.
-fn parse_expression_with_diags(tokens: &[Token], pos: &mut usize) -> ParseResult<Expression> {
+pub(crate) fn parse_expression_with_diags(
+    tokens: &[Token],
+    pos: &mut usize,
+) -> ParseResult<Expression> {
     match parse_expression_at(tokens, pos) {
         Ok(expr) => (Some(expr), vec![]),
         Err(diag) => (None, vec![*diag]),
@@ -467,7 +473,7 @@ fn parse_query_statements(
 }
 
 /// Parses a primitive query statement.
-fn parse_primitive_query_statement(
+pub(crate) fn parse_primitive_query_statement(
     tokens: &[Token],
     pos: &mut usize,
 ) -> ParseResult<PrimitiveQueryStatement> {
@@ -526,7 +532,7 @@ fn parse_primitive_query_statement(
 // ============================================================================
 
 /// Parses a USE GRAPH clause.
-fn parse_use_graph_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<UseGraphClause> {
+pub(crate) fn parse_use_graph_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<UseGraphClause> {
     let mut diags = Vec::new();
 
     if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Use) {
@@ -1769,7 +1775,7 @@ fn parse_having_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<HavingC
 // ============================================================================
 
 /// Parses a RETURN statement.
-fn parse_return_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<ReturnStatement> {
+pub(crate) fn parse_return_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<ReturnStatement> {
     let mut diags = Vec::new();
 
     if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Return) {

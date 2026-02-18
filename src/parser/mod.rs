@@ -4,6 +4,7 @@
 //! an AST while preserving diagnostics and recovering at statement boundaries.
 
 pub mod expression;
+pub mod mutation;
 pub mod patterns;
 mod program;
 pub mod query;
