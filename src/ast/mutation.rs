@@ -4,11 +4,11 @@
 
 use crate::ast::Span;
 use crate::ast::expression::Expression;
+use crate::ast::procedure::CallProcedureStatement;
 use crate::ast::query::{
     ElementPropertySpecification, ElementVariableDeclaration, LabelSetSpecification,
     PrimitiveQueryStatement, PrimitiveResultStatement, UseGraphClause,
 };
-use crate::ast::references::ProcedureReference;
 use smol_str::SmolStr;
 
 // ============================================================================
@@ -55,7 +55,7 @@ pub struct AmbientLinearDataModifyingStatement {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimpleDataAccessingStatement {
     /// A simple query statement (MATCH, FILTER, LET, FOR, ORDER/LIMIT/OFFSET, SELECT).
-    Query(PrimitiveQueryStatement),
+    Query(Box<PrimitiveQueryStatement>),
     /// A simple data modifying statement (INSERT/SET/REMOVE/DELETE/CALL).
     Modifying(SimpleDataModifyingStatement),
 }
@@ -76,7 +76,7 @@ pub enum SimpleDataModifyingStatement {
     /// Primitive mutation statement.
     Primitive(PrimitiveDataModifyingStatement),
     /// Procedure call that may modify data.
-    Call(CallDataModifyingProcedureStatement),
+    Call(Box<CallDataModifyingProcedureStatement>),
 }
 
 impl SimpleDataModifyingStatement {
@@ -375,16 +375,7 @@ pub struct DeleteItem {
 /// `OPTIONAL? CALL` statement in data-modifying contexts.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CallDataModifyingProcedureStatement {
-    pub optional: bool,
-    /// Named procedure reference for named calls, absent for inline calls.
-    pub procedure: Option<ProcedureReference>,
-    /// Arguments for named calls.
-    pub arguments: Vec<Expression>,
-    /// Optional YIELD projection for named calls.
-    pub yield_items: Option<Vec<SmolStr>>,
-    /// Optional variable scope list for inline calls.
-    pub inline_variable_scope: Option<Vec<SmolStr>>,
-    /// Span of `{ ... }` nested procedure specification for inline calls.
-    pub inline_procedure_span: Option<Span>,
+    /// Full CALL statement payload.
+    pub call: CallProcedureStatement,
     pub span: Span,
 }

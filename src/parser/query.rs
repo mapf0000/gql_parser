@@ -14,6 +14,7 @@ use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
 use crate::parser::expression::parse_expression;
 use crate::parser::patterns::parse_graph_pattern;
+use crate::parser::procedure::parse_call_procedure_statement;
 use crate::parser::types::parse_value_type_prefix;
 use smol_str::SmolStr;
 
@@ -487,9 +488,18 @@ pub(crate) fn parse_primitive_query_statement(
             let (match_opt, diags) = parse_match_statement(tokens, pos);
             (match_opt.map(PrimitiveQueryStatement::Match), diags)
         }
+        TokenKind::Call => {
+            let (call_opt, diags) = parse_call_procedure_statement(tokens, pos);
+            (call_opt.map(PrimitiveQueryStatement::Call), diags)
+        }
         TokenKind::Optional => {
-            let (match_opt, diags) = parse_match_statement(tokens, pos);
-            (match_opt.map(PrimitiveQueryStatement::Match), diags)
+            if matches!(tokens.get(*pos + 1).map(|t| &t.kind), Some(TokenKind::Call)) {
+                let (call_opt, diags) = parse_call_procedure_statement(tokens, pos);
+                (call_opt.map(PrimitiveQueryStatement::Call), diags)
+            } else {
+                let (match_opt, diags) = parse_match_statement(tokens, pos);
+                (match_opt.map(PrimitiveQueryStatement::Match), diags)
+            }
         }
         TokenKind::Filter => {
             let (filter_opt, diags) = parse_filter_statement(tokens, pos);

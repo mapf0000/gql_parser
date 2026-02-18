@@ -4,7 +4,7 @@ use crate::ast::{
     CallCatalogModifyingProcedureStatement, CatalogStatement, CatalogStatementKind, CommitCommand,
     CreateGraphStatement, CreateGraphTypeStatement, CreateSchemaStatement, DropGraphStatement,
     DropGraphTypeStatement, DropSchemaStatement, Expression, GraphReference, GraphTypeReference,
-    GraphTypeSource, GraphTypeSpec, MutationStatement, ProcedureReference, Program, QueryStatement,
+    GraphTypeSource, GraphTypeSpec, MutationStatement, Program, QueryStatement,
     RollbackCommand, SchemaReference, SessionCloseCommand, SessionCommand, SessionResetCommand,
     SessionResetTarget, SessionSetCommand, SessionSetGraphClause, SessionSetParameterClause,
     SessionSetSchemaClause, SessionSetTimeZoneClause, SessionStatement, Span,
@@ -14,6 +14,7 @@ use crate::ast::{
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
 use crate::parser::mutation::parse_linear_data_modifying_statement;
+use crate::parser::procedure::parse_call_procedure_statement;
 use crate::parser::query::parse_query;
 use crate::parser::references as reference_parser;
 use smol_str::SmolStr;
@@ -50,7 +51,15 @@ pub(crate) fn parse_program_tokens(tokens: &[Token], source_len: usize) -> (Prog
 
     while cursor < tokens.len() {
         let start_cursor = cursor;
-        match classify(&tokens[cursor].kind) {
+        let syntax = if matches!(tokens[cursor].kind, TokenKind::Optional)
+            && matches!(tokens.get(cursor + 1).map(|t| &t.kind), Some(TokenKind::Call))
+        {
+            SyntaxToken::CatalogStart
+        } else {
+            classify(&tokens[cursor].kind)
+        };
+
+        match syntax {
             SyntaxToken::Eof => break,
             SyntaxToken::Semicolon => {
                 cursor += 1;
@@ -189,6 +198,11 @@ fn find_statement_end(tokens: &[Token], start: usize, class: StatementClass) -> 
             ) {
                 return cursor;
             }
+            cursor += 1;
+            continue;
+        }
+
+        if matches!(class, StatementClass::Query) && matches!(kind, TokenKind::Call) {
             cursor += 1;
             continue;
         }
@@ -852,6 +866,15 @@ fn parse_rollback_command(tokens: &[Token]) -> ParseOutcome<TransactionCommand> 
 
 fn parse_catalog_statement(tokens: &[Token]) -> ParseOutcome<Statement> {
     let span = slice_span(tokens);
+    let kind = parse_catalog_statement_kind(tokens)?;
+
+    Ok(Statement::Catalog(Box::new(CatalogStatement {
+        kind,
+        span,
+    })))
+}
+
+pub(crate) fn parse_catalog_statement_kind(tokens: &[Token]) -> ParseOutcome<CatalogStatementKind> {
     if tokens.is_empty() {
         return Err(expected_token_diag(
             tokens,
@@ -861,24 +884,20 @@ fn parse_catalog_statement(tokens: &[Token]) -> ParseOutcome<Statement> {
         ));
     }
 
-    let kind = match tokens[0].kind {
-        TokenKind::Create => parse_create_catalog_statement(tokens)?,
-        TokenKind::Drop => parse_drop_catalog_statement(tokens)?,
-        TokenKind::Call => parse_call_catalog_statement(tokens)?,
-        _ => {
-            return Err(expected_token_diag(
-                tokens,
-                0,
-                "CREATE, DROP, or CALL",
-                "catalog statement",
-            ));
+    match tokens[0].kind {
+        TokenKind::Create => parse_create_catalog_statement(tokens),
+        TokenKind::Drop => parse_drop_catalog_statement(tokens),
+        TokenKind::Call => parse_call_catalog_statement(tokens),
+        TokenKind::Optional if matches!(tokens.get(1).map(|t| &t.kind), Some(TokenKind::Call)) => {
+            parse_call_catalog_statement(tokens)
         }
-    };
-
-    Ok(Statement::Catalog(Box::new(CatalogStatement {
-        kind,
-        span,
-    })))
+        _ => Err(expected_token_diag(
+            tokens,
+            0,
+            "CREATE, DROP, CALL, or OPTIONAL CALL",
+            "catalog statement",
+        )),
+    }
 }
 
 fn parse_create_catalog_statement(tokens: &[Token]) -> ParseOutcome<CatalogStatementKind> {
@@ -1253,40 +1272,26 @@ fn parse_drop_catalog_statement(tokens: &[Token]) -> ParseOutcome<CatalogStateme
 }
 
 fn parse_call_catalog_statement(tokens: &[Token]) -> ParseOutcome<CatalogStatementKind> {
-    if tokens.len() < 2 {
+    let mut pos = 0usize;
+    let (call_opt, mut diags) = parse_call_procedure_statement(tokens, &mut pos);
+    if let Some(diag) = diags.drain(..).next() {
+        return Err(Box::new(diag));
+    }
+    let Some(call) = call_opt else {
         return Err(expected_token_diag(
             tokens,
-            1,
-            "procedure name",
+            pos,
+            "procedure call",
             "CALL statement",
         ));
-    }
-
-    let (procedure, next_cursor) = parse_procedure_reference_until(
-        tokens,
-        1,
-        |kind| matches!(kind, TokenKind::LParen),
-        "procedure name",
-    )?;
-
-    // Procedure argument parsing is deferred; accept any trailing (...) payload.
-    if next_cursor < tokens.len() {
-        if !matches!(tokens[next_cursor].kind, TokenKind::LParen) {
-            return Err(unexpected_token_diag(tokens, next_cursor, "CALL"));
-        }
-        if !matches!(tokens.last().map(|t| &t.kind), Some(TokenKind::RParen)) {
-            return Err(expected_token_diag(
-                tokens,
-                tokens.len(),
-                ")",
-                "CALL argument list",
-            ));
-        }
+    };
+    if pos < tokens.len() {
+        return Err(unexpected_token_diag(tokens, pos, "CALL statement"));
     }
 
     Ok(CatalogStatementKind::CallCatalogModifyingProcedure(
         CallCatalogModifyingProcedureStatement {
-            procedure,
+            call,
             span: slice_span(tokens),
         },
     ))
@@ -1343,24 +1348,6 @@ where
         stop,
         context,
         reference_parser::parse_graph_type_reference,
-    )
-}
-
-fn parse_procedure_reference_until<F>(
-    tokens: &[Token],
-    start: usize,
-    stop: F,
-    context: &str,
-) -> ParseOutcome<(ProcedureReference, usize)>
-where
-    F: Fn(&TokenKind) -> bool,
-{
-    parse_reference_until(
-        tokens,
-        start,
-        stop,
-        context,
-        reference_parser::parse_procedure_reference,
     )
 }
 
@@ -1547,6 +1534,7 @@ fn compute_program_span(tokens: &[Token], source_len: usize) -> Span {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::ProcedureReference;
     use crate::ast::query::{
         LinearQuery, PrimitiveQueryStatement, PrimitiveResultStatement, Query,
     };
@@ -1830,7 +1818,10 @@ mod tests {
         let CatalogStatementKind::CallCatalogModifyingProcedure(call) = &stmt.kind else {
             panic!("expected CALL");
         };
-        let ProcedureReference::CatalogQualified { name, .. } = &call.procedure else {
+        let crate::ast::ProcedureCall::Named(named_call) = &call.call.call else {
+            panic!("expected named procedure call");
+        };
+        let ProcedureReference::CatalogQualified { name, .. } = &named_call.procedure else {
             panic!("expected parsed procedure reference");
         };
         assert_eq!(name.name, "doMaintenance");

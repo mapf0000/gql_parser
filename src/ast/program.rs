@@ -71,6 +71,7 @@ mod tests {
     use super::*;
     use crate::ast::catalog::{CallCatalogModifyingProcedureStatement, CatalogStatementKind};
     use crate::ast::mutation::{AmbientLinearDataModifyingStatement, LinearDataModifyingStatement};
+    use crate::ast::procedure::{CallProcedureStatement, NamedProcedureCall, ProcedureCall, ProcedureArgumentList};
     use crate::ast::query::{AmbientLinearQuery, LinearQuery, Query};
     use crate::ast::references::ProcedureReference;
     use crate::ast::session::{SessionCloseCommand, SessionCommand};
@@ -125,14 +126,26 @@ mod tests {
         let catalog = Statement::Catalog(Box::new(CatalogStatement {
             kind: CatalogStatementKind::CallCatalogModifyingProcedure(
                 CallCatalogModifyingProcedureStatement {
-                    procedure: ProcedureReference::ReferenceParameter {
-                        name: "test".into(),
-                        span: 0..5,
+                    call: CallProcedureStatement {
+                        optional: false,
+                        call: ProcedureCall::Named(NamedProcedureCall {
+                            procedure: ProcedureReference::ReferenceParameter {
+                                name: "test".into(),
+                                span: 0..5,
+                            },
+                            arguments: Some(ProcedureArgumentList {
+                                arguments: vec![],
+                                span: 5..7,
+                            }),
+                            yield_clause: None,
+                            span: 0..7,
+                        }),
+                        span: 0..7,
                     },
-                    span: 0..5,
+                    span: 0..7,
                 },
             ),
-            span: 0..5,
+            span: 0..7,
         }));
         assert!(matches!(catalog, Statement::Catalog(_)));
 

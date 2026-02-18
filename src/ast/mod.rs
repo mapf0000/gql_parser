@@ -3,6 +3,7 @@
 mod catalog;
 pub mod expression;
 pub mod mutation;
+pub mod procedure;
 pub mod program;
 pub mod query;
 pub mod references;
@@ -92,4 +93,16 @@ pub use mutation::{
     PrimitiveDataModifyingStatement, RemoveItem, RemoveItemList, RemoveLabelItem,
     RemovePropertyItem, RemoveStatement, SetAllPropertiesItem, SetItem, SetItemList, SetLabelItem,
     SetPropertyItem, SetStatement, SimpleDataAccessingStatement, SimpleDataModifyingStatement,
+};
+
+// Re-export procedure types
+pub use procedure::{
+    AtSchemaClause, BindingTableExpression, BindingTableInitializer,
+    BindingTableVariableDefinition, BindingVariableDefinition, BindingVariableDefinitionBlock,
+    CallProcedureStatement, GraphExpression, GraphInitializer, GraphVariableDefinition,
+    InlineProcedureCall, LinearCatalogModifyingStatement, NamedProcedureCall, NestedDataModifyingProcedureSpecification,
+    NestedProcedureSpecification, NestedQuerySpecification, NextStatement, ProcedureArgument,
+    ProcedureArgumentList, ProcedureBody, ProcedureCall, Statement as ProcedureStatement, StatementBlock,
+    ValueInitializer, ValueVariableDefinition, VariableScopeClause, YieldClause, YieldItem,
+    YieldItemAlias, YieldItemList,
 };

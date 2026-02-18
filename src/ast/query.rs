@@ -186,6 +186,8 @@ pub struct AmbientLinearQuery {
 pub enum PrimitiveQueryStatement {
     /// MATCH statement for graph pattern matching.
     Match(MatchStatement),
+    /// CALL procedure statement.
+    Call(crate::ast::procedure::CallProcedureStatement),
     /// FILTER statement for filtering results.
     Filter(FilterStatement),
     /// LET statement for variable bindings.
@@ -203,6 +205,7 @@ impl PrimitiveQueryStatement {
     pub fn span(&self) -> &Span {
         match self {
             PrimitiveQueryStatement::Match(s) => s.span(),
+            PrimitiveQueryStatement::Call(s) => &s.span,
             PrimitiveQueryStatement::Filter(s) => &s.span,
             PrimitiveQueryStatement::Let(s) => &s.span,
             PrimitiveQueryStatement::For(s) => &s.span,

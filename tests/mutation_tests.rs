@@ -147,7 +147,8 @@ fn inline_call_reports_unclosed_procedure_specification() {
 
     let diag_text = diagnostics_text(&result.diagnostics);
     assert!(
-        diag_text.contains("Unclosed inline CALL procedure specification"),
+        diag_text.contains("Expected closing brace in nested procedure specification")
+            || diag_text.contains("expected '}'"),
         "unexpected diagnostics: {diag_text}"
     );
 }

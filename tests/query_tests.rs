@@ -84,3 +84,13 @@ fn for_accepts_non_reserved_keyword_identifier() {
 fn for_ordinality_accepts_non_reserved_keyword_identifier() {
     parse_ok("FOR n IN items WITH ORDINALITY GRAPH RETURN GRAPH");
 }
+
+#[test]
+fn query_pipeline_accepts_call_statement() {
+    parse_ok("MATCH (n) CALL my_proc(n) RETURN n");
+}
+
+#[test]
+fn optional_call_is_not_treated_as_optional_match() {
+    parse_ok("OPTIONAL CALL my_proc()");
+}

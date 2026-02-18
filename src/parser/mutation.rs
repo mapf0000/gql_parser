@@ -1,7 +1,6 @@
 //! Mutation statement parsing for ISO GQL data modification.
 
 use crate::ast::Span;
-use crate::ast::expression::Expression;
 use crate::ast::mutation::*;
 use crate::ast::query::{
     ElementPropertySpecification, ElementVariableDeclaration, LabelSetSpecification,
@@ -13,7 +12,7 @@ use crate::parser::query::{
     parse_expression_with_diags, parse_primitive_query_statement, parse_return_statement,
     parse_use_graph_clause,
 };
-use crate::parser::references as reference_parser;
+use crate::parser::procedure::parse_call_procedure_statement;
 use smol_str::SmolStr;
 
 /// Parse result with optional value and diagnostics.
@@ -175,12 +174,13 @@ fn parse_simple_data_accessing_statement(
         return (None, vec![]);
     }
 
-    // OPTIONAL CALL is a data-modifying procedure call, not OPTIONAL MATCH.
-    if matches!(tokens[*pos].kind, TokenKind::Optional)
-        && matches!(
-            tokens.get(*pos + 1).map(|token| &token.kind),
-            Some(TokenKind::Call)
-        )
+    // In mutation pipelines, CALL/OPTIONAL CALL is parsed as data-modifying call syntax.
+    if matches!(tokens[*pos].kind, TokenKind::Call)
+        || (matches!(tokens[*pos].kind, TokenKind::Optional)
+            && matches!(
+                tokens.get(*pos + 1).map(|token| &token.kind),
+                Some(TokenKind::Call)
+            ))
     {
         let (modifying_opt, diags) = parse_simple_data_modifying_statement(tokens, pos);
         return (
@@ -193,7 +193,7 @@ fn parse_simple_data_accessing_statement(
     let (query_opt, mut query_diags) = parse_primitive_query_statement(tokens, pos);
     if let Some(query_stmt) = query_opt {
         return (
-            Some(SimpleDataAccessingStatement::Query(query_stmt)),
+            Some(SimpleDataAccessingStatement::Query(Box::new(query_stmt))),
             query_diags,
         );
     }
@@ -232,7 +232,10 @@ fn parse_simple_data_modifying_statement(
         }
         TokenKind::Call | TokenKind::Optional => {
             let (call_opt, diags) = parse_call_data_modifying_procedure_statement(tokens, pos);
-            (call_opt.map(SimpleDataModifyingStatement::Call), diags)
+            (
+                call_opt.map(|call| SimpleDataModifyingStatement::Call(Box::new(call))),
+                diags,
+            )
         }
         _ => (None, vec![]),
     }
@@ -1219,349 +1222,18 @@ fn parse_call_data_modifying_procedure_statement(
     tokens: &[Token],
     pos: &mut usize,
 ) -> ParseResult<CallDataModifyingProcedureStatement> {
-    let mut diags = Vec::new();
-
-    if *pos >= tokens.len() {
+    let (call_opt, diags) = parse_call_procedure_statement(tokens, pos);
+    let Some(call) = call_opt else {
         return (None, diags);
-    }
-
-    let start = tokens[*pos].span.start;
-    let optional = if matches!(tokens[*pos].kind, TokenKind::Optional) {
-        *pos += 1;
-        true
-    } else {
-        false
-    };
-
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Call) {
-        if optional {
-            diags.push(
-                Diag::error("Expected CALL after OPTIONAL")
-                    .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map_or(start..start, |token| token.span.clone()),
-                        "expected CALL here",
-                    )
-                    .with_code("P_MUT"),
-            );
-        }
-        return (None, diags);
-    }
-    *pos += 1;
-
-    // Inline call: variableScopeClause? nestedProcedureSpecification
-    if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::LParen | TokenKind::LBrace) {
-        let (inline_variable_scope, mut scope_diags) =
-            parse_inline_variable_scope_clause(tokens, pos);
-        diags.append(&mut scope_diags);
-
-        let (inline_procedure_span_opt, mut inline_diags) =
-            parse_nested_procedure_specification_span(tokens, pos);
-        diags.append(&mut inline_diags);
-
-        let Some(inline_procedure_span) = inline_procedure_span_opt else {
-            return (None, diags);
-        };
-
-        let end = inline_procedure_span.end;
-        return (
-            Some(CallDataModifyingProcedureStatement {
-                optional,
-                procedure: None,
-                arguments: Vec::new(),
-                yield_items: None,
-                inline_variable_scope,
-                inline_procedure_span: Some(inline_procedure_span),
-                span: start..end,
-            }),
-            diags,
-        );
-    }
-
-    // Named call: procedureReference '(' args? ')' yieldClause?
-    let Some(lparen_idx) = find_next_token(tokens, *pos, TokenKind::LParen) else {
-        diags.push(
-            Diag::error("Expected '(' after procedure name in CALL statement")
-                .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map_or(start..start, |token| token.span.clone()),
-                    "expected '(' here",
-                )
-                .with_code("P_MUT"),
-        );
-        return (None, diags);
-    };
-
-    if lparen_idx == *pos {
-        diags.push(
-            Diag::error("Inline CALL procedure syntax is not supported yet")
-                .with_primary_label(tokens[*pos].span.clone(), "unsupported CALL form")
-                .with_code("P_MUT"),
-        );
-        return (None, diags);
-    }
-
-    let procedure_tokens = &tokens[*pos..lparen_idx];
-    let procedure = match reference_parser::parse_procedure_reference(procedure_tokens) {
-        Ok(reference) => reference,
-        Err(diag) => {
-            diags.push(*diag);
-            return (None, diags);
-        }
-    };
-
-    *pos = lparen_idx + 1;
-
-    let (arguments, mut arg_diags) = parse_procedure_argument_list(tokens, pos);
-    diags.append(&mut arg_diags);
-
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::RParen) {
-        diags.push(
-            Diag::error("Expected ')' to close CALL arguments")
-                .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map_or(start..start, |token| token.span.clone()),
-                    "expected ')' here",
-                )
-                .with_code("P_MUT"),
-        );
-        return (None, diags);
-    }
-    let mut end = tokens[*pos].span.end;
-    *pos += 1;
-
-    let yield_items = if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Yield) {
-        let (items, mut yield_diags, yield_end) = parse_optional_yield_clause(tokens, pos);
-        diags.append(&mut yield_diags);
-        end = yield_end;
-        Some(items)
-    } else {
-        None
     };
 
     (
         Some(CallDataModifyingProcedureStatement {
-            optional,
-            procedure: Some(procedure),
-            arguments,
-            yield_items,
-            inline_variable_scope: None,
-            inline_procedure_span: None,
-            span: start..end,
+            span: call.span.clone(),
+            call,
         }),
         diags,
     )
-}
-
-fn parse_inline_variable_scope_clause(
-    tokens: &[Token],
-    pos: &mut usize,
-) -> (Option<Vec<SmolStr>>, Vec<Diag>) {
-    let mut diags = Vec::new();
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::LParen) {
-        return (None, diags);
-    }
-
-    let start = tokens[*pos].span.start;
-    *pos += 1;
-
-    let mut variables = Vec::new();
-    if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::RParen) {
-        *pos += 1;
-        return (Some(variables), diags);
-    }
-
-    loop {
-        let Some((name, _)) = parse_regular_identifier(tokens, pos) else {
-            diags.push(
-                Diag::error("Expected binding variable in inline CALL variable scope")
-                    .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map_or(start..start, |token| token.span.clone()),
-                        "expected binding variable here",
-                    )
-                    .with_code("P_MUT"),
-            );
-            break;
-        };
-        variables.push(name);
-
-        if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Comma) {
-            *pos += 1;
-            continue;
-        }
-        break;
-    }
-
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::RParen) {
-        diags.push(
-            Diag::error("Expected ')' to close inline CALL variable scope")
-                .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map_or(start..start, |token| token.span.clone()),
-                    "expected ')' here",
-                )
-                .with_code("P_MUT"),
-        );
-        return (Some(variables), diags);
-    }
-
-    *pos += 1;
-    (Some(variables), diags)
-}
-
-fn parse_nested_procedure_specification_span(
-    tokens: &[Token],
-    pos: &mut usize,
-) -> ParseResult<Span> {
-    let mut diags = Vec::new();
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::LBrace) {
-        let start = tokens.get(*pos).map_or(0, |token| token.span.start);
-        diags.push(
-            Diag::error("Expected '{' to start inline CALL procedure specification")
-                .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map_or(start..start, |token| token.span.clone()),
-                    "expected '{' here",
-                )
-                .with_code("P_MUT"),
-        );
-        return (None, diags);
-    }
-
-    let start = tokens[*pos].span.start;
-    let mut depth = 0usize;
-    while *pos < tokens.len() {
-        match tokens[*pos].kind {
-            TokenKind::LBrace => {
-                depth += 1;
-                *pos += 1;
-            }
-            TokenKind::RBrace => {
-                depth = depth.saturating_sub(1);
-                let end = tokens[*pos].span.end;
-                *pos += 1;
-                if depth == 0 {
-                    return (Some(start..end), diags);
-                }
-            }
-            _ => {
-                *pos += 1;
-            }
-        }
-    }
-
-    diags.push(
-        Diag::error("Unclosed inline CALL procedure specification")
-            .with_primary_label(start..start, "missing closing '}'")
-            .with_code("P_MUT"),
-    );
-    (None, diags)
-}
-
-fn parse_procedure_argument_list(
-    tokens: &[Token],
-    pos: &mut usize,
-) -> (Vec<Expression>, Vec<Diag>) {
-    let mut arguments = Vec::new();
-    let mut diags = Vec::new();
-
-    if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::RParen) {
-        return (arguments, diags);
-    }
-
-    loop {
-        let before = *pos;
-        let (arg_opt, mut arg_diags) = parse_expression_with_diags(tokens, pos);
-        diags.append(&mut arg_diags);
-
-        let Some(arg) = arg_opt else {
-            if *pos == before {
-                break;
-            }
-            continue;
-        };
-        arguments.push(arg);
-
-        if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Comma) {
-            *pos += 1;
-            continue;
-        }
-
-        break;
-    }
-
-    (arguments, diags)
-}
-
-fn parse_optional_yield_clause(
-    tokens: &[Token],
-    pos: &mut usize,
-) -> (Vec<SmolStr>, Vec<Diag>, usize) {
-    let mut items = Vec::new();
-    let mut diags = Vec::new();
-    let start = tokens.get(*pos).map_or(0, |token| token.span.start);
-
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Yield) {
-        return (items, diags, start);
-    }
-    *pos += 1;
-
-    loop {
-        let Some((field_name, field_span)) = parse_identifier(tokens, pos) else {
-            diags.push(
-                Diag::error("Expected yield item after YIELD")
-                    .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map_or(start..start, |token| token.span.clone()),
-                        "expected yield item",
-                    )
-                    .with_code("P_MUT"),
-            );
-            break;
-        };
-
-        let mut output_name = field_name;
-        let mut last_span = field_span;
-
-        if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::As) {
-            *pos += 1;
-            if let Some((alias, alias_span)) = parse_regular_identifier(tokens, pos) {
-                output_name = alias;
-                last_span = alias_span;
-            } else {
-                diags.push(
-                    Diag::error("Expected alias after AS in YIELD item")
-                        .with_primary_label(
-                            tokens
-                                .get(*pos)
-                                .map_or(start..start, |token| token.span.clone()),
-                            "expected alias",
-                        )
-                        .with_code("P_MUT"),
-                );
-            }
-        }
-
-        items.push(output_name);
-
-        if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Comma) {
-            *pos += 1;
-            continue;
-        }
-
-        return (items, diags, last_span.end);
-    }
-
-    let end = end_after_last_consumed(tokens, *pos, start);
-    (items, diags, end)
 }
 
 fn parse_primitive_result_statement(
@@ -1798,17 +1470,6 @@ fn parse_identifier(tokens: &[Token], pos: &mut usize) -> Option<(SmolStr, Span)
     Some((name, span))
 }
 
-fn find_next_token(tokens: &[Token], start: usize, kind: TokenKind) -> Option<usize> {
-    let mut idx = start;
-    while idx < tokens.len() {
-        if tokens[idx].kind == kind {
-            return Some(idx);
-        }
-        idx += 1;
-    }
-    None
-}
-
 fn end_after_last_consumed(tokens: &[Token], pos: usize, fallback: usize) -> usize {
     if pos > 0 {
         tokens.get(pos - 1).map_or(fallback, |token| token.span.end)
@@ -1931,11 +1592,18 @@ mod tests {
             panic!("expected CALL statement");
         };
 
-        assert!(call.optional);
-        assert!(call.procedure.is_some());
-        assert_eq!(call.arguments.len(), 2);
-        assert_eq!(call.yield_items.as_ref().map_or(0, Vec::len), 1);
-        assert!(call.inline_procedure_span.is_none());
+        assert!(call.call.optional);
+        let crate::ast::ProcedureCall::Named(named) = &call.call.call else {
+            panic!("expected named call");
+        };
+        assert_eq!(
+            named.arguments.as_ref().map_or(0, |args| args.arguments.len()),
+            2
+        );
+        assert_eq!(
+            named.yield_clause.as_ref().map_or(0, |yield_clause| yield_clause.items.items.len()),
+            1
+        );
     }
 
     #[test]
@@ -1953,11 +1621,11 @@ mod tests {
             panic!("expected inline CALL statement");
         };
 
-        assert!(!call.optional);
-        assert!(call.procedure.is_none());
-        assert!(call.arguments.is_empty());
-        assert!(call.yield_items.is_none());
-        assert!(call.inline_procedure_span.is_some());
+        assert!(!call.call.optional);
+        assert!(matches!(
+            call.call.call,
+            crate::ast::ProcedureCall::Inline(_)
+        ));
     }
 
     #[test]
@@ -1975,12 +1643,15 @@ mod tests {
             panic!("expected inline CALL statement");
         };
 
-        let scope = call
-            .inline_variable_scope
+        let crate::ast::ProcedureCall::Inline(inline) = &call.call.call else {
+            panic!("expected inline call");
+        };
+        let scope = inline
+            .variable_scope
             .as_ref()
             .expect("expected inline variable scope");
-        assert_eq!(scope.len(), 2);
-        assert_eq!(scope[0].as_str(), "n");
-        assert_eq!(scope[1].as_str(), "m");
+        assert_eq!(scope.variables.len(), 2);
+        assert_eq!(scope.variables[0].name.as_str(), "n");
+        assert_eq!(scope.variables[1].name.as_str(), "m");
     }
 }

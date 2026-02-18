@@ -6,6 +6,7 @@
 pub mod expression;
 pub mod mutation;
 pub mod patterns;
+pub mod procedure;
 mod program;
 pub mod query;
 pub mod references;

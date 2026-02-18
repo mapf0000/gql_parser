@@ -7,8 +7,9 @@
 //! - CALL catalog-modifying procedure statements
 
 use crate::ast::Span;
+use crate::ast::procedure::CallProcedureStatement;
 use crate::ast::references::{
-    GraphReference, GraphTypeReference, ProcedureReference, SchemaReference,
+    GraphReference, GraphTypeReference, SchemaReference,
 };
 
 // ============================================================================
@@ -138,9 +139,8 @@ pub struct DropGraphTypeStatement {
 /// CALL catalog-modifying procedure statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CallCatalogModifyingProcedureStatement {
-    /// Procedure reference
-    pub procedure: ProcedureReference,
-    /// Procedure arguments placeholder (deferred to Sprint 11)
+    /// Full CALL statement payload.
+    pub call: CallProcedureStatement,
     pub span: Span,
 }
 
@@ -158,6 +158,21 @@ pub enum CatalogStatementKind {
     CreateGraphType(CreateGraphTypeStatement),
     DropGraphType(DropGraphTypeStatement),
     CallCatalogModifyingProcedure(CallCatalogModifyingProcedureStatement),
+}
+
+impl CatalogStatementKind {
+    /// Returns the source span of this catalog statement.
+    pub fn span(&self) -> &Span {
+        match self {
+            CatalogStatementKind::CreateSchema(stmt) => &stmt.span,
+            CatalogStatementKind::DropSchema(stmt) => &stmt.span,
+            CatalogStatementKind::CreateGraph(stmt) => &stmt.span,
+            CatalogStatementKind::DropGraph(stmt) => &stmt.span,
+            CatalogStatementKind::CreateGraphType(stmt) => &stmt.span,
+            CatalogStatementKind::DropGraphType(stmt) => &stmt.span,
+            CatalogStatementKind::CallCatalogModifyingProcedure(stmt) => &stmt.span,
+        }
+    }
 }
 
 #[cfg(test)]
