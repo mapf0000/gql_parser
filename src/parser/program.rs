@@ -278,7 +278,10 @@ fn parse_mutation_statement(tokens: &[Token]) -> StatementParseOutcome {
 
             let span = statement.span().clone();
             (
-                Some(Statement::Mutation(Box::new(MutationStatement { statement, span }))),
+                Some(Statement::Mutation(Box::new(MutationStatement {
+                    statement,
+                    span,
+                }))),
                 diags,
             )
         }
@@ -1626,7 +1629,7 @@ mod tests {
 
     #[test]
     fn parse_use_graph_query_start_is_accepted() {
-        let source = "USE GRAPH g MATCH (n) RETURN n";
+        let source = "USE g MATCH (n) RETURN n";
         let (program, diagnostics) = parse_source(source);
 
         assert!(diagnostics.is_empty());

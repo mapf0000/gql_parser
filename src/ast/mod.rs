@@ -88,8 +88,8 @@ pub use mutation::{
     DeleteItemList, DeleteStatement, DetachOption, FocusedLinearDataModifyingStatement,
     InsertEdgePattern, InsertEdgePointingLeft, InsertEdgePointingRight, InsertEdgeUndirected,
     InsertElementPattern, InsertElementPatternFiller, InsertGraphPattern, InsertNodePattern,
-    InsertPathPattern, InsertStatement, LinearDataModifyingStatement, PrimitiveDataModifyingStatement,
-    RemoveItem, RemoveItemList, RemoveLabelItem, RemovePropertyItem, RemoveStatement,
-    SetAllPropertiesItem, SetItem, SetItemList, SetLabelItem, SetPropertyItem, SetStatement,
-    SimpleDataAccessingStatement, SimpleDataModifyingStatement,
+    InsertPathPattern, InsertStatement, LinearDataModifyingStatement,
+    PrimitiveDataModifyingStatement, RemoveItem, RemoveItemList, RemoveLabelItem,
+    RemovePropertyItem, RemoveStatement, SetAllPropertiesItem, SetItem, SetItemList, SetLabelItem,
+    SetPropertyItem, SetStatement, SimpleDataAccessingStatement, SimpleDataModifyingStatement,
 };

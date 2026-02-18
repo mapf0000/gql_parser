@@ -286,7 +286,17 @@ impl<'a> PatternParser<'a> {
             return None;
         };
 
-        let name = identifier_from_kind(&name_token.kind)?;
+        let Some(name) = regular_identifier_from_kind(&name_token.kind) else {
+            self.diags.push(
+                Diag::error("Path variable declaration requires a regular identifier")
+                    .with_primary_label(
+                        name_token.span.clone(),
+                        "expected regular identifier here",
+                    ),
+            );
+            self.pos += 2;
+            return None;
+        };
 
         let start = name_token.span.start;
         self.pos += 2;
@@ -630,14 +640,18 @@ impl<'a> PatternParser<'a> {
         let Some(token) = self.tokens.get(self.pos) else {
             return;
         };
-        if identifier_from_kind(&token.kind).is_none() {
-            return;
-        }
         if !matches!(
             self.tokens.get(self.pos + 1).map(|t| &t.kind),
             Some(TokenKind::Eq)
         ) {
             return;
+        }
+
+        if regular_identifier_from_kind(&token.kind).is_none() {
+            self.diags.push(
+                Diag::error("Subpath variable declaration requires a regular identifier")
+                    .with_primary_label(token.span.clone(), "expected regular identifier here"),
+            );
         }
         self.pos += 2;
     }
@@ -923,18 +937,28 @@ impl<'a> PatternParser<'a> {
     ) -> ParsedElementFiller {
         let start = self.current_start().unwrap_or(fallback_start);
 
-        let variable = if matches!(
-            self.current_kind(),
-            Some(TokenKind::Identifier(_) | TokenKind::DelimitedIdentifier(_))
-        ) {
-            let token = self.tokens[self.pos].clone();
-            self.pos += 1;
-            identifier_from_kind(&token.kind).map(|name| ElementVariableDeclaration {
-                variable: name,
-                span: token.span,
-            })
-        } else {
-            None
+        let variable = match self.current_kind() {
+            Some(kind) if regular_identifier_from_kind(kind).is_some() => {
+                let token = self.tokens[self.pos].clone();
+                self.pos += 1;
+                regular_identifier_from_kind(&token.kind).map(|name| ElementVariableDeclaration {
+                    variable: name,
+                    span: token.span,
+                })
+            }
+            Some(TokenKind::DelimitedIdentifier(_)) => {
+                let token = self.tokens[self.pos].clone();
+                self.diags.push(
+                    Diag::error("Element variable declaration requires a regular identifier")
+                        .with_primary_label(
+                            token.span.clone(),
+                            "delimited identifiers are not allowed here",
+                        ),
+                );
+                self.pos += 1;
+                None
+            }
+            _ => None,
         };
 
         let label_expression =
@@ -946,22 +970,39 @@ impl<'a> PatternParser<'a> {
 
         let mut properties = None;
         let mut where_clause = None;
+        let mut parsed_predicate_kind: Option<TokenKind> = None;
 
-        loop {
-            let mut progressed = false;
+        if matches!(self.current_kind(), Some(TokenKind::LBrace)) {
+            properties = self.parse_element_property_specification();
+            parsed_predicate_kind = Some(TokenKind::LBrace);
+        } else if matches!(self.current_kind(), Some(TokenKind::Where)) {
+            where_clause = self.parse_element_pattern_where_clause(terminator);
+            parsed_predicate_kind = Some(TokenKind::Where);
+        }
 
-            if properties.is_none() && matches!(self.current_kind(), Some(TokenKind::LBrace)) {
-                properties = self.parse_element_property_specification();
-                progressed = true;
-            }
-
-            if where_clause.is_none() && matches!(self.current_kind(), Some(TokenKind::Where)) {
-                where_clause = self.parse_element_pattern_where_clause(terminator);
-                progressed = true;
-            }
-
-            if !progressed {
-                break;
+        // ISO grammar permits at most one elementPatternPredicate.
+        if matches!(
+            self.current_kind(),
+            Some(TokenKind::LBrace | TokenKind::Where)
+        ) {
+            let next_is_property = matches!(self.current_kind(), Some(TokenKind::LBrace));
+            let already_parsed_property = matches!(parsed_predicate_kind, Some(TokenKind::LBrace));
+            let already_parsed_where = matches!(parsed_predicate_kind, Some(TokenKind::Where));
+            if (next_is_property && already_parsed_where)
+                || (!next_is_property && already_parsed_property)
+            {
+                self.diags.push(
+                    Diag::error("Element pattern can have either property specification or WHERE predicate, not both")
+                        .with_primary_label(
+                            self.current_span_or(start),
+                            "remove this second element predicate",
+                        ),
+                );
+                if next_is_property {
+                    let _ = self.parse_element_property_specification();
+                } else {
+                    let _ = self.parse_element_pattern_where_clause(terminator);
+                }
             }
         }
 
@@ -1139,10 +1180,7 @@ impl<'a> PatternParser<'a> {
 
     fn parse_label_name(&mut self) -> Option<(SmolStr, std::ops::Range<usize>)> {
         let token = self.tokens.get(self.pos)?;
-        let name = match &token.kind {
-            TokenKind::Identifier(name) | TokenKind::DelimitedIdentifier(name) => name.clone(),
-            _ => return None,
-        };
+        let name = identifier_from_kind(&token.kind)?;
         self.pos += 1;
         Some((name, token.span.clone()))
     }
@@ -1196,7 +1234,19 @@ impl<'a> PatternParser<'a> {
 
     fn parse_property_key_value_pair(&mut self) -> Option<PropertyKeyValuePair> {
         let key_start = self.current_start().unwrap_or(self.pos);
-        let key = self.parse_property_name()?;
+        let key = match self.parse_property_name() {
+            Some(key) => key,
+            None => {
+                self.diags.push(
+                    Diag::error("Expected property name in property specification")
+                        .with_primary_label(
+                            self.current_span_or(key_start),
+                            "expected property name here",
+                        ),
+                );
+                return None;
+            }
+        };
 
         if !matches!(self.current_kind(), Some(TokenKind::Colon)) {
             self.diags.push(
@@ -1224,7 +1274,7 @@ impl<'a> PatternParser<'a> {
             TokenKind::Identifier(name)
             | TokenKind::DelimitedIdentifier(name)
             | TokenKind::StringLiteral(name) => name.clone(),
-            kind if kind.is_keyword() => SmolStr::new(kind.to_string()),
+            kind if kind.is_non_reserved_identifier_keyword() => SmolStr::new(kind.to_string()),
             _ => return None,
         };
 
@@ -2089,9 +2139,18 @@ impl<'a> PatternParser<'a> {
     }
 }
 
+fn regular_identifier_from_kind(kind: &TokenKind) -> Option<SmolStr> {
+    match kind {
+        TokenKind::Identifier(name) => Some(name.clone()),
+        kind if kind.is_non_reserved_identifier_keyword() => Some(SmolStr::new(kind.to_string())),
+        _ => None,
+    }
+}
+
 fn identifier_from_kind(kind: &TokenKind) -> Option<SmolStr> {
     match kind {
         TokenKind::Identifier(name) | TokenKind::DelimitedIdentifier(name) => Some(name.clone()),
+        kind if kind.is_non_reserved_identifier_keyword() => Some(SmolStr::new(kind.to_string())),
         _ => None,
     }
 }

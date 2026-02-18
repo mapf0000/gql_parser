@@ -408,20 +408,19 @@
   - Node or edge pattern
 
 - **Node Pattern** (`nodePattern`, Line 993):
-  - `(<variable> [:label_expression] [{property_specification}] [WHERE predicate])`
+  - `([<variable>] [IS|: <label_expression>] [WHERE <predicate> | {property_specification}])`
   - Match nodes with labels and properties
 
 - **Element Pattern Filler** (`elementPatternFiller`, Line 997):
   - Variable declaration
   - Label expression
-  - Property specification
-  - WHERE clause
+  - Optional predicate: **either** property specification **or** `WHERE` clause
 
 - **Element Variable Declaration** (`elementVariableDeclaration`, Line 1001):
   - Declare element variables in patterns
 
 - **Is Label Expression** (`isLabelExpression`, Line 1005):
-  - `:label_name` or `:label_expression`
+  - `IS label_expression` or `:label_expression`
   - Match elements by label
 
 - **Element Pattern Predicate** (`elementPatternPredicate`, Line 1014):
@@ -433,7 +432,7 @@
 
 ### Edge Patterns
 
-**Grammar Reference**: Lines 1035-1082
+**Grammar Reference**: Lines 1035-1086
 
 - **Edge Pattern** (`edgePattern`, Line 1035):
   - Full or abbreviated edge syntax
@@ -441,17 +440,20 @@
 - **Full Edge Pattern** (`fullEdgePattern`, Line 1040):
   - **7 Direction Types** (Lines 1050-1076):
     1. `<-[edge]-`: Left pointing
-    2. `-[edge]->`: Right pointing
-    3. `~[edge]~`: Undirected
-    4. `<-[edge]->`: Any direction (bidirectional)
-    5. `<~[edge]~>`: Any undirected
-    6. `-[edge]-`: Any direction
-    7. `~[edge]-`: Mixed directed/undirected
+    2. `~[edge]~`: Undirected
+    3. `-[edge]->`: Right pointing
+    4. `<~[edge]~`: Left or undirected
+    5. `~[edge]~>`: Undirected or right
+    6. `<-[edge]->`: Left or right
+    7. `-[edge]-`: Any direction
 
 - **Abbreviated Edge Pattern** (`abbreviatedEdgePattern`, Line 1078):
   - `<-`: Left arrow
-  - `->`: Right arrow
   - `~`: Undirected
+  - `->`: Right arrow
+  - `<~`: Left or undirected
+  - `~>`: Undirected or right
+  - `<->`: Left or right
   - `-`: Any direction
 
 - **Parenthesized Path Pattern** (`parenthesizedPathPatternExpression`, Line 1088):
@@ -465,11 +467,11 @@
 - **Graph Pattern Quantifier** (`graphPatternQuantifier`, Line 1125):
   - **`*`**: Zero or more (Kleene star)
   - **`+`**: One or more (Kleene plus)
-  - **`?`**: Zero or one (optional)
   - **`{n}`**: Exactly n occurrences (`fixedQuantifier`, Line 1132)
   - **`{n,m}`**: Between n and m occurrences (`generalQuantifier`, Line 1136)
   - **`{n,}`**: At least n occurrences
   - **`{,m}`**: At most m occurrences
+  - `?` optionality is handled separately in `pathFactor` (Line 976) via the `pathPrimary QUESTION_MARK` alternative
 
 ### Simplified Path Patterns
 
@@ -539,8 +541,9 @@ Alternative, simplified syntax for path patterns:
   - Path-based insertion
 
 - **Insert Node Pattern** (`insertNodePattern`, Line 864):
-  - `(<variable> [:label_expression] {properties})`
-  - Create nodes with labels and properties
+  - `(<insert_element_pattern_filler>?)`
+  - `insertElementPatternFiller` can provide variable declaration and/or label/property set specification
+  - Create nodes with variable, labels, and properties
 
 - **Insert Edge Pattern** (`insertEdgePattern`, Line 868):
   - **Pointing Left** (Line 872): `<-[edge]-`
@@ -548,9 +551,9 @@ Alternative, simplified syntax for path patterns:
   - **Undirected** (Line 876): `~[edge]~`
 
 - **Insert Element Pattern Filler** (`insertElementPatternFiller`, Line 886):
-  - Variable declaration
-  - Label expression
-  - Property specification
+  - `elementVariableDeclaration labelAndPropertySetSpecification?`
+  - `elementVariableDeclaration? labelAndPropertySetSpecification`
+  - Uses label **set specification** (`label1 & label2 & ...`) and optional property specification
 
 ### Set Operations
 
@@ -608,7 +611,7 @@ Alternative, simplified syntax for path patterns:
   - **NODETACH** (default): Only delete if no edges remain
 
 - **Delete Item** (`deleteItem`, Line 486):
-  - Element variables to delete
+  - Any `valueExpression` (commonly an element variable reference)
 
 ### Data Modifying Procedure Calls
 
@@ -842,7 +845,9 @@ Boolean algebra over labels:
 **Grammar Reference**: Lines 1679-1687
 
 - **Label Set Phrase** (`labelSetPhrase`, Line 1679):
-  - `LABEL` or `LABELS` keyword
+  - `LABEL <label_name>`
+  - `LABELS <label_set_specification>`
+  - `IS|: <label_set_specification>`
 
 - **Label Set Specification** (`labelSetSpecification`, Line 1685):
   - Ampersand-separated labels: `label1 & label2 & label3`
@@ -967,10 +972,9 @@ Core type categories:
 
 **Grammar Rule**: `temporalDurationType` (Line 1891)
 
-- **Duration Type** (`durationType`, Line 1891):
-  - `DURATION`: General duration
-  - `DURATION YEAR TO MONTH` (Line 1896): Year-month interval
-  - `DURATION DAY TO SECOND` (Line 1897): Day-time interval
+- **Temporal Duration Type** (`temporalDurationType`, Line 1891):
+  - `DURATION(YEAR TO MONTH)` (Line 1896): Year-month interval
+  - `DURATION(DAY TO SECOND)` (Line 1897): Day-time interval
 
 ### Reference Value Types
 
@@ -1265,25 +1269,25 @@ Categories:
 
 #### Length and Cardinality
 
-- **Length Expression** (`lengthExpression`, Line 2553):
+- **Length Expression** (`lengthExpression`, Line 2568):
   - `CHAR_LENGTH(string)` / `CHARACTER_LENGTH(string)` (Line 2583)
   - `BYTE_LENGTH(string)` / `OCTET_LENGTH(string)` (Line 2587)
   - `PATH_LENGTH(path)` (Line 2591)
 
-- **Cardinality Expression** (`cardinalityExpression`, Line 2554):
+- **Cardinality Expression** (`cardinalityExpression`, Line 2574):
   - `CARDINALITY(collection)` / `SIZE(collection)`
 
 #### Arithmetic Functions
 
-- **Absolute Value** (`absoluteValueExpression`, Line 2555):
+- **Absolute Value** (`absoluteValueExpression`, Line 2596):
   - `ABS(value)`
 
-- **Modulus** (`modulusExpression`, Line 2556):
+- **Modulus** (`modulusExpression`, Line 2600):
   - `MOD(dividend, divisor)`
 
 #### Trigonometric Functions
 
-**Grammar Rule**: `trigonometricFunction` (Line 2557)
+**Grammar Rule**: `trigonometricFunction` (Line 2612)
 
 - `SIN(x)`: Sine
 - `COS(x)`: Cosine
@@ -1300,30 +1304,30 @@ Categories:
 
 #### Logarithmic and Exponential Functions
 
-- **General Logarithm** (`generalLogarithmFunction`, Line 2558):
+- **General Logarithm** (`generalLogarithmFunction`, Line 2631):
   - `LOG(base, value)`
 
-- **Common Logarithm** (`commonLogarithm`, Line 2559):
+- **Common Logarithm** (`commonLogarithm`, Line 2643):
   - `LOG10(value)`
 
-- **Natural Logarithm** (`naturalLogarithm`, Line 2560):
+- **Natural Logarithm** (`naturalLogarithm`, Line 2647):
   - `LN(value)`
 
-- **Exponential Function** (`exponentialFunction`, Line 2561):
+- **Exponential Function** (`exponentialFunction`, Line 2651):
   - `EXP(value)`
 
-- **Power Function** (`powerFunction`, Line 2562):
+- **Power Function** (`powerFunction`, Line 2655):
   - `POWER(base, exponent)`
 
-- **Square Root** (`squareRoot`, Line 2563):
+- **Square Root** (`squareRoot`, Line 2667):
   - `SQRT(value)`
 
 #### Rounding Functions
 
-- **Floor Function** (`floorFunction`, Line 2564):
+- **Floor Function** (`floorFunction`, Line 2671):
   - `FLOOR(value)`
 
-- **Ceiling Function** (`ceilingFunction`, Line 2565):
+- **Ceiling Function** (`ceilingFunction`, Line 2675):
   - `CEIL(value)` / `CEILING(value)`
 
 ### String Functions
@@ -1470,7 +1474,7 @@ Categories:
 
 #### Boolean Literals
 
-**Grammar Rule**: `BOOLEAN_LITERAL` (Line 2919)
+**Lexer Token**: `BOOLEAN_LITERAL` (Line 3111)
 
 - `TRUE`
 - `FALSE`
@@ -1478,13 +1482,13 @@ Categories:
 
 #### String Literals
 
-- **Character String Literal** (`characterStringLiteral`, Line 2920):
+- **Character String Literal** (`characterStringLiteral`, Line 2972):
   - Single-quoted strings: `'text'`
   - Double-quoted strings: `"text"`
   - Unicode escape sequences
   - Escaped quoting and Unicode escape support
 
-- **Byte String Literal** (`BYTE_STRING_LITERAL`, Line 2921):
+- **Byte String Literal** (`BYTE_STRING_LITERAL`, Line 3188):
   - Hexadecimal byte strings: `X'4A7E'`
 
 #### Numeric Literals
@@ -1519,7 +1523,7 @@ Categories:
 
 #### Duration Literals
 
-**Grammar Rule**: `durationLiteral` (Line 2924)
+**Grammar Rule**: `durationLiteral` (Line 3024)
 
 - `DURATION 'P1Y2M'`: 1 year, 2 months
 - `DURATION 'P3DT4H'`: 3 days, 4 hours
@@ -1527,16 +1531,16 @@ Categories:
 
 #### Null Literal
 
-**Grammar Rule**: `nullLiteral` (Line 2924)
+**Grammar Rule**: `nullLiteral` (Line 3008)
 
 - `NULL`: Null value
 
 #### Collection Literals
 
-- **List Literal** (`listLiteral`, Line 2925):
+- **List Literal** (`listLiteral`, Line 2948):
   - `[element1, element2, element3, ...]`
 
-- **Record Literal** (`recordLiteral`, Line 2926):
+- **Record Literal** (`recordLiteral`, Line 2952):
   - `{field1: value1, field2: value2, ...}`
 
 ### Constructors

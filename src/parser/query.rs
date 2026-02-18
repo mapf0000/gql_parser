@@ -15,6 +15,7 @@ use crate::lexer::token::{Token, TokenKind};
 use crate::parser::expression::parse_expression;
 use crate::parser::patterns::parse_graph_pattern;
 use crate::parser::types::parse_value_type_prefix;
+use smol_str::SmolStr;
 
 /// Parse result with optional value and diagnostics.
 pub(crate) type ParseResult<T> = (Option<T>, Vec<Diag>);
@@ -54,7 +55,7 @@ fn find_expression_boundary(tokens: &[Token], start_pos: usize) -> usize {
 
         // At depth 0, check for statement keywords that terminate expressions
         if depth == 0 {
-                match &token.kind {
+            match &token.kind {
                     // Statement keywords
                     TokenKind::Match | TokenKind::Filter | TokenKind::Let | TokenKind::For |
                     TokenKind::Order | TokenKind::Limit | TokenKind::Offset | TokenKind::Skip |
@@ -317,7 +318,7 @@ fn parse_linear_query_as_query(tokens: &[Token], pos: &mut usize) -> ParseResult
 fn parse_linear_query(tokens: &[Token], pos: &mut usize) -> ParseResult<LinearQuery> {
     let mut diags = Vec::new();
 
-    // Check for USE GRAPH clause (focused query)
+    // Check for USE clause (focused query)
     if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Use) {
         let (focused_opt, mut focused_diags) = parse_focused_linear_query(tokens, pos);
         diags.append(&mut focused_diags);
@@ -330,7 +331,7 @@ fn parse_linear_query(tokens: &[Token], pos: &mut usize) -> ParseResult<LinearQu
     (ambient_opt.map(LinearQuery::Ambient), diags)
 }
 
-/// Parses a focused linear query (with USE GRAPH clause).
+/// Parses a focused linear query (with USE clause).
 fn parse_focused_linear_query(
     tokens: &[Token],
     pos: &mut usize,
@@ -338,7 +339,7 @@ fn parse_focused_linear_query(
     let mut diags = Vec::new();
     let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
 
-    // Parse USE GRAPH clause
+    // Parse USE clause
     let (use_graph_opt, mut use_diags) = parse_use_graph_clause(tokens, pos);
     diags.append(&mut use_diags);
 
@@ -354,7 +355,7 @@ fn parse_focused_linear_query(
 
     if !has_query_body {
         diags.push(
-            Diag::error("Expected query statement after USE GRAPH clause").with_primary_label(
+            Diag::error("Expected query statement after USE clause").with_primary_label(
                 tokens
                     .get(*pos)
                     .map(|t| t.span.clone())
@@ -376,7 +377,7 @@ fn parse_focused_linear_query(
     )
 }
 
-/// Parses an ambient linear query (without USE GRAPH clause).
+/// Parses an ambient linear query (without USE clause).
 fn parse_ambient_linear_query(
     tokens: &[Token],
     pos: &mut usize,
@@ -528,11 +529,14 @@ pub(crate) fn parse_primitive_query_statement(
 }
 
 // ============================================================================
-// USE GRAPH Clause (Task 23)
+// USE Clause (Task 23)
 // ============================================================================
 
-/// Parses a USE GRAPH clause.
-pub(crate) fn parse_use_graph_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<UseGraphClause> {
+/// Parses a USE clause.
+pub(crate) fn parse_use_graph_clause(
+    tokens: &[Token],
+    pos: &mut usize,
+) -> ParseResult<UseGraphClause> {
     let mut diags = Vec::new();
 
     if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Use) {
@@ -541,11 +545,6 @@ pub(crate) fn parse_use_graph_clause(tokens: &[Token], pos: &mut usize) -> Parse
 
     let start = tokens[*pos].span.start;
     *pos += 1;
-
-    // GRAPH keyword is optional in GQL
-    if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Graph) {
-        *pos += 1;
-    }
 
     // Parse graph expression
     let (graph_opt, mut expr_diags) = parse_expression_with_diags(tokens, pos);
@@ -990,6 +989,13 @@ fn parse_let_variable_definition(
                     span: token.span.clone(),
                 }
             }
+            kind if kind.is_non_reserved_identifier_keyword() => {
+                *pos += 1;
+                BindingVariable {
+                    name: SmolStr::new(kind.to_string()),
+                    span: token.span.clone(),
+                }
+            }
             _ => {
                 diags.push(
                     Diag::error("Expected variable name in LET definition")
@@ -1148,6 +1154,13 @@ fn parse_for_item(tokens: &[Token], pos: &mut usize) -> ParseResult<ForItem> {
                     span: token.span.clone(),
                 }
             }
+            kind if kind.is_non_reserved_identifier_keyword() => {
+                *pos += 1;
+                BindingVariable {
+                    name: SmolStr::new(kind.to_string()),
+                    span: token.span.clone(),
+                }
+            }
             _ => {
                 diags.push(
                     Diag::error("Expected variable name in FOR statement")
@@ -1269,6 +1282,14 @@ fn parse_for_ordinality_or_offset(
         TokenKind::Identifier(name) => {
             let variable = BindingVariable {
                 name: name.clone(),
+                span: token.span.clone(),
+            };
+            *pos += 1;
+            variable
+        }
+        kind if kind.is_non_reserved_identifier_keyword() => {
+            let variable = BindingVariable {
+                name: SmolStr::new(kind.to_string()),
                 span: token.span.clone(),
             };
             *pos += 1;
@@ -1545,15 +1566,31 @@ fn parse_select_item(tokens: &[Token], pos: &mut usize) -> ParseResult<SelectIte
 
     // Parse optional AS alias
     let alias = if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::As) {
+        let as_span = tokens[*pos].span.clone();
         *pos += 1;
         if let Some(token) = tokens.get(*pos) {
-            if let TokenKind::Identifier(name) = &token.kind {
-                *pos += 1;
-                Some(name.clone())
-            } else {
-                None
+            match &token.kind {
+                TokenKind::Identifier(name) | TokenKind::DelimitedIdentifier(name) => {
+                    *pos += 1;
+                    Some(name.clone())
+                }
+                kind if kind.is_non_reserved_identifier_keyword() => {
+                    *pos += 1;
+                    Some(SmolStr::new(kind.to_string()))
+                }
+                _ => {
+                    diags.push(
+                        Diag::error("Expected alias after AS in SELECT item")
+                            .with_primary_label(as_span, "AS must be followed by an identifier"),
+                    );
+                    None
+                }
             }
         } else {
+            diags.push(
+                Diag::error("Expected alias after AS in SELECT item")
+                    .with_primary_label(as_span, "AS must be followed by an identifier"),
+            );
             None
         }
     } else {
@@ -1775,7 +1812,10 @@ fn parse_having_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<HavingC
 // ============================================================================
 
 /// Parses a RETURN statement.
-pub(crate) fn parse_return_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<ReturnStatement> {
+pub(crate) fn parse_return_statement(
+    tokens: &[Token],
+    pos: &mut usize,
+) -> ParseResult<ReturnStatement> {
     let mut diags = Vec::new();
 
     if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Return) {
@@ -1889,15 +1929,31 @@ fn parse_return_item(tokens: &[Token], pos: &mut usize) -> ParseResult<ReturnIte
 
     // Parse optional AS alias
     let alias = if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::As) {
+        let as_span = tokens[*pos].span.clone();
         *pos += 1;
         if let Some(token) = tokens.get(*pos) {
-            if let TokenKind::Identifier(name) = &token.kind {
-                *pos += 1;
-                Some(name.clone())
-            } else {
-                None
+            match &token.kind {
+                TokenKind::Identifier(name) | TokenKind::DelimitedIdentifier(name) => {
+                    *pos += 1;
+                    Some(name.clone())
+                }
+                kind if kind.is_non_reserved_identifier_keyword() => {
+                    *pos += 1;
+                    Some(SmolStr::new(kind.to_string()))
+                }
+                _ => {
+                    diags.push(
+                        Diag::error("Expected alias after AS in RETURN item")
+                            .with_primary_label(as_span, "AS must be followed by an identifier"),
+                    );
+                    None
+                }
             }
         } else {
+            diags.push(
+                Diag::error("Expected alias after AS in RETURN item")
+                    .with_primary_label(as_span, "AS must be followed by an identifier"),
+            );
             None
         }
     } else {
@@ -2665,14 +2721,14 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_query_requires_body_after_use_graph() {
-        let tokens = lex("USE GRAPH g");
+    fn test_parse_query_requires_body_after_use_clause() {
+        let tokens = lex("USE g");
         let mut pos = 0;
         let (result, diags) = parse_query(&tokens, &mut pos);
 
         assert!(result.is_none());
         assert!(!diags.is_empty());
-        assert!(pos > 0, "USE GRAPH clause should still be consumed");
+        assert!(pos > 0, "USE clause should still be consumed");
     }
 
     #[test]

@@ -1,7 +1,7 @@
 // Quick demonstration that Sprint 10 AST compiles and works
 
-use gql_parser::ast::mutation::*;
 use gql_parser::ast::expression::{Expression, Literal};
+use gql_parser::ast::mutation::*;
 use smol_str::SmolStr;
 
 fn main() {

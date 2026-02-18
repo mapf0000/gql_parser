@@ -2,13 +2,13 @@
 //!
 //! This module models ISO GQL chapter 13 data-modifying statements.
 
+use crate::ast::Span;
 use crate::ast::expression::Expression;
 use crate::ast::query::{
     ElementPropertySpecification, ElementVariableDeclaration, LabelSetSpecification,
     PrimitiveQueryStatement, PrimitiveResultStatement, UseGraphClause,
 };
 use crate::ast::references::ProcedureReference;
-use crate::ast::Span;
 use smol_str::SmolStr;
 
 // ============================================================================
@@ -376,8 +376,15 @@ pub struct DeleteItem {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CallDataModifyingProcedureStatement {
     pub optional: bool,
-    pub procedure: ProcedureReference,
+    /// Named procedure reference for named calls, absent for inline calls.
+    pub procedure: Option<ProcedureReference>,
+    /// Arguments for named calls.
     pub arguments: Vec<Expression>,
+    /// Optional YIELD projection for named calls.
     pub yield_items: Option<Vec<SmolStr>>,
+    /// Optional variable scope list for inline calls.
+    pub inline_variable_scope: Option<Vec<SmolStr>>,
+    /// Span of `{ ... }` nested procedure specification for inline calls.
+    pub inline_procedure_span: Option<Span>,
     pub span: Span,
 }

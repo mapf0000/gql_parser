@@ -15,6 +15,14 @@ fn parse_ok(source: &str) -> gql_parser::ast::Program {
     result.ast.expect("expected AST")
 }
 
+fn diagnostics_text(diags: &[miette::Report]) -> String {
+    diags
+        .iter()
+        .map(|diag| format!("{diag:?}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[test]
 fn parse_set_statement_is_mutation_start() {
     let program = parse_ok("SET n.age = 1");
@@ -85,7 +93,10 @@ fn parse_mutation_chain_with_query_step_stays_single_statement() {
         ambient.statements[0],
         SimpleDataAccessingStatement::Modifying(_)
     ));
-    assert!(matches!(ambient.statements[1], SimpleDataAccessingStatement::Query(_)));
+    assert!(matches!(
+        ambient.statements[1],
+        SimpleDataAccessingStatement::Query(_)
+    ));
 }
 
 #[test]
@@ -113,4 +124,30 @@ fn insert_rejects_empty_property_map_in_insert_filler() {
 fn set_all_properties_accepts_empty_map() {
     let result = parse("SET n = {}");
     assert!(result.diagnostics.is_empty(), "unexpected diagnostics");
+}
+
+#[test]
+fn parse_inline_call_statement_is_mutation_start() {
+    let program = parse_ok("INSERT (n) CALL { RETURN n }");
+    assert_eq!(program.statements.len(), 1);
+    assert!(matches!(program.statements[0], Statement::Mutation(_)));
+}
+
+#[test]
+fn parse_inline_call_with_scope_is_mutation_start() {
+    let program = parse_ok("INSERT (n) CALL (n, m) { RETURN n }");
+    assert_eq!(program.statements.len(), 1);
+    assert!(matches!(program.statements[0], Statement::Mutation(_)));
+}
+
+#[test]
+fn inline_call_reports_unclosed_procedure_specification() {
+    let result = parse("INSERT (n) CALL { RETURN n");
+    assert!(!result.diagnostics.is_empty(), "expected diagnostics");
+
+    let diag_text = diagnostics_text(&result.diagnostics);
+    assert!(
+        diag_text.contains("Unclosed inline CALL procedure specification"),
+        "unexpected diagnostics: {diag_text}"
+    );
 }

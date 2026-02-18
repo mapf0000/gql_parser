@@ -35,6 +35,14 @@ fn parse_ambient_query(source: &str) -> gql_parser::ast::query::AmbientLinearQue
     query.clone()
 }
 
+fn diagnostics_text(diags: &[miette::Report]) -> String {
+    diags
+        .iter()
+        .map(|diag| format!("{diag:?}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn parse_first_simple_match_pattern(source: &str) -> GraphPattern {
     let query = parse_ambient_query(source);
     let Some(PrimitiveQueryStatement::Match(MatchStatement::Simple(simple))) =
@@ -320,8 +328,8 @@ fn parse_path_expression_union_and_multiset_alternation() {
 }
 
 #[test]
-fn parse_node_pattern_with_all_filler_features() {
-    let node = extract_node_pattern("MATCH (n:Person {age: 42} WHERE n.age > 10) RETURN n");
+fn parse_node_pattern_with_property_predicate() {
+    let node = extract_node_pattern("MATCH (n:Person {age: 42}) RETURN n");
 
     assert_eq!(
         node.variable.as_ref().map(|var| var.variable.as_str()),
@@ -343,7 +351,31 @@ fn parse_node_pattern_with_all_filler_features() {
     assert_eq!(props.properties.len(), 1);
     assert_eq!(props.properties[0].key.as_str(), "age");
 
+    assert!(node.where_clause.is_none());
+}
+
+#[test]
+fn parse_node_pattern_with_where_predicate() {
+    let node = extract_node_pattern("MATCH (n:Person WHERE n.age > 10) RETURN n");
+
+    assert_eq!(
+        node.variable.as_ref().map(|var| var.variable.as_str()),
+        Some("n")
+    );
+    assert!(node.properties.is_none());
     assert!(node.where_clause.is_some());
+}
+
+#[test]
+fn parse_node_pattern_rejects_mixed_property_and_where_predicates() {
+    let result = parse("MATCH (n:Person {age: 42} WHERE n.age > 10) RETURN n");
+    assert!(!result.diagnostics.is_empty(), "expected diagnostics");
+
+    let diag_text = diagnostics_text(&result.diagnostics);
+    assert!(
+        diag_text.contains("Element pattern can have either property specification or WHERE predicate"),
+        "unexpected diagnostics: {diag_text}"
+    );
 }
 
 #[test]
@@ -601,6 +633,52 @@ fn parse_graph_pattern_rejects_empty_pattern() {
 
     assert!(pattern_opt.is_none());
     assert!(!diags.is_empty());
+}
+
+#[test]
+fn parse_path_variable_accepts_non_reserved_keyword_identifier() {
+    let pattern = parse_first_simple_match_pattern("MATCH GRAPH = (n) RETURN GRAPH");
+    let variable = pattern.paths.patterns[0]
+        .variable_declaration
+        .as_ref()
+        .map(|decl| decl.variable.as_str());
+    assert_eq!(variable, Some("GRAPH"));
+}
+
+#[test]
+fn parse_path_variable_rejects_delimited_identifier() {
+    let result = parse("MATCH `p` = (n) RETURN n");
+    assert!(!result.diagnostics.is_empty(), "expected diagnostics");
+
+    let diag_text = diagnostics_text(&result.diagnostics);
+    assert!(
+        diag_text.contains("Path variable declaration requires a regular identifier"),
+        "unexpected diagnostics: {diag_text}"
+    );
+}
+
+#[test]
+fn parse_element_variable_rejects_delimited_identifier() {
+    let result = parse("MATCH (`n`:Person) RETURN n");
+    assert!(!result.diagnostics.is_empty(), "expected diagnostics");
+
+    let diag_text = diagnostics_text(&result.diagnostics);
+    assert!(
+        diag_text.contains("Element variable declaration requires a regular identifier"),
+        "unexpected diagnostics: {diag_text}"
+    );
+}
+
+#[test]
+fn parse_property_map_rejects_reserved_unquoted_property_name() {
+    let result = parse("MATCH (n {RETURN: 1}) RETURN n");
+    assert!(!result.diagnostics.is_empty(), "expected diagnostics");
+
+    let diag_text = diagnostics_text(&result.diagnostics);
+    assert!(
+        diag_text.contains("Expected property name in property specification"),
+        "unexpected diagnostics: {diag_text}"
+    );
 }
 
 #[test]

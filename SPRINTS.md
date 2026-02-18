@@ -6,7 +6,7 @@ This document is intentionally broad and will be refined into detailed sprint pl
 
 ## Planning Assumptions
 - Parser stack: `logos` + `chumsky` + custom `ast` + `miette` diagnostics.
-- Source-of-truth feature scope: `GQL_FEATURES.md` and `third_party/opengql-grammar/GQL.g4`.
+- Source-of-truth feature scope: `third_party/opengql-grammar/GQL.g4` (normative); `GQL_FEATURES.md` is a derived coverage map and must remain grammar-aligned.
 - Output contract: `parse(&str) -> { ast: Option<Ast>, diags: Vec<miette::Report> }`.
 - Parser must never panic on invalid input and should return partial AST where possible.
 
@@ -70,7 +70,7 @@ This document is intentionally broad and will be refined into detailed sprint pl
 
 ### Sprint 8: Graph Pattern and Path Pattern System (Completed February 17, 2026)
 - Goal: Deliver full graph matching syntax breadth.
-- Scope: graph pattern binding/yield, match modes, node/edge patterns, path prefixes/search modes, quantifiers, simplified path patterns, label expressions.
+- Scope: graph pattern binding/yield, match modes, node/edge patterns (including all full and abbreviated directional forms), path prefixes/search modes, graph pattern quantifiers plus questioned path primaries, simplified path patterns, label expressions.
 - Exit Criteria: pattern AST supports all directional and quantified variants in grammar.
 
 ### Sprint 9: Result Shaping and Aggregation
@@ -81,7 +81,7 @@ This document is intentionally broad and will be refined into detailed sprint pl
 
 ### Sprint 10: Data Modification Statements
 - Goal: Implement graph mutation grammar end-to-end.
-- Scope: `INSERT` graph patterns, `SET`, `REMOVE`, `[DETACH|NODETACH] DELETE`, data-modifying calls.
+- Scope: `INSERT` graph patterns (with `insertElementPatternFiller` and label/property set specification forms), `SET`, `REMOVE`, `[DETACH|NODETACH] DELETE` over `valueExpression` item lists, data-modifying calls.
 - Exit Criteria: mutation statements parse in focused and ambient forms with valid AST structure.
 
 ### Sprint 11: Procedures, Nested Specs, and Execution Flow
@@ -96,7 +96,7 @@ This document is intentionally broad and will be refined into detailed sprint pl
 
 ### Sprint 13: Conformance Hardening and Edge Cases
 - Goal: Raise parser reliability and standards alignment.
-- Scope: reserved/pre-reserved/non-reserved keyword behavior, ambiguity handling, stress cases, grammar sample corpus integration.
+- Scope: reserved/pre-reserved/non-reserved keyword behavior, ambiguity handling, stress cases, grammar sample corpus integration, and documentation conformance checks against `GQL.g4`.
 - Exit Criteria: high-confidence parse behavior on official samples and curated edge-case corpus.
 
 ### Sprint 14: Semantic Validation Pass (Post-Parse Phase)
