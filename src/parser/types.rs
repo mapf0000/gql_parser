@@ -896,7 +896,16 @@ impl<'a> TypeParser<'a> {
             self.expect(TokenKind::Graph)?;
 
             let spec_span = self.parse_placeholder_spec_span("nested graph type specification")?;
-            let spec = Box::new(NestedGraphTypeSpecification { span: spec_span });
+
+            // Create a minimal placeholder nested graph type spec
+            let body = crate::ast::graph_type::GraphTypeSpecificationBody {
+                element_types: crate::ast::graph_type::ElementTypeList {
+                    types: Vec::new(),
+                    span: spec_span.clone(),
+                },
+                span: spec_span.clone(),
+            };
+            let spec = Box::new(NestedGraphTypeSpecification { body, span: spec_span });
 
             let not_null = self.check_not_null();
             let end = self
@@ -994,7 +1003,18 @@ impl<'a> TypeParser<'a> {
             Err(self.error_here("expected NODE or VERTEX after ANY"))
         } else {
             let spec_span = self.parse_placeholder_spec_span("node type specification")?;
-            let spec = Box::new(NodeTypeSpecification { span: spec_span });
+
+            // Create a minimal placeholder node type spec
+            let pattern = crate::ast::graph_type::NodeTypePattern {
+                phrase: crate::ast::graph_type::NodeTypePhrase {
+                    filler: None,
+                    alias: None,
+                    span: spec_span.clone(),
+                },
+                span: spec_span.clone(),
+            };
+            let spec = Box::new(NodeTypeSpecification { pattern, span: spec_span });
+
             let not_null = self.check_not_null();
             let end = self
                 .tokens
@@ -1048,7 +1068,33 @@ impl<'a> TypeParser<'a> {
             Err(self.error_here("expected EDGE or RELATIONSHIP after ANY"))
         } else {
             let spec_span = self.parse_placeholder_spec_span("edge type specification")?;
-            let spec = Box::new(EdgeTypeSpecification { span: spec_span });
+
+            // Create a minimal placeholder edge type spec
+            let left_endpoint = crate::ast::graph_type::NodeTypePattern {
+                phrase: crate::ast::graph_type::NodeTypePhrase {
+                    filler: None,
+                    alias: None,
+                    span: spec_span.clone(),
+                },
+                span: spec_span.clone(),
+            };
+            let right_endpoint = left_endpoint.clone();
+            let arc = crate::ast::graph_type::DirectedArcType::PointingRight(
+                crate::ast::graph_type::ArcTypePointingRight {
+                    filler: None,
+                    span: spec_span.clone(),
+                },
+            );
+            let pattern = crate::ast::graph_type::EdgeTypePattern::Directed(
+                crate::ast::graph_type::EdgeTypePatternDirected {
+                    left_endpoint,
+                    arc,
+                    right_endpoint,
+                    span: spec_span.clone(),
+                },
+            );
+            let spec = Box::new(EdgeTypeSpecification { pattern, span: spec_span });
+
             let not_null = self.check_not_null();
             let end = self
                 .tokens
@@ -1371,6 +1417,14 @@ impl<'a> TypeParser<'a> {
             .unwrap_or(start);
         ValueType::Predefined(predefined, start..end)
     }
+
+    /// Returns the current parser position.
+    ///
+    /// This is useful for integrating with other parsers that need to know
+    /// how many tokens were consumed.
+    pub fn current_position(&self) -> usize {
+        self.pos
+    }
 }
 
 // ============================================================================
@@ -1383,11 +1437,15 @@ impl<'a> TypeParser<'a> {
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```rust
+/// use gql_parser::parser::types::parse_value_type;
+/// use gql_parser::{Token, TokenKind};
+///
 /// let tokens = vec![
 ///     Token::new(TokenKind::Int, 0..3),
 /// ];
-/// let value_type = parse_value_type(&tokens)?;
+/// let value_type = parse_value_type(&tokens).unwrap();
+/// assert!(matches!(value_type, gql_parser::ast::ValueType::Predefined(_, _)));
 /// ```
 pub fn parse_value_type(tokens: &[Token]) -> ParseResult<ValueType> {
     parse_with_full_consumption(tokens, |parser| parser.parse_value_type())

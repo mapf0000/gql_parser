@@ -1,12 +1,429 @@
 //! Keyword recognition and classification for GQL.
 //!
 //! GQL keywords are case-insensitive per the ISO standard.
+//!
+//! ## Keyword Classification
+//!
+//! Per ISO GQL specification, keywords are classified into three categories:
+//!
+//! 1. **Reserved Words** (~200 keywords): Cannot be used as regular identifiers.
+//!    Must be delimited with quotes (`"CREATE"`) or backticks (`` `SELECT` ``) to use as identifiers.
+//!    Grammar reference: GQL.g4 lines 3277-3494
+//!
+//! 2. **Pre-Reserved Words** (~40 keywords): Future-proofed for potential use in later GQL versions.
+//!    Currently allowed as identifiers for forward compatibility.
+//!    Grammar reference: GQL.g4 lines 3497-3535
+//!
+//! 3. **Non-Reserved Words** (~50 keywords): Context-sensitive keywords that can act as both
+//!    keywords and identifiers depending on parsing context.
+//!    Grammar reference: GQL.g4 lines 3538-3584
 
 use super::token::TokenKind;
 
+/// Classification of GQL keywords per ISO specification.
+///
+/// This enum distinguishes between reserved, pre-reserved, and non-reserved words,
+/// which affects identifier parsing and validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KeywordClassification {
+    /// Reserved words that cannot be used as undelimited identifiers.
+    /// Examples: SELECT, MATCH, CREATE, INSERT, DELETE
+    Reserved,
+
+    /// Pre-reserved words for future GQL versions, currently allowed as identifiers.
+    /// Examples: ABSTRACT, CONSTRAINT, FUNCTION, AGGREGATE
+    PreReserved,
+
+    /// Non-reserved words that are context-sensitive.
+    /// Can be keywords in some contexts and identifiers in others.
+    /// Examples: GRAPH, NODE, EDGE, TYPE, DIRECTED
+    NonReserved,
+}
+
+const RESERVED_WORDS: &[&str] = &[
+    "ABS",
+    "ACOS",
+    "ALL",
+    "ALL_DIFFERENT",
+    "AND",
+    "ANY",
+    "ARRAY",
+    "AS",
+    "ASC",
+    "ASCENDING",
+    "ASIN",
+    "AT",
+    "ATAN",
+    "AVG",
+    "BIG",
+    "BIGINT",
+    "BINARY",
+    "BOOL",
+    "BOOLEAN",
+    "BOTH",
+    "BTRIM",
+    "BY",
+    "BYTES",
+    "BYTE_LENGTH",
+    "CALL",
+    "CARDINALITY",
+    "CASE",
+    "CAST",
+    "CEIL",
+    "CEILING",
+    "CHAR",
+    "CHARACTERISTICS",
+    "CHARACTER_LENGTH",
+    "CHAR_LENGTH",
+    "CLOSE",
+    "COALESCE",
+    "COLLECT_LIST",
+    "COMMIT",
+    "COPY",
+    "COS",
+    "COSH",
+    "COT",
+    "COUNT",
+    "CREATE",
+    "CURRENT_DATE",
+    "CURRENT_GRAPH",
+    "CURRENT_PROPERTY_GRAPH",
+    "CURRENT_SCHEMA",
+    "CURRENT_TIME",
+    "CURRENT_TIMESTAMP",
+    "DATE",
+    "DATETIME",
+    "DAY",
+    "DEC",
+    "DECIMAL",
+    "DEGREES",
+    "DELETE",
+    "DESC",
+    "DESCENDING",
+    "DETACH",
+    "DISTINCT",
+    "DOUBLE",
+    "DROP",
+    "DURATION",
+    "DURATION_BETWEEN",
+    "ELEMENT_ID",
+    "ELSE",
+    "END",
+    "EXCEPT",
+    "EXISTS",
+    "EXP",
+    "FILTER",
+    "FINISH",
+    "FLOAT",
+    "FLOAT128",
+    "FLOAT16",
+    "FLOAT256",
+    "FLOAT32",
+    "FLOAT64",
+    "FLOOR",
+    "FOR",
+    "FROM",
+    "GROUP",
+    "HAVING",
+    "HOME_GRAPH",
+    "HOME_PROPERTY_GRAPH",
+    "HOME_SCHEMA",
+    "HOUR",
+    "IF",
+    "IN",
+    "INSERT",
+    "INT",
+    "INT128",
+    "INT16",
+    "INT256",
+    "INT32",
+    "INT64",
+    "INT8",
+    "INTEGER",
+    "INTEGER128",
+    "INTEGER16",
+    "INTEGER256",
+    "INTEGER32",
+    "INTEGER64",
+    "INTEGER8",
+    "INTERSECT",
+    "INTERVAL",
+    "IS",
+    "LEADING",
+    "LEFT",
+    "LET",
+    "LIKE",
+    "LIMIT",
+    "LIST",
+    "LN",
+    "LOCAL",
+    "LOCAL_DATETIME",
+    "LOCAL_TIME",
+    "LOCAL_TIMESTAMP",
+    "LOG",
+    "LOG10",
+    "LOWER",
+    "LTRIM",
+    "MATCH",
+    "MAX",
+    "MIN",
+    "MINUTE",
+    "MOD",
+    "MONTH",
+    "NEXT",
+    "NODETACH",
+    "NORMALIZE",
+    "NOT",
+    "NOTHING",
+    "NULL",
+    "NULLIF",
+    "NULLS",
+    "OCTET_LENGTH",
+    "OF",
+    "OFFSET",
+    "OPTIONAL",
+    "OR",
+    "ORDER",
+    "OTHERWISE",
+    "PARAMETER",
+    "PARAMETERS",
+    "PATH",
+    "PATHS",
+    "PATH_LENGTH",
+    "PERCENTILE_CONT",
+    "PERCENTILE_DISC",
+    "POWER",
+    "PRECISION",
+    "PROPERTY_EXISTS",
+    "RADIANS",
+    "REAL",
+    "RECORD",
+    "REMOVE",
+    "REPLACE",
+    "RESET",
+    "RETURN",
+    "RIGHT",
+    "ROLLBACK",
+    "RTRIM",
+    "SAME",
+    "SCHEMA",
+    "SECOND",
+    "SELECT",
+    "SESSION",
+    "SESSION_USER",
+    "SET",
+    "SIGNED",
+    "SIN",
+    "SINH",
+    "SIZE",
+    "SKIP",
+    "SMALL",
+    "SMALLINT",
+    "SQRT",
+    "START",
+    "STDDEV_POP",
+    "STDDEV_SAMP",
+    "STRING",
+    "SUM",
+    "TAN",
+    "TANH",
+    "THEN",
+    "TIME",
+    "TIMESTAMP",
+    "TRAILING",
+    "TRIM",
+    "TYPED",
+    "UBIGINT",
+    "UINT",
+    "UINT128",
+    "UINT16",
+    "UINT256",
+    "UINT32",
+    "UINT64",
+    "UINT8",
+    "UNION",
+    "UNSIGNED",
+    "UPPER",
+    "USE",
+    "USMALLINT",
+    "VALUE",
+    "VARBINARY",
+    "VARCHAR",
+    "VARIABLE",
+    "WHEN",
+    "WHERE",
+    "WITH",
+    "XOR",
+    "YEAR",
+    "YIELD",
+    "ZONED",
+    "ZONED_DATETIME",
+    "ZONED_TIME",
+];
+
+const PRE_RESERVED_WORDS: &[&str] = &[
+    "ABSTRACT",
+    "AGGREGATE",
+    "AGGREGATES",
+    "ALTER",
+    "CATALOG",
+    "CLEAR",
+    "CLONE",
+    "CONSTRAINT",
+    "CURRENT_ROLE",
+    "CURRENT_USER",
+    "DATA",
+    "DIRECTORY",
+    "DRYRUN",
+    "EXACT",
+    "EXISTING",
+    "FUNCTION",
+    "GQLSTATUS",
+    "GRANT",
+    "INFINITY",
+    "INSTANT",
+    "NUMBER",
+    "NUMERIC",
+    "ON",
+    "OPEN",
+    "PARTITION",
+    "PROCEDURE",
+    "PRODUCT",
+    "PROJECT",
+    "QUERY",
+    "RECORDS",
+    "REFERENCE",
+    "RENAME",
+    "REVOKE",
+    "SUBSTRING",
+    "SYSTEM_USER",
+    "TEMPORAL",
+    "UNIQUE",
+    "UNIT",
+    "VALUES",
+];
+
+const NON_RESERVED_WORDS: &[&str] = &[
+    "ACYCLIC",
+    "BINDING",
+    "BINDINGS",
+    "CONNECTING",
+    "DESTINATION",
+    "DIFFERENT",
+    "DIRECTED",
+    "EDGE",
+    "EDGES",
+    "ELEMENT",
+    "ELEMENTS",
+    "FIRST",
+    "GRAPH",
+    "GROUPS",
+    "KEEP",
+    "LABEL",
+    "LABELED",
+    "LABELS",
+    "LAST",
+    "NFC",
+    "NFD",
+    "NFKC",
+    "NFKD",
+    "NO",
+    "NODE",
+    "NORMALIZED",
+    "ONLY",
+    "ORDINALITY",
+    "PROPERTY",
+    "READ",
+    "RELATIONSHIP",
+    "RELATIONSHIPS",
+    "REPEATABLE",
+    "SHORTEST",
+    "SIMPLE",
+    "SOURCE",
+    "TABLE",
+    "TO",
+    "TRAIL",
+    "TRANSACTION",
+    "TYPE",
+    "UNDIRECTED",
+    "VERTEX",
+    "WALK",
+    "WITHOUT",
+    "WRITE",
+    "ZONE",
+];
+
+fn contains_keyword(list: &[&str], upper: &str) -> bool {
+    list.binary_search(&upper).is_ok()
+}
+
+/// Classifies a keyword by its type (reserved, pre-reserved, or non-reserved).
+///
+/// Returns `None` if the name is not a recognized keyword.
+///
+/// # Examples
+///
+/// ```rust
+/// use gql_parser::{classify_keyword, KeywordClassification};
+///
+/// assert_eq!(classify_keyword("MATCH"), Some(KeywordClassification::Reserved));
+/// assert_eq!(classify_keyword("ABSTRACT"), Some(KeywordClassification::PreReserved));
+/// assert_eq!(classify_keyword("GRAPH"), Some(KeywordClassification::NonReserved));
+/// assert_eq!(classify_keyword("myVariable"), None);
+/// ```
+pub fn classify_keyword(name: &str) -> Option<KeywordClassification> {
+    let upper = name.to_ascii_uppercase();
+    if contains_keyword(RESERVED_WORDS, &upper) {
+        Some(KeywordClassification::Reserved)
+    } else if contains_keyword(PRE_RESERVED_WORDS, &upper) {
+        Some(KeywordClassification::PreReserved)
+    } else if contains_keyword(NON_RESERVED_WORDS, &upper) {
+        Some(KeywordClassification::NonReserved)
+    } else {
+        None
+    }
+}
+
+/// Returns true if the given name is a reserved word.
+///
+/// # Examples
+///
+/// ```rust
+/// use gql_parser::is_reserved_word;
+///
+/// assert!(is_reserved_word("MATCH"));
+/// assert!(is_reserved_word("match"));
+/// assert!(!is_reserved_word("GRAPH")); // Non-reserved
+/// assert!(!is_reserved_word("ABSTRACT")); // Pre-reserved
+/// assert!(!is_reserved_word("myVariable")); // Not a keyword
+/// ```
+pub fn is_reserved_word(name: &str) -> bool {
+    matches!(
+        classify_keyword(name),
+        Some(KeywordClassification::Reserved)
+    )
+}
+
+/// Returns true if the given name is a pre-reserved word.
+pub fn is_pre_reserved_word(name: &str) -> bool {
+    matches!(
+        classify_keyword(name),
+        Some(KeywordClassification::PreReserved)
+    )
+}
+
+/// Returns true if the given name is a non-reserved word.
+pub fn is_non_reserved_word(name: &str) -> bool {
+    matches!(
+        classify_keyword(name),
+        Some(KeywordClassification::NonReserved)
+    )
+}
+
 /// Looks up a keyword by name (case-insensitive).
 pub fn lookup_keyword(name: &str) -> Option<TokenKind> {
-    match name.to_ascii_uppercase().as_str() {
+    let upper = name.to_ascii_uppercase();
+    match upper.as_str() {
         // Reserved keywords
         "MATCH" => Some(TokenKind::Match),
         "WHERE" => Some(TokenKind::Where),
@@ -237,9 +654,12 @@ pub fn lookup_keyword(name: &str) -> Option<TokenKind> {
         "TYPED" => Some(TokenKind::Typed),
         "NORMALIZED" => Some(TokenKind::Normalized),
         "DIRECTED" => Some(TokenKind::Directed),
+        "UNDIRECTED" => Some(TokenKind::Undirected),
         "LABELED" => Some(TokenKind::Labeled),
         "SOURCE" => Some(TokenKind::Source),
         "DESTINATION" => Some(TokenKind::Destination),
+        "CONNECTING" => Some(TokenKind::Connecting),
+        "KEY" => Some(TokenKind::Key),
 
         // Built-in function keywords - Numeric
         "ABS" => Some(TokenKind::Abs),
@@ -284,7 +704,11 @@ pub fn lookup_keyword(name: &str) -> Option<TokenKind> {
         "SAME" => Some(TokenKind::Same),
         "PROPERTY_EXISTS" => Some(TokenKind::PropertyExists),
 
-        _ => None,
+        _ => classify_keyword(&upper).map(|classification| match classification {
+            KeywordClassification::Reserved => TokenKind::ReservedKeyword(upper.into()),
+            KeywordClassification::PreReserved => TokenKind::PreReservedKeyword(upper.into()),
+            KeywordClassification::NonReserved => TokenKind::NonReservedKeyword(upper.into()),
+        }),
     }
 }
 
@@ -371,5 +795,339 @@ mod tests {
     fn detach_keywords() {
         assert_eq!(lookup_keyword("DETACH"), Some(TokenKind::Detach));
         assert_eq!(lookup_keyword("NODETACH"), Some(TokenKind::Nodetach));
+    }
+
+    // ===== Keyword Classification Tests =====
+
+    #[test]
+    fn classify_reserved_words() {
+        // Query keywords
+        assert_eq!(
+            classify_keyword("MATCH"),
+            Some(KeywordClassification::Reserved)
+        );
+        assert_eq!(
+            classify_keyword("SELECT"),
+            Some(KeywordClassification::Reserved)
+        );
+        assert_eq!(
+            classify_keyword("WHERE"),
+            Some(KeywordClassification::Reserved)
+        );
+        assert_eq!(
+            classify_keyword("RETURN"),
+            Some(KeywordClassification::Reserved)
+        );
+
+        // Data modification keywords
+        assert_eq!(
+            classify_keyword("INSERT"),
+            Some(KeywordClassification::Reserved)
+        );
+        assert_eq!(
+            classify_keyword("DELETE"),
+            Some(KeywordClassification::Reserved)
+        );
+        assert_eq!(
+            classify_keyword("CREATE"),
+            Some(KeywordClassification::Reserved)
+        );
+
+        // Type keywords
+        assert_eq!(
+            classify_keyword("STRING"),
+            Some(KeywordClassification::Reserved)
+        );
+        assert_eq!(
+            classify_keyword("INTEGER"),
+            Some(KeywordClassification::Reserved)
+        );
+        assert_eq!(
+            classify_keyword("BOOLEAN"),
+            Some(KeywordClassification::Reserved)
+        );
+
+        // Operator keywords
+        assert_eq!(
+            classify_keyword("AND"),
+            Some(KeywordClassification::Reserved)
+        );
+        assert_eq!(
+            classify_keyword("OR"),
+            Some(KeywordClassification::Reserved)
+        );
+        assert_eq!(
+            classify_keyword("NOT"),
+            Some(KeywordClassification::Reserved)
+        );
+    }
+
+    #[test]
+    fn classify_pre_reserved_words() {
+        assert_eq!(
+            classify_keyword("ABSTRACT"),
+            Some(KeywordClassification::PreReserved)
+        );
+        assert_eq!(
+            classify_keyword("CONSTRAINT"),
+            Some(KeywordClassification::PreReserved)
+        );
+        assert_eq!(
+            classify_keyword("FUNCTION"),
+            Some(KeywordClassification::PreReserved)
+        );
+        assert_eq!(
+            classify_keyword("AGGREGATE"),
+            Some(KeywordClassification::PreReserved)
+        );
+        assert_eq!(
+            classify_keyword("GRANT"),
+            Some(KeywordClassification::PreReserved)
+        );
+        assert_eq!(
+            classify_keyword("REVOKE"),
+            Some(KeywordClassification::PreReserved)
+        );
+    }
+
+    #[test]
+    fn classify_non_reserved_words() {
+        // Graph element keywords
+        assert_eq!(
+            classify_keyword("GRAPH"),
+            Some(KeywordClassification::NonReserved)
+        );
+        assert_eq!(
+            classify_keyword("NODE"),
+            Some(KeywordClassification::NonReserved)
+        );
+        assert_eq!(
+            classify_keyword("EDGE"),
+            Some(KeywordClassification::NonReserved)
+        );
+        assert_eq!(
+            classify_keyword("PROPERTY"),
+            Some(KeywordClassification::NonReserved)
+        );
+
+        // Path mode keywords
+        assert_eq!(
+            classify_keyword("WALK"),
+            Some(KeywordClassification::NonReserved)
+        );
+        assert_eq!(
+            classify_keyword("TRAIL"),
+            Some(KeywordClassification::NonReserved)
+        );
+        assert_eq!(
+            classify_keyword("SIMPLE"),
+            Some(KeywordClassification::NonReserved)
+        );
+        assert_eq!(
+            classify_keyword("SHORTEST"),
+            Some(KeywordClassification::NonReserved)
+        );
+
+        // Directionality keywords
+        assert_eq!(
+            classify_keyword("DIRECTED"),
+            Some(KeywordClassification::NonReserved)
+        );
+        assert_eq!(
+            classify_keyword("UNDIRECTED"),
+            Some(KeywordClassification::NonReserved)
+        );
+
+        // Context keywords
+        assert_eq!(
+            classify_keyword("BINDING"),
+            Some(KeywordClassification::NonReserved)
+        );
+        assert_eq!(
+            classify_keyword("TABLE"),
+            Some(KeywordClassification::NonReserved)
+        );
+        assert_eq!(
+            classify_keyword("TYPE"),
+            Some(KeywordClassification::NonReserved)
+        );
+    }
+
+    #[test]
+    fn classify_non_keyword() {
+        assert_eq!(classify_keyword("myVariable"), None);
+        assert_eq!(classify_keyword("foo"), None);
+        assert_eq!(classify_keyword("test123"), None);
+        assert_eq!(classify_keyword("_private"), None);
+    }
+
+    #[test]
+    fn classify_case_insensitive() {
+        // Reserved words case variations
+        assert_eq!(
+            classify_keyword("match"),
+            Some(KeywordClassification::Reserved)
+        );
+        assert_eq!(
+            classify_keyword("Match"),
+            Some(KeywordClassification::Reserved)
+        );
+        assert_eq!(
+            classify_keyword("MATCH"),
+            Some(KeywordClassification::Reserved)
+        );
+        assert_eq!(
+            classify_keyword("MaTcH"),
+            Some(KeywordClassification::Reserved)
+        );
+
+        // Pre-reserved words case variations
+        assert_eq!(
+            classify_keyword("abstract"),
+            Some(KeywordClassification::PreReserved)
+        );
+        assert_eq!(
+            classify_keyword("Abstract"),
+            Some(KeywordClassification::PreReserved)
+        );
+        assert_eq!(
+            classify_keyword("ABSTRACT"),
+            Some(KeywordClassification::PreReserved)
+        );
+
+        // Non-reserved words case variations
+        assert_eq!(
+            classify_keyword("graph"),
+            Some(KeywordClassification::NonReserved)
+        );
+        assert_eq!(
+            classify_keyword("Graph"),
+            Some(KeywordClassification::NonReserved)
+        );
+        assert_eq!(
+            classify_keyword("GRAPH"),
+            Some(KeywordClassification::NonReserved)
+        );
+    }
+
+    #[test]
+    fn is_reserved_word_check() {
+        // Reserved words
+        assert!(is_reserved_word("MATCH"));
+        assert!(is_reserved_word("match"));
+        assert!(is_reserved_word("SELECT"));
+        assert!(is_reserved_word("INSERT"));
+        assert!(is_reserved_word("AND"));
+        assert!(is_reserved_word("OR"));
+
+        // Pre-reserved words (not reserved)
+        assert!(!is_reserved_word("ABSTRACT"));
+        assert!(!is_reserved_word("CONSTRAINT"));
+
+        // Non-reserved words (not reserved)
+        assert!(!is_reserved_word("GRAPH"));
+        assert!(!is_reserved_word("NODE"));
+
+        // Non-keywords
+        assert!(!is_reserved_word("myVariable"));
+        assert!(!is_reserved_word("foo"));
+    }
+
+    #[test]
+    fn is_pre_reserved_word_check() {
+        // Pre-reserved words
+        assert!(is_pre_reserved_word("ABSTRACT"));
+        assert!(is_pre_reserved_word("abstract"));
+        assert!(is_pre_reserved_word("CONSTRAINT"));
+        assert!(is_pre_reserved_word("FUNCTION"));
+
+        // Reserved words (not pre-reserved)
+        assert!(!is_pre_reserved_word("MATCH"));
+        assert!(!is_pre_reserved_word("SELECT"));
+
+        // Non-reserved words (not pre-reserved)
+        assert!(!is_pre_reserved_word("GRAPH"));
+
+        // Non-keywords
+        assert!(!is_pre_reserved_word("myVariable"));
+    }
+
+    #[test]
+    fn is_non_reserved_word_check() {
+        // Non-reserved words
+        assert!(is_non_reserved_word("GRAPH"));
+        assert!(is_non_reserved_word("graph"));
+        assert!(is_non_reserved_word("NODE"));
+        assert!(is_non_reserved_word("EDGE"));
+        assert!(is_non_reserved_word("DIRECTED"));
+        assert!(is_non_reserved_word("BINDING"));
+
+        // Reserved words (not non-reserved)
+        assert!(!is_non_reserved_word("MATCH"));
+        assert!(!is_non_reserved_word("SELECT"));
+
+        // Pre-reserved words (not non-reserved)
+        assert!(!is_non_reserved_word("ABSTRACT"));
+
+        // Non-keywords
+        assert!(!is_non_reserved_word("myVariable"));
+    }
+
+    #[test]
+    fn comprehensive_keyword_coverage() {
+        // Test sample of all categories to ensure comprehensive coverage
+
+        // Reserved - Query
+        let reserved_query = vec!["MATCH", "SELECT", "WHERE", "RETURN", "WITH", "ORDER", "BY"];
+        for kw in reserved_query {
+            assert!(is_reserved_word(kw), "{} should be reserved", kw);
+        }
+
+        // Reserved - Data modification
+        let reserved_dm = vec!["INSERT", "DELETE", "CREATE", "DROP", "SET", "REMOVE"];
+        for kw in reserved_dm {
+            assert!(is_reserved_word(kw), "{} should be reserved", kw);
+        }
+
+        // Reserved - Types
+        let reserved_types = vec![
+            "INT", "STRING", "BOOLEAN", "DATE", "TIME", "TIMESTAMP", "FLOAT", "DOUBLE",
+        ];
+        for kw in reserved_types {
+            assert!(is_reserved_word(kw), "{} should be reserved", kw);
+        }
+
+        // Pre-reserved
+        let pre_reserved = vec![
+            "ABSTRACT",
+            "AGGREGATE",
+            "CONSTRAINT",
+            "FUNCTION",
+            "GRANT",
+            "REVOKE",
+        ];
+        for kw in pre_reserved {
+            assert!(is_pre_reserved_word(kw), "{} should be pre-reserved", kw);
+        }
+
+        // Non-reserved
+        let non_reserved = vec![
+            "GRAPH",
+            "NODE",
+            "EDGE",
+            "PROPERTY",
+            "DIRECTED",
+            "UNDIRECTED",
+            "WALK",
+            "TRAIL",
+            "SIMPLE",
+            "SHORTEST",
+            "BINDING",
+            "TABLE",
+            "TYPE",
+        ];
+        for kw in non_reserved {
+            assert!(is_non_reserved_word(kw), "{} should be non-reserved", kw);
+        }
     }
 }

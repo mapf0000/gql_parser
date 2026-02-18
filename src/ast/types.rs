@@ -453,41 +453,13 @@ pub enum EdgeReferenceValueType {
 }
 
 // ============================================================================
-// Placeholder types for Sprint 12 (Graph Type Specifications)
+// Re-exports from graph_type module (Sprint 12)
 // ============================================================================
 
-/// Placeholder for nested graph type specification.
-///
-/// This will be fully implemented in Sprint 12 when graph type specifications are added.
-/// For now, this serves as a marker in the AST structure.
-#[derive(Debug, Clone, PartialEq)]
-pub struct NestedGraphTypeSpecification {
-    /// Placeholder span
-    pub span: Span,
-    // TODO(Sprint 12): Add full graph type specification fields
-}
-
-/// Placeholder for node type specification.
-///
-/// This will be fully implemented in Sprint 12 when graph type specifications are added.
-/// For now, this serves as a marker in the AST structure.
-#[derive(Debug, Clone, PartialEq)]
-pub struct NodeTypeSpecification {
-    /// Placeholder span
-    pub span: Span,
-    // TODO(Sprint 12): Add full node type specification fields
-}
-
-/// Placeholder for edge type specification.
-///
-/// This will be fully implemented in Sprint 12 when graph type specifications are added.
-/// For now, this serves as a marker in the AST structure.
-#[derive(Debug, Clone, PartialEq)]
-pub struct EdgeTypeSpecification {
-    /// Placeholder span
-    pub span: Span,
-    // TODO(Sprint 12): Add full edge type specification fields
-}
+// Re-export the full implementations from graph_type module
+pub use crate::ast::graph_type::{
+    EdgeTypeSpecification, NestedGraphTypeSpecification, NodeTypeSpecification,
+};
 
 // ============================================================================
 // Constructed Types - Path

@@ -2283,15 +2283,28 @@ fn is_query_boundary(kind: &TokenKind) -> bool {
 
 fn is_elements_keyword(kind: &TokenKind) -> bool {
     matches!(kind, TokenKind::Elements | TokenKind::Element)
-        || matches!(kind, TokenKind::Identifier(name) if name.eq_ignore_ascii_case("ELEMENTS"))
+        || token_matches_word(kind, "ELEMENT")
+        || token_matches_word(kind, "ELEMENTS")
 }
 
 fn is_bindings_keyword(kind: &TokenKind) -> bool {
     matches!(kind, TokenKind::Binding)
-        || matches!(kind, TokenKind::Identifier(name) if name.eq_ignore_ascii_case("BINDINGS"))
+        || token_matches_word(kind, "BINDING")
+        || token_matches_word(kind, "BINDINGS")
 }
 
 fn is_edge_keyword(kind: &TokenKind) -> bool {
     matches!(kind, TokenKind::Edge | TokenKind::Relationship)
-        || matches!(kind, TokenKind::Identifier(name) if name.eq_ignore_ascii_case("EDGE") || name.eq_ignore_ascii_case("EDGES"))
+        || token_matches_word(kind, "EDGE")
+        || token_matches_word(kind, "EDGES")
+}
+
+fn token_matches_word(kind: &TokenKind, word: &str) -> bool {
+    match kind {
+        TokenKind::Identifier(name)
+        | TokenKind::ReservedKeyword(name)
+        | TokenKind::PreReservedKeyword(name)
+        | TokenKind::NonReservedKeyword(name) => name.eq_ignore_ascii_case(word),
+        _ => false,
+    }
 }

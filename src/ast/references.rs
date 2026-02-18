@@ -119,7 +119,7 @@ impl SchemaReference {
 /// Graph reference variants.
 ///
 /// Graph references can be catalog-qualified, delimited identifiers,
-/// predefined names, or reference parameters.
+/// predefined names, current graph aliases, or reference parameters.
 ///
 /// # Examples
 ///
@@ -128,6 +128,8 @@ impl SchemaReference {
 /// "my graph"              -- Delimited identifier
 /// HOME_GRAPH              -- Predefined reference
 /// HOME_PROPERTY_GRAPH     -- Predefined reference
+/// CURRENT_GRAPH           -- Current graph alias
+/// CURRENT_PROPERTY_GRAPH  -- Current property graph alias
 /// $$graph_param           -- Reference parameter
 /// ```
 #[derive(Debug, Clone, PartialEq)]
@@ -164,6 +166,18 @@ pub enum GraphReference {
         span: Span,
     },
 
+    /// CURRENT_GRAPH - current graph alias used in graph expressions.
+    CurrentGraph {
+        /// Source span
+        span: Span,
+    },
+
+    /// CURRENT_PROPERTY_GRAPH - current property graph alias used in graph expressions.
+    CurrentPropertyGraph {
+        /// Source span
+        span: Span,
+    },
+
     /// $$name - reference parameter
     ReferenceParameter {
         /// Parameter name (without the $$ prefix)
@@ -181,6 +195,8 @@ impl GraphReference {
             | GraphReference::Delimited { span, .. }
             | GraphReference::HomeGraph { span }
             | GraphReference::HomePropertyGraph { span }
+            | GraphReference::CurrentGraph { span }
+            | GraphReference::CurrentPropertyGraph { span }
             | GraphReference::ReferenceParameter { span, .. } => span.clone(),
         }
     }

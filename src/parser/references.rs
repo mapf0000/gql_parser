@@ -179,8 +179,7 @@ impl<'a> ReferenceParser<'a> {
             }
 
             // Predefined: HOME_SCHEMA, CURRENT_SCHEMA
-            // These are parsed as identifiers by the lexer
-            TokenKind::Identifier(name) => {
+            TokenKind::Identifier(name) | TokenKind::ReservedKeyword(name) => {
                 let name_upper = name.to_ascii_uppercase();
                 match name_upper.as_str() {
                     "HOME_SCHEMA" => {
@@ -349,8 +348,8 @@ impl<'a> ReferenceParser<'a> {
                 Ok(GraphReference::ReferenceParameter { name, span })
             }
 
-            // Predefined: HOME_GRAPH, HOME_PROPERTY_GRAPH
-            TokenKind::Identifier(name) => {
+            // Predefined: HOME_GRAPH, HOME_PROPERTY_GRAPH, CURRENT_GRAPH, CURRENT_PROPERTY_GRAPH
+            TokenKind::Identifier(name) | TokenKind::ReservedKeyword(name) => {
                 let name_upper = name.to_ascii_uppercase();
                 match name_upper.as_str() {
                     "HOME_GRAPH" => {
@@ -362,6 +361,16 @@ impl<'a> ReferenceParser<'a> {
                         let span = self.current().span.clone();
                         self.advance();
                         Ok(GraphReference::HomePropertyGraph { span })
+                    }
+                    "CURRENT_GRAPH" => {
+                        let span = self.current().span.clone();
+                        self.advance();
+                        Ok(GraphReference::CurrentGraph { span })
+                    }
+                    "CURRENT_PROPERTY_GRAPH" => {
+                        let span = self.current().span.clone();
+                        self.advance();
+                        Ok(GraphReference::CurrentPropertyGraph { span })
                     }
                     _ => {
                         // Try catalog-qualified name
@@ -408,8 +417,14 @@ impl<'a> ReferenceParser<'a> {
                 }
             }
 
-            // Could be a catalog-qualified name starting with / or ..
-            TokenKind::Slash | TokenKind::DotDot | TokenKind::Dot | TokenKind::Current => {
+            // Absolute graph path: /graph or /dir/graph
+            TokenKind::Slash => {
+                let (name, span) = self.parse_absolute_path_graph_name()?;
+                Ok(GraphReference::CatalogQualified { name, span })
+            }
+
+            // Could be a catalog-qualified name starting with relative schema references
+            TokenKind::DotDot | TokenKind::Dot | TokenKind::Current => {
                 let name = self.parse_catalog_qualified_name()?;
                 let end = name.span.end;
                 Ok(GraphReference::CatalogQualified {
@@ -599,16 +614,7 @@ impl<'a> ReferenceParser<'a> {
         let parent = self.try_parse_catalog_object_parent_reference()?;
 
         // Parse the object name
-        let name = match &self.current().kind {
-            TokenKind::Identifier(n) => {
-                let name = n.clone();
-                self.advance();
-                name
-            }
-            _ => {
-                return Err(self.error_here("expected identifier for object name"));
-            }
-        };
+        let (name, _) = self.parse_regular_identifier("object name")?;
 
         let end = self
             .tokens
@@ -621,6 +627,72 @@ impl<'a> ReferenceParser<'a> {
             name,
             span: start..end,
         })
+    }
+
+    fn parse_absolute_path_graph_name(&mut self) -> ParseResult<(CatalogQualifiedName, Span)> {
+        let start = self.current().span.start;
+        self.expect(TokenKind::Slash)?;
+
+        let mut components: Vec<(SmolStr, Span)> = Vec::new();
+        while !matches!(self.current().kind, TokenKind::Eof) {
+            let (name, span) = self.parse_regular_identifier("graph path component")?;
+            components.push((name, span));
+            if self.check(&TokenKind::Slash) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        if components.is_empty() {
+            return Err(self.error_here("absolute graph path must include a graph name"));
+        }
+
+        let (graph_name, graph_span) = components
+            .last()
+            .cloned()
+            .expect("components is guaranteed non-empty");
+        let parent_span_end = if components.len() == 1 {
+            start + 1
+        } else {
+            components[components.len() - 2].1.end
+        };
+        let parent_span = start..parent_span_end;
+
+        let schema = SchemaReference::AbsolutePath {
+            components: components[..components.len() - 1]
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect(),
+            span: parent_span.clone(),
+        };
+
+        let name = CatalogQualifiedName {
+            parent: Some(CatalogObjectParentReference::Schema {
+                schema,
+                span: parent_span,
+            }),
+            name: graph_name,
+            span: start..graph_span.end,
+        };
+
+        let span = name.span.clone();
+        Ok((name, span))
+    }
+
+    fn parse_regular_identifier(&mut self, expected: &str) -> ParseResult<(SmolStr, Span)> {
+        let token = self.current().clone();
+        match &token.kind {
+            TokenKind::Identifier(name) => {
+                self.advance();
+                Ok((name.clone(), token.span))
+            }
+            kind if kind.is_non_reserved_identifier_keyword() => {
+                self.advance();
+                Ok((SmolStr::new(kind.to_string()), token.span))
+            }
+            _ => Err(self.error_here(format!("expected {expected}"))),
+        }
     }
 
     /// Tries to parse a catalog object parent reference.
@@ -698,7 +770,7 @@ impl<'a> ReferenceParser<'a> {
                 }
             }
 
-            TokenKind::Identifier(name) => {
+            TokenKind::Identifier(name) | TokenKind::ReservedKeyword(name) => {
                 let name_upper = name.to_ascii_uppercase();
                 // Check for predefined schema references
                 if matches!(name_upper.as_str(), "HOME_SCHEMA" | "CURRENT_SCHEMA") {
@@ -978,12 +1050,17 @@ impl<'a> ReferenceParser<'a> {
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```rust
+/// use gql_parser::ast::SchemaReference;
+/// use gql_parser::parser::references::parse_schema_reference;
+/// use gql_parser::{Token, TokenKind};
+///
 /// let tokens = vec![
 ///     Token::new(TokenKind::Slash, 0..1),
 ///     Token::new(TokenKind::Identifier("my_schema".into()), 1..10),
 /// ];
-/// let schema_ref = parse_schema_reference(&tokens)?;
+/// let schema_ref = parse_schema_reference(&tokens).unwrap();
+/// assert!(matches!(schema_ref, SchemaReference::AbsolutePath { .. }));
 /// ```
 pub fn parse_schema_reference(tokens: &[Token]) -> ParseResult<SchemaReference> {
     parse_with_full_consumption(tokens, |parser| parser.parse_schema_reference())

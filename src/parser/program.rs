@@ -128,7 +128,7 @@ fn classify(kind: &TokenKind) -> SyntaxToken {
         TokenKind::Session => SyntaxToken::SessionStart,
         TokenKind::Start | TokenKind::Commit | TokenKind::Rollback => SyntaxToken::TransactionStart,
         TokenKind::Create | TokenKind::Drop | TokenKind::Call => SyntaxToken::CatalogStart,
-        TokenKind::Semicolon => SyntaxToken::Semicolon,
+        TokenKind::Semicolon | TokenKind::Next => SyntaxToken::Semicolon,
         TokenKind::Eof => SyntaxToken::Eof,
         _ => SyntaxToken::Other,
     }
@@ -151,13 +151,58 @@ fn find_statement_end(tokens: &[Token], start: usize, class: StatementClass) -> 
     let mut cursor = start + 1;
     let starts_with_use = matches!(tokens.get(start).map(|t| &t.kind), Some(TokenKind::Use));
 
-    if matches!(
-        class,
-        StatementClass::Session | StatementClass::Transaction | StatementClass::Catalog
-    ) {
+    if matches!(class, StatementClass::Session | StatementClass::Transaction) {
         while cursor < tokens.len() {
-            if matches!(tokens[cursor].kind, TokenKind::Semicolon | TokenKind::Eof) {
+            if matches!(
+                tokens[cursor].kind,
+                TokenKind::Semicolon | TokenKind::Next | TokenKind::Eof
+            ) {
                 return cursor;
+            }
+            cursor += 1;
+        }
+        return cursor;
+    }
+
+    if matches!(class, StatementClass::Catalog) {
+        let mut paren_depth = 0usize;
+        let mut brace_depth = 0usize;
+        let mut bracket_depth = 0usize;
+        let starts_with_optional_call = matches!(
+            tokens.get(start).map(|t| &t.kind),
+            Some(TokenKind::Optional)
+        ) && matches!(tokens.get(start + 1).map(|t| &t.kind), Some(TokenKind::Call));
+
+        while cursor < tokens.len() {
+            let kind = &tokens[cursor].kind;
+            let at_top_level = paren_depth == 0 && brace_depth == 0 && bracket_depth == 0;
+
+            if at_top_level {
+                if matches!(kind, TokenKind::Semicolon | TokenKind::Next | TokenKind::Eof) {
+                    return cursor;
+                }
+
+                if !(starts_with_optional_call && cursor == start + 1) {
+                    match classify(kind) {
+                        SyntaxToken::QueryStart
+                        | SyntaxToken::MutationStart
+                        | SyntaxToken::SessionStart
+                        | SyntaxToken::TransactionStart
+                        | SyntaxToken::CatalogStart => return cursor,
+                        SyntaxToken::Semicolon | SyntaxToken::Eof => return cursor,
+                        SyntaxToken::Other => {}
+                    }
+                }
+            }
+
+            match kind {
+                TokenKind::LParen => paren_depth += 1,
+                TokenKind::RParen => paren_depth = paren_depth.saturating_sub(1),
+                TokenKind::LBrace => brace_depth += 1,
+                TokenKind::RBrace => brace_depth = brace_depth.saturating_sub(1),
+                TokenKind::LBracket => bracket_depth += 1,
+                TokenKind::RBracket => bracket_depth = bracket_depth.saturating_sub(1),
+                _ => {}
             }
             cursor += 1;
         }
@@ -1124,19 +1169,41 @@ fn parse_graph_type_spec(
         ));
     }
 
-    if matches!(
-        tokens[cursor].kind,
-        TokenKind::DoubleColon | TokenKind::LBrace
-    ) {
+    if matches!(tokens[cursor].kind, TokenKind::DoubleColon) {
         cursor += 1;
-        while cursor < tokens.len() && !matches!(tokens[cursor].kind, TokenKind::As) {
-            cursor += 1;
+        if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::LBrace) {
+            // Inline graph type specification: ::{...}
+            let next_cursor = parse_inline_graph_type_spec(tokens, cursor)?;
+            return Ok((
+                GraphTypeSpec::Open {
+                    span: span_for_segment(tokens, start, next_cursor),
+                },
+                next_cursor,
+            ));
         }
+        // Graph type reference after :: socialNetworkGraphType
+        let (graph_type, next_cursor) = parse_graph_type_reference_until(
+            tokens,
+            cursor,
+            |kind| matches!(kind, TokenKind::As),
+            "graph type reference after ::",
+        )?;
+        return Ok((
+            GraphTypeSpec::Of {
+                graph_type,
+                span: span_for_segment(tokens, start, next_cursor),
+            },
+            next_cursor,
+        ));
+    }
+
+    if matches!(tokens[cursor].kind, TokenKind::LBrace) {
+        let next_cursor = parse_inline_graph_type_spec(tokens, cursor)?;
         return Ok((
             GraphTypeSpec::Open {
-                span: span_for_segment(tokens, start, cursor),
+                span: span_for_segment(tokens, start, next_cursor),
             },
-            cursor,
+            next_cursor,
         ));
     }
 
@@ -1153,6 +1220,53 @@ fn parse_graph_type_spec(
         },
         next_cursor,
     ))
+}
+
+fn parse_inline_graph_type_spec(tokens: &[Token], start: usize) -> ParseOutcome<usize> {
+    if start >= tokens.len() || !matches!(tokens[start].kind, TokenKind::LBrace) {
+        return Err(expected_token_diag(
+            tokens,
+            start,
+            "{",
+            "inline graph type specification",
+        ));
+    }
+
+    let mut depth = 0usize;
+    let mut end = None;
+    for (idx, token) in tokens.iter().enumerate().skip(start) {
+        match token.kind {
+            TokenKind::LBrace => depth += 1,
+            TokenKind::RBrace => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    end = Some(idx);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let end_idx = end.ok_or_else(|| {
+        expected_token_diag(
+            tokens,
+            tokens.len(),
+            "}",
+            "inline graph type specification",
+        )
+    })?;
+
+    let mut inline_tokens = tokens[start..=end_idx].to_vec();
+    if !matches!(inline_tokens.last().map(|t| &t.kind), Some(TokenKind::Eof)) {
+        let eof_pos = inline_tokens.last().map_or(0, |t| t.span.end);
+        inline_tokens.push(Token::new(TokenKind::Eof, eof_pos..eof_pos));
+    }
+
+    let mut parser = crate::parser::graph_type::GraphTypeParser::new(&inline_tokens);
+    parser.parse_nested_graph_type_specification()?;
+
+    Ok(end_idx + 1)
 }
 
 fn parse_as_copy_of_graph(
@@ -1367,9 +1481,21 @@ where
     }
 
     for end in (start + 1..=tokens.len()).rev() {
-        if end < tokens.len() && !stop(&tokens[end].kind) {
+        // Determine if we should try parsing this slice
+        let should_try = if end < tokens.len() {
+            // Check if the token right after this slice is a stop token
+            // If it is, this is a potential stopping point
+            stop(&tokens[end].kind)
+        } else {
+            // At the end of token stream, only try if there are NO stop tokens within the slice
+            // (otherwise we should have stopped earlier)
+            !(start..end).any(|i| stop(&tokens[i].kind))
+        };
+
+        if !should_try {
             continue;
         }
+
         if let Ok(reference) = parse(&tokens[start..end]) {
             return Ok((reference, end));
         }
@@ -1388,6 +1514,10 @@ fn is_graph_type_spec_start(kind: &TokenKind) -> bool {
             | TokenKind::LBrace
             | TokenKind::DoubleColon
             | TokenKind::Typed
+            | TokenKind::Identifier(_)
+            | TokenKind::Slash  // For path-based graph names
+            | TokenKind::Dot    // For relative paths
+            | TokenKind::DotDot // For parent paths
     ) || is_identifier_word(kind, "TYPED")
 }
 

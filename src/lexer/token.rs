@@ -223,9 +223,12 @@ pub enum TokenKind {
     Typed,
     Normalized,
     Directed,
+    Undirected,
     Labeled,
     Source,
     Destination,
+    Connecting,
+    Key,
 
     // Aggregate function keywords
     Avg,
@@ -282,6 +285,11 @@ pub enum TokenKind {
     AllDifferent,
     Same,
     PropertyExists,
+
+    // Generic keyword buckets for words without dedicated token variants.
+    ReservedKeyword(SmolStr),
+    PreReservedKeyword(SmolStr),
+    NonReservedKeyword(SmolStr),
 
     // Identifiers
     Identifier(SmolStr),
@@ -519,9 +527,12 @@ impl TokenKind {
                 | TokenKind::Typed
                 | TokenKind::Normalized
                 | TokenKind::Directed
+                | TokenKind::Undirected
                 | TokenKind::Labeled
                 | TokenKind::Source
                 | TokenKind::Destination
+                | TokenKind::Connecting
+                | TokenKind::Key
                 | TokenKind::Avg
                 | TokenKind::Count
                 | TokenKind::Max
@@ -561,6 +572,9 @@ impl TokenKind {
                 | TokenKind::AllDifferent
                 | TokenKind::Same
                 | TokenKind::PropertyExists
+                | TokenKind::ReservedKeyword(_)
+                | TokenKind::PreReservedKeyword(_)
+                | TokenKind::NonReservedKeyword(_)
         )
     }
 
@@ -614,10 +628,14 @@ impl TokenKind {
     /// Returns true if this token belongs to the grammar's
     /// `nonReservedWords` set and can be used as a regular identifier.
     pub fn is_non_reserved_identifier_keyword(&self) -> bool {
+        if matches!(self, TokenKind::NonReservedKeyword(_)) {
+            return true;
+        }
         matches!(
             self,
             TokenKind::Acyclic
                 | TokenKind::Binding
+                | TokenKind::Connecting
                 | TokenKind::Destination
                 | TokenKind::Different
                 | TokenKind::Directed
@@ -648,6 +666,7 @@ impl TokenKind {
                 | TokenKind::Trail
                 | TokenKind::Transaction
                 | TokenKind::Type
+                | TokenKind::Undirected
                 | TokenKind::Vertex
                 | TokenKind::Walk
                 | TokenKind::Without
@@ -834,9 +853,12 @@ impl fmt::Display for TokenKind {
             TokenKind::Typed => write!(f, "TYPED"),
             TokenKind::Normalized => write!(f, "NORMALIZED"),
             TokenKind::Directed => write!(f, "DIRECTED"),
+            TokenKind::Undirected => write!(f, "UNDIRECTED"),
             TokenKind::Labeled => write!(f, "LABELED"),
             TokenKind::Source => write!(f, "SOURCE"),
             TokenKind::Destination => write!(f, "DESTINATION"),
+            TokenKind::Connecting => write!(f, "CONNECTING"),
+            TokenKind::Key => write!(f, "KEY"),
             TokenKind::Avg => write!(f, "AVG"),
             TokenKind::Count => write!(f, "COUNT"),
             TokenKind::Max => write!(f, "MAX"),
@@ -876,6 +898,9 @@ impl fmt::Display for TokenKind {
             TokenKind::AllDifferent => write!(f, "ALL_DIFFERENT"),
             TokenKind::Same => write!(f, "SAME"),
             TokenKind::PropertyExists => write!(f, "PROPERTY_EXISTS"),
+            TokenKind::ReservedKeyword(name)
+            | TokenKind::PreReservedKeyword(name)
+            | TokenKind::NonReservedKeyword(name) => write!(f, "{name}"),
             TokenKind::Identifier(name) => write!(f, "{name}"),
             TokenKind::DelimitedIdentifier(name) => write!(f, "`{name}`"),
             TokenKind::StringLiteral(s) => write!(f, "'{s}'"),

@@ -2,6 +2,7 @@
 
 mod catalog;
 pub mod expression;
+pub mod graph_type;
 pub mod mutation;
 pub mod procedure;
 pub mod program;
@@ -105,4 +106,18 @@ pub use procedure::{
     ProcedureArgumentList, ProcedureBody, ProcedureCall, Statement as ProcedureStatement, StatementBlock,
     ValueInitializer, ValueVariableDefinition, VariableScopeClause, YieldClause, YieldItem,
     YieldItemAlias, YieldItemList,
+};
+
+// Re-export graph type specification types
+pub use graph_type::{
+    ArcTypePointingLeft, ArcTypePointingRight, ArcTypeUndirected, DirectedArcType, EdgeKind,
+    EdgeTypePattern, EdgeTypePatternDirected, EdgeTypePatternUndirected, EdgeTypeFiller,
+    EdgeTypeLabelSet, EdgeTypePhrase, EdgeTypePhraseContent, EdgeTypePropertyTypes,
+    EdgeTypeSpecification as EdgeTypeSpec, ElementTypeList, ElementTypeSpecification,
+    EndpointPair, EndpointPairPhrase, GraphTypeSpecificationBody, LabelName, LabelSetPhrase,
+    LabelSetSpecification, LocalNodeTypeAlias, NestedGraphTypeSpecification as NestedGraphTypeSpec,
+    NodeTypeFiller, NodeTypeImpliedContent, NodeTypeKeyLabelSet, NodeTypeLabelSet,
+    NodeTypePattern, NodeTypePhrase, NodeTypePropertyTypes, NodeTypeReference,
+    NodeTypeSpecification as NodeTypeSpec, PropertyName, PropertyType, PropertyTypeList,
+    PropertyTypesSpecification, PropertyValueType,
 };

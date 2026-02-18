@@ -4,6 +4,7 @@
 //! an AST while preserving diagnostics and recovering at statement boundaries.
 
 pub mod expression;
+pub mod graph_type;
 pub mod mutation;
 pub mod patterns;
 pub mod procedure;

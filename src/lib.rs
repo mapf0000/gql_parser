@@ -25,6 +25,7 @@ pub use ast::{Span, Spanned};
 
 // Re-export lexer types for convenience.
 pub use diag::{Diag, DiagLabel, DiagSeverity, LabelRole};
+pub use lexer::keywords::{classify_keyword, is_non_reserved_word, is_pre_reserved_word, is_reserved_word, KeywordClassification};
 pub use lexer::token::{Token, TokenKind};
 pub use lexer::{Lexer, LexerResult, tokenize};
 
