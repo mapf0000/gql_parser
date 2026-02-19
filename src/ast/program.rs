@@ -71,7 +71,9 @@ mod tests {
     use super::*;
     use crate::ast::catalog::{CallCatalogModifyingProcedureStatement, CatalogStatementKind};
     use crate::ast::mutation::{AmbientLinearDataModifyingStatement, LinearDataModifyingStatement};
-    use crate::ast::procedure::{CallProcedureStatement, NamedProcedureCall, ProcedureCall, ProcedureArgumentList};
+    use crate::ast::procedure::{
+        CallProcedureStatement, NamedProcedureCall, ProcedureArgumentList, ProcedureCall,
+    };
     use crate::ast::query::{AmbientLinearQuery, LinearQuery, Query};
     use crate::ast::references::ProcedureReference;
     use crate::ast::session::{SessionCloseCommand, SessionCommand};

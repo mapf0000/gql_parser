@@ -18,11 +18,7 @@ use gql_parser::parse;
 #[test]
 fn minimal_valid_query() {
     // Shortest valid query
-    let queries = vec![
-        "MATCH (n) RETURN n",
-        "RETURN 1",
-        "RETURN TRUE",
-    ];
+    let queries = vec!["MATCH (n) RETURN n", "RETURN 1", "RETURN TRUE"];
 
     for query in queries {
         let result = parse(query);
@@ -76,12 +72,12 @@ fn numeric_literal_edge_cases() {
 #[test]
 fn string_literal_edge_cases() {
     let queries = vec![
-        r#"RETURN ''"#,  // Empty string
-        r#"RETURN "  ""#,  // String with spaces
-        r#"RETURN '\n'"#,  // Newline escape
-        r#"RETURN '\t'"#,  // Tab escape
-        r#"RETURN '\''"#,  // Escaped quote
-        r#"RETURN '\\'"#,  // Escaped backslash
+        r#"RETURN ''"#,   // Empty string
+        r#"RETURN "  ""#, // String with spaces
+        r#"RETURN '\n'"#, // Newline escape
+        r#"RETURN '\t'"#, // Tab escape
+        r#"RETURN '\''"#, // Escaped quote
+        r#"RETURN '\\'"#, // Escaped backslash
     ];
 
     for query in queries {
@@ -165,12 +161,7 @@ fn unexpected_eof() {
 
 #[test]
 fn invalid_token_sequences() {
-    let queries = vec![
-        "MATCH MATCH",
-        "RETURN RETURN",
-        "WHERE MATCH",
-        "(n) MATCH",
-    ];
+    let queries = vec!["MATCH MATCH", "RETURN RETURN", "WHERE MATCH", "(n) MATCH"];
 
     for query in queries {
         let result = parse(query);
@@ -270,10 +261,7 @@ fn parameters_in_all_valid_contexts() {
 
 #[test]
 fn substituted_parameters() {
-    let queries = vec![
-        "RETURN $$param",
-        "MATCH (n {id: $$id}) RETURN n",
-    ];
+    let queries = vec!["RETURN $$param", "MATCH (n {id: $$id}) RETURN n"];
 
     for query in queries {
         let result = parse(query);
@@ -429,8 +417,8 @@ fn all_logical_operators() {
 #[test]
 fn operator_precedence_combinations() {
     let queries = vec![
-        "RETURN 1 + 2 * 3",  // Should be 1 + (2 * 3) = 7
-        "RETURN (1 + 2) * 3",  // Should be 9
+        "RETURN 1 + 2 * 3",   // Should be 1 + (2 * 3) = 7
+        "RETURN (1 + 2) * 3", // Should be 9
         "RETURN 1 < 2 AND 3 < 4",
         "RETURN 1 + 2 > 3 - 1",
         "MATCH (n) WHERE n.a > 0 AND n.b < 10 OR n.c = 5 RETURN n",
@@ -520,10 +508,7 @@ fn case_expressions() {
 
     let result = parse(query);
 
-    assert!(
-        result.ast.is_some(),
-        "CASE expression should parse"
-    );
+    assert!(result.ast.is_some(), "CASE expression should parse");
 }
 
 #[test]
@@ -572,11 +557,11 @@ fn mixed_valid_and_invalid_syntax() {
 #[test]
 fn whitespace_variations() {
     let queries = vec![
-        "MATCH(n)RETURN n",  // No spaces
+        "MATCH(n)RETURN n",       // No spaces
         "MATCH  (n)  RETURN  n",  // Multiple spaces
         "MATCH\n(n)\nRETURN\nn",  // Newlines
         "MATCH\t(n)\tRETURN\tn",  // Tabs
-        "  MATCH (n) RETURN n  ",  // Leading/trailing spaces
+        "  MATCH (n) RETURN n  ", // Leading/trailing spaces
     ];
 
     for query in queries {

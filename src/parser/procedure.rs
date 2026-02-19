@@ -18,6 +18,7 @@ use crate::ast::references::BindingVariable;
 use crate::ast::{Expression, ProcedureStatement, Span};
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
+use crate::parser::LegacyParseResult;
 use crate::parser::expression::parse_expression;
 use crate::parser::mutation::parse_linear_data_modifying_statement;
 use crate::parser::program::parse_catalog_statement_kind;
@@ -26,7 +27,6 @@ use crate::parser::references::{parse_procedure_reference, parse_schema_referenc
 use crate::parser::types::{
     parse_binding_table_reference_value_type, parse_graph_reference_value_type, parse_value_type,
 };
-use crate::parser::LegacyParseResult;
 use smol_str::SmolStr;
 
 /// Parse result with optional value and diagnostics.
@@ -57,8 +57,11 @@ fn expect_token(
     } else {
         let actual = &tokens[*pos];
         Err(Box::new(
-            Diag::error(format!("Expected {kind} in {context}, found {}", actual.kind))
-                .with_primary_label(actual.span.clone(), format!("expected {kind} here")),
+            Diag::error(format!(
+                "Expected {kind} in {context}, found {}",
+                actual.kind
+            ))
+            .with_primary_label(actual.span.clone(), format!("expected {kind} here")),
         ))
     }
 }
@@ -136,11 +139,8 @@ fn parse_regular_identifier(
             Ok(result)
         }
         _ => Err(Box::new(
-            Diag::error(format!(
-                "Expected regular identifier, found {}",
-                token.kind
-            ))
-            .with_primary_label(token.span.clone(), "expected regular identifier here"),
+            Diag::error(format!("Expected regular identifier, found {}", token.kind))
+                .with_primary_label(token.span.clone(), "expected regular identifier here"),
         )),
     }
 }
@@ -419,13 +419,22 @@ pub fn parse_variable_scope_clause(
     diags.extend(var_diags);
 
     // Expect closing parenthesis
-    let end_span = if let Ok(span) = expect_token(tokens, pos, TokenKind::RParen, "variable scope clause") {
-        span.end
-    } else {
-        diags.push(Diag::error("Expected closing parenthesis in variable scope clause")
-            .with_primary_label(tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start_pos..start_pos), "expected ')' here"));
-        start_pos
-    };
+    let end_span =
+        if let Ok(span) = expect_token(tokens, pos, TokenKind::RParen, "variable scope clause") {
+            span.end
+        } else {
+            diags.push(
+                Diag::error("Expected closing parenthesis in variable scope clause")
+                    .with_primary_label(
+                        tokens
+                            .get(*pos)
+                            .map(|t| t.span.clone())
+                            .unwrap_or(start_pos..start_pos),
+                        "expected ')' here",
+                    ),
+            );
+            start_pos
+        };
 
     let clause = VariableScopeClause {
         variables,
@@ -459,16 +468,16 @@ pub fn parse_binding_variable_reference_list(
         if !consume_if(tokens, pos, TokenKind::Comma) {
             break;
         }
-        if check_token(tokens, *pos, TokenKind::RParen) || check_token(tokens, *pos, TokenKind::Eof) {
+        if check_token(tokens, *pos, TokenKind::RParen) || check_token(tokens, *pos, TokenKind::Eof)
+        {
             diags.push(
-                Diag::error("Expected binding variable after ','")
-                    .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map(|t| t.span.clone())
-                            .unwrap_or(*pos..*pos),
-                        "expected binding variable here",
-                    ),
+                Diag::error("Expected binding variable after ','").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(*pos..*pos),
+                    "expected binding variable here",
+                ),
             );
             break;
         }
@@ -524,8 +533,15 @@ pub fn parse_named_procedure_call(
     }
 
     if proc_ref_end == proc_ref_start {
-        diags.push(Diag::error("Expected procedure reference")
-            .with_primary_label(tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start_pos..start_pos), "expected procedure reference here"));
+        diags.push(
+            Diag::error("Expected procedure reference").with_primary_label(
+                tokens
+                    .get(*pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or(start_pos..start_pos),
+                "expected procedure reference here",
+            ),
+        );
         return (None, diags);
     }
 
@@ -544,14 +560,13 @@ pub fn parse_named_procedure_call(
     // Parse required procedure argument list
     if !check_token(tokens, *pos, TokenKind::LParen) {
         diags.push(
-            Diag::error("Expected '(' after procedure reference")
-                .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start_pos..start_pos),
-                    "expected '(' here",
-                ),
+            Diag::error("Expected '(' after procedure reference").with_primary_label(
+                tokens
+                    .get(*pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or(start_pos..start_pos),
+                "expected '(' here",
+            ),
         );
         return (None, diags);
     }
@@ -604,7 +619,8 @@ pub fn parse_procedure_argument_list(
     let mut arguments = vec![];
 
     // Parse arguments until closing parenthesis
-    while !check_token(tokens, *pos, TokenKind::RParen) && !check_token(tokens, *pos, TokenKind::Eof)
+    while !check_token(tokens, *pos, TokenKind::RParen)
+        && !check_token(tokens, *pos, TokenKind::Eof)
     {
         // Parse procedure argument
         let arg_start = *pos;
@@ -626,32 +642,38 @@ pub fn parse_procedure_argument_list(
         if !consume_if(tokens, pos, TokenKind::Comma) {
             break;
         }
-        if check_token(tokens, *pos, TokenKind::RParen) || check_token(tokens, *pos, TokenKind::Eof) {
+        if check_token(tokens, *pos, TokenKind::RParen) || check_token(tokens, *pos, TokenKind::Eof)
+        {
             diags.push(
-                Diag::error("Expected argument expression after ','")
-                    .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map(|t| t.span.clone())
-                            .unwrap_or(start_pos..start_pos),
-                        "expected argument expression here",
-                    ),
+                Diag::error("Expected argument expression after ','").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start_pos..start_pos),
+                    "expected argument expression here",
+                ),
             );
             break;
         }
     }
 
     // Expect closing parenthesis
-    let end_span = if let Ok(span) = expect_token(tokens, pos, TokenKind::RParen, "procedure argument list")
-    {
-        span.end
-    } else {
-        diags.push(
-            Diag::error("Expected closing parenthesis in procedure argument list")
-                .with_primary_label(tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start_pos..start_pos), "expected ')' here"),
-        );
-        *pos
-    };
+    let end_span =
+        if let Ok(span) = expect_token(tokens, pos, TokenKind::RParen, "procedure argument list") {
+            span.end
+        } else {
+            diags.push(
+                Diag::error("Expected closing parenthesis in procedure argument list")
+                    .with_primary_label(
+                        tokens
+                            .get(*pos)
+                            .map(|t| t.span.clone())
+                            .unwrap_or(start_pos..start_pos),
+                        "expected ')' here",
+                    ),
+            );
+            *pos
+        };
 
     let list = ProcedureArgumentList {
         arguments,
@@ -741,22 +763,23 @@ pub fn parse_yield_item_list(tokens: &[Token], pos: &mut usize) -> ParseResult<Y
             || check_token(tokens, *pos, TokenKind::Next)
         {
             diags.push(
-                Diag::error("Expected yield item after ','")
-                    .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map(|t| t.span.clone())
-                            .unwrap_or(start_pos..start_pos),
-                        "expected yield item here",
-                    ),
+                Diag::error("Expected yield item after ','").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start_pos..start_pos),
+                    "expected yield item here",
+                ),
             );
             break;
         }
     }
 
     if items.is_empty() && diags.is_empty() {
-        diags.push(Diag::error("Expected yield items")
-            .with_primary_label(start_pos..start_pos, "expected yield items here"));
+        diags.push(
+            Diag::error("Expected yield items")
+                .with_primary_label(start_pos..start_pos, "expected yield items here"),
+        );
         return (None, diags);
     }
 
@@ -782,7 +805,12 @@ pub fn parse_nested_procedure_specification(
     let mut diags = vec![];
 
     // Expect opening brace
-    if let Err(diag) = expect_token(tokens, pos, TokenKind::LBrace, "nested procedure specification") {
+    if let Err(diag) = expect_token(
+        tokens,
+        pos,
+        TokenKind::LBrace,
+        "nested procedure specification",
+    ) {
         diags.push(*diag);
         return (None, diags);
     }
@@ -792,11 +820,24 @@ pub fn parse_nested_procedure_specification(
     diags.extend(body_diags);
 
     // Expect closing brace
-    let end_span = if let Ok(span) = expect_token(tokens, pos, TokenKind::RBrace, "nested procedure specification") {
+    let end_span = if let Ok(span) = expect_token(
+        tokens,
+        pos,
+        TokenKind::RBrace,
+        "nested procedure specification",
+    ) {
         span.end
     } else {
-        diags.push(Diag::error("Expected closing brace in nested procedure specification")
-            .with_primary_label(tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start_pos..start_pos), "expected '}' here"));
+        diags.push(
+            Diag::error("Expected closing brace in nested procedure specification")
+                .with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start_pos..start_pos),
+                    "expected '}' here",
+                ),
+        );
         *pos
     };
 
@@ -947,7 +988,9 @@ fn is_at_schema_follow_boundary(kind: &TokenKind) -> bool {
 }
 
 fn consume_typed_marker(tokens: &[Token], pos: &mut usize) -> bool {
-    if check_token(tokens, *pos, TokenKind::DoubleColon) || check_token(tokens, *pos, TokenKind::Typed) {
+    if check_token(tokens, *pos, TokenKind::DoubleColon)
+        || check_token(tokens, *pos, TokenKind::Typed)
+    {
         *pos += 1;
         true
     } else {
@@ -1046,24 +1089,15 @@ pub fn parse_binding_variable_definition(
     match &tokens[*pos].kind {
         TokenKind::Graph | TokenKind::Property => {
             let (def_opt, diags) = parse_graph_variable_definition(tokens, pos);
-            (
-                def_opt.map(BindingVariableDefinition::Graph),
-                diags,
-            )
+            (def_opt.map(BindingVariableDefinition::Graph), diags)
         }
         TokenKind::Table | TokenKind::Binding => {
             let (def_opt, diags) = parse_binding_table_variable_definition(tokens, pos);
-            (
-                def_opt.map(BindingVariableDefinition::BindingTable),
-                diags,
-            )
+            (def_opt.map(BindingVariableDefinition::BindingTable), diags)
         }
         TokenKind::Value => {
             let (def_opt, diags) = parse_value_variable_definition(tokens, pos);
-            (
-                def_opt.map(BindingVariableDefinition::Value),
-                diags,
-            )
+            (def_opt.map(BindingVariableDefinition::Value), diags)
         }
         _ => (None, vec![]),
     }
@@ -1118,14 +1152,13 @@ pub fn parse_graph_variable_definition(
             }
         } else if had_typed_marker {
             diags.push(
-                Diag::error("Expected graph type after typed marker")
-                    .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map(|t| t.span.clone())
-                            .unwrap_or(start_pos..start_pos),
-                        "expected graph type here",
-                    ),
+                Diag::error("Expected graph type after typed marker").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start_pos..start_pos),
+                    "expected graph type here",
+                ),
             );
             return (None, diags);
         }
@@ -1133,14 +1166,13 @@ pub fn parse_graph_variable_definition(
 
     if !consume_if(tokens, pos, TokenKind::Eq) {
         diags.push(
-            Diag::error("Expected '=' in graph variable definition")
-                .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start_pos..start_pos),
-                    "expected '=' here",
-                ),
+            Diag::error("Expected '=' in graph variable definition").with_primary_label(
+                tokens
+                    .get(*pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or(start_pos..start_pos),
+                "expected '=' here",
+            ),
         );
         return (None, diags);
     }
@@ -1241,7 +1273,12 @@ pub fn parse_binding_table_variable_definition(
     let is_binding = consume_if(tokens, pos, TokenKind::Binding);
 
     // Expect TABLE keyword
-    if let Err(diag) = expect_token(tokens, pos, TokenKind::Table, "binding table variable definition") {
+    if let Err(diag) = expect_token(
+        tokens,
+        pos,
+        TokenKind::Table,
+        "binding table variable definition",
+    ) {
         diags.push(*diag);
         return (None, diags);
     }
@@ -1276,14 +1313,13 @@ pub fn parse_binding_table_variable_definition(
             }
         } else if had_typed_marker {
             diags.push(
-                Diag::error("Expected binding table type after typed marker")
-                    .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map(|t| t.span.clone())
-                            .unwrap_or(start_pos..start_pos),
-                        "expected binding table type here",
-                    ),
+                Diag::error("Expected binding table type after typed marker").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start_pos..start_pos),
+                    "expected binding table type here",
+                ),
             );
             return (None, diags);
         }
@@ -1291,14 +1327,13 @@ pub fn parse_binding_table_variable_definition(
 
     if !consume_if(tokens, pos, TokenKind::Eq) {
         diags.push(
-            Diag::error("Expected '=' in binding table variable definition")
-                .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start_pos..start_pos),
-                    "expected '=' here",
-                ),
+            Diag::error("Expected '=' in binding table variable definition").with_primary_label(
+                tokens
+                    .get(*pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or(start_pos..start_pos),
+                "expected '=' here",
+            ),
         );
         return (None, diags);
     }
@@ -1404,14 +1439,13 @@ pub fn parse_value_variable_definition(
             }
         } else if had_typed_marker {
             diags.push(
-                Diag::error("Expected value type after typed marker")
-                    .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map(|t| t.span.clone())
-                            .unwrap_or(start_pos..start_pos),
-                        "expected value type here",
-                    ),
+                Diag::error("Expected value type after typed marker").with_primary_label(
+                    tokens
+                        .get(*pos)
+                        .map(|t| t.span.clone())
+                        .unwrap_or(start_pos..start_pos),
+                    "expected value type here",
+                ),
             );
             return (None, diags);
         }
@@ -1419,14 +1453,13 @@ pub fn parse_value_variable_definition(
 
     if !consume_if(tokens, pos, TokenKind::Eq) {
         diags.push(
-            Diag::error("Expected '=' in value variable definition")
-                .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start_pos..start_pos),
-                    "expected '=' here",
-                ),
+            Diag::error("Expected '=' in value variable definition").with_primary_label(
+                tokens
+                    .get(*pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or(start_pos..start_pos),
+                "expected '=' here",
+            ),
         );
         return (None, diags);
     }
@@ -1527,8 +1560,11 @@ fn parse_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<ProcedureSt
 
     let mut candidates: Vec<(usize, usize, ProcedureStatement, Vec<Diag>)> = Vec::new();
     let start_kind = &tokens[start].kind;
-    let is_optional_call =
-        matches!(start_kind, TokenKind::Optional) && matches!(tokens.get(start + 1).map(|t| &t.kind), Some(TokenKind::Call));
+    let is_optional_call = matches!(start_kind, TokenKind::Optional)
+        && matches!(
+            tokens.get(start + 1).map(|t| &t.kind),
+            Some(TokenKind::Call)
+        );
 
     // Query candidate
     if !matches!(start_kind, TokenKind::Create | TokenKind::Drop) {
@@ -1571,8 +1607,10 @@ fn parse_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<ProcedureSt
     }
 
     // Catalog candidate
-    if matches!(start_kind, TokenKind::Create | TokenKind::Drop | TokenKind::Call)
-        || is_optional_call
+    if matches!(
+        start_kind,
+        TokenKind::Create | TokenKind::Drop | TokenKind::Call
+    ) || is_optional_call
     {
         let (catalog_opt, catalog_diags, catalog_pos) = parse_catalog_statement_at(tokens, start);
         if let Some(catalog) = catalog_opt {
@@ -1593,7 +1631,8 @@ fn parse_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<ProcedureSt
     for idx in 1..candidates.len() {
         let (best_pos, best_diag_count, _, _) = &candidates[best_idx];
         let (pos_candidate, diag_candidate, _, _) = &candidates[idx];
-        if pos_candidate > best_pos || (pos_candidate == best_pos && diag_candidate < best_diag_count)
+        if pos_candidate > best_pos
+            || (pos_candidate == best_pos && diag_candidate < best_diag_count)
         {
             best_idx = idx;
         }
@@ -1735,8 +1774,15 @@ pub fn parse_at_schema_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<
     }
 
     let Some(schema) = parsed_schema else {
-        diags.push(Diag::error("Expected schema reference after AT keyword")
-            .with_primary_label(tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(start_pos..start_pos), "expected schema reference here"));
+        diags.push(
+            Diag::error("Expected schema reference after AT keyword").with_primary_label(
+                tokens
+                    .get(*pos)
+                    .map(|t| t.span.clone())
+                    .unwrap_or(start_pos..start_pos),
+                "expected schema reference here",
+            ),
+        );
         return (None, diags);
     };
     *pos = schema_ref_end;
@@ -1779,7 +1825,10 @@ mod tests {
         let mut pos = 0;
 
         let (stmt_opt, diags) = parse_call_procedure_statement(&tokens, &mut pos);
-        assert!(stmt_opt.is_some(), "Failed to parse OPTIONAL CALL statement");
+        assert!(
+            stmt_opt.is_some(),
+            "Failed to parse OPTIONAL CALL statement"
+        );
         assert!(diags.is_empty(), "Unexpected diagnostics: {diags:?}");
 
         let stmt = stmt_opt.unwrap();
@@ -1807,7 +1856,10 @@ mod tests {
         let mut pos = 0;
 
         let (scope_opt, diags) = parse_variable_scope_clause(&tokens, &mut pos);
-        assert!(scope_opt.is_some(), "Failed to parse variable scope with variables");
+        assert!(
+            scope_opt.is_some(),
+            "Failed to parse variable scope with variables"
+        );
         assert!(diags.is_empty(), "Unexpected diagnostics: {diags:?}");
 
         let scope = scope_opt.unwrap();
@@ -1850,7 +1902,10 @@ mod tests {
         let mut pos = 0;
 
         let (args_opt, _diags) = parse_procedure_argument_list(&tokens, &mut pos);
-        assert!(args_opt.is_some(), "Failed to parse argument list with args");
+        assert!(
+            args_opt.is_some(),
+            "Failed to parse argument list with args"
+        );
 
         let args = args_opt.unwrap();
         assert_eq!(args.arguments.len(), 3);
@@ -1874,7 +1929,10 @@ mod tests {
         let mut pos = 0;
 
         let (def_opt, _diags) = parse_value_variable_definition(&tokens, &mut pos);
-        assert!(def_opt.is_some(), "Failed to parse value variable definition with initializer");
+        assert!(
+            def_opt.is_some(),
+            "Failed to parse value variable definition with initializer"
+        );
 
         let def = def_opt.unwrap();
         assert_eq!(def.variable.name.as_str(), "counter");

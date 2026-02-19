@@ -29,7 +29,10 @@ pub use ast::{Span, Spanned};
 
 // Re-export lexer types for convenience.
 pub use diag::{Diag, DiagLabel, DiagSeverity, LabelRole};
-pub use lexer::keywords::{classify_keyword, is_non_reserved_word, is_pre_reserved_word, is_reserved_word, KeywordClassification};
+pub use lexer::keywords::{
+    KeywordClassification, classify_keyword, is_non_reserved_word, is_pre_reserved_word,
+    is_reserved_word,
+};
 pub use lexer::token::{Token, TokenKind};
 pub use lexer::{Lexer, LexerResult, tokenize};
 
@@ -142,7 +145,9 @@ fn parse_and_validate_internal(
     let Some(program) = parse_result.ast else {
         return ParseAndValidateResult {
             ir: None,
-            diagnostics: vec![miette::Report::msg("Failed to parse source (no AST produced)")],
+            diagnostics: vec![miette::Report::msg(
+                "Failed to parse source (no AST produced)",
+            )],
         };
     };
 
@@ -188,7 +193,10 @@ mod tests {
     fn parse_and_validate_undefined_variable() {
         let source = "MATCH (n:Person) RETURN m";
         let result = parse_and_validate(source);
-        assert!(result.ir.is_none(), "Expected validation error for undefined variable");
+        assert!(
+            result.ir.is_none(),
+            "Expected validation error for undefined variable"
+        );
         assert!(!result.diagnostics.is_empty(), "Expected diagnostics");
     }
 
@@ -203,7 +211,10 @@ mod tests {
             warn_on_disconnected_patterns: true,
         };
         let result = parse_and_validate_with_config(source, config);
-        assert!(result.ir.is_some(), "Expected successful validation in strict mode");
+        assert!(
+            result.ir.is_some(),
+            "Expected successful validation in strict mode"
+        );
     }
 
     #[test]
@@ -228,7 +239,10 @@ mod tests {
         let diag = &result.diagnostics[0];
         let diag_str = format!("{:?}", diag);
         // Verify it's not a simple message-only diagnostic
-        assert!(diag_str.len() > 50, "Diagnostic should have rich structure, not just a message");
+        assert!(
+            diag_str.len() > 50,
+            "Diagnostic should have rich structure, not just a message"
+        );
     }
 
     #[test]

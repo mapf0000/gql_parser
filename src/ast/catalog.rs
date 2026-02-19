@@ -8,9 +8,7 @@
 
 use crate::ast::Span;
 use crate::ast::procedure::CallProcedureStatement;
-use crate::ast::references::{
-    GraphReference, GraphTypeReference, SchemaReference,
-};
+use crate::ast::references::{GraphReference, GraphTypeReference, SchemaReference};
 
 // ============================================================================
 // Schema Statements

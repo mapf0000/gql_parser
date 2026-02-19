@@ -42,7 +42,10 @@ fn test_procedure_call_with_arguments() {
     let mut pos = 0;
 
     let (stmt_opt, _diags) = parse_call_procedure_statement(&tokens, &mut pos);
-    assert!(stmt_opt.is_some(), "Failed to parse procedure call with arguments");
+    assert!(
+        stmt_opt.is_some(),
+        "Failed to parse procedure call with arguments"
+    );
 
     let stmt = stmt_opt.unwrap();
     if let ProcedureCall::Named(named) = &stmt.call {
@@ -61,7 +64,10 @@ fn test_procedure_call_with_yield() {
     let mut pos = 0;
 
     let (stmt_opt, diags) = parse_call_procedure_statement(&tokens, &mut pos);
-    assert!(stmt_opt.is_some(), "Failed to parse procedure call with yield");
+    assert!(
+        stmt_opt.is_some(),
+        "Failed to parse procedure call with yield"
+    );
     assert!(diags.is_empty(), "Unexpected diagnostics: {diags:?}");
 
     let stmt = stmt_opt.unwrap();
@@ -81,7 +87,10 @@ fn test_procedure_call_with_yield_aliases() {
     let mut pos = 0;
 
     let (stmt_opt, diags) = parse_call_procedure_statement(&tokens, &mut pos);
-    assert!(stmt_opt.is_some(), "Failed to parse procedure call with yield aliases");
+    assert!(
+        stmt_opt.is_some(),
+        "Failed to parse procedure call with yield aliases"
+    );
     assert!(diags.is_empty(), "Unexpected diagnostics: {diags:?}");
 
     let stmt = stmt_opt.unwrap();
@@ -103,7 +112,10 @@ fn test_optional_procedure_call() {
     let mut pos = 0;
 
     let (stmt_opt, diags) = parse_call_procedure_statement(&tokens, &mut pos);
-    assert!(stmt_opt.is_some(), "Failed to parse optional procedure call");
+    assert!(
+        stmt_opt.is_some(),
+        "Failed to parse optional procedure call"
+    );
     assert!(diags.is_empty(), "Unexpected diagnostics: {diags:?}");
 
     let stmt = stmt_opt.unwrap();
@@ -117,7 +129,10 @@ fn test_inline_procedure_call_with_empty_scope() {
     let mut pos = 0;
 
     let (stmt_opt, _diags) = parse_call_procedure_statement(&tokens, &mut pos);
-    assert!(stmt_opt.is_some(), "Failed to parse inline procedure call with empty scope");
+    assert!(
+        stmt_opt.is_some(),
+        "Failed to parse inline procedure call with empty scope"
+    );
 
     let stmt = stmt_opt.unwrap();
     if let ProcedureCall::Inline(inline) = &stmt.call {
@@ -136,7 +151,10 @@ fn test_inline_procedure_call_with_variables() {
     let mut pos = 0;
 
     let (stmt_opt, _diags) = parse_call_procedure_statement(&tokens, &mut pos);
-    assert!(stmt_opt.is_some(), "Failed to parse inline procedure call with variables");
+    assert!(
+        stmt_opt.is_some(),
+        "Failed to parse inline procedure call with variables"
+    );
 
     let stmt = stmt_opt.unwrap();
     if let ProcedureCall::Inline(inline) = &stmt.call {
@@ -171,7 +189,10 @@ fn test_value_variable_definition_with_initializer() {
     let mut pos = 0;
 
     let (def_opt, _diags) = parse_value_variable_definition(&tokens, &mut pos);
-    assert!(def_opt.is_some(), "Failed to parse value variable with initializer");
+    assert!(
+        def_opt.is_some(),
+        "Failed to parse value variable with initializer"
+    );
 
     let def = def_opt.unwrap();
     assert_eq!(def.variable.name.as_str(), "counter");
@@ -251,7 +272,10 @@ fn test_multiple_variable_definitions() {
     let mut pos = 0;
 
     let (block_opt, _diags) = parse_binding_variable_definition_block(&tokens, &mut pos);
-    assert!(block_opt.is_some(), "Failed to parse variable definition block");
+    assert!(
+        block_opt.is_some(),
+        "Failed to parse variable definition block"
+    );
 
     let block = block_opt.unwrap();
     assert_eq!(block.definitions.len(), 1);
@@ -305,14 +329,22 @@ fn test_yield_item_with_alias() {
     let mut pos = 0;
 
     let (yield_opt, diags) = parse_yield_clause(&tokens, &mut pos);
-    assert!(yield_opt.is_some(), "Failed to parse yield clause with alias");
+    assert!(
+        yield_opt.is_some(),
+        "Failed to parse yield clause with alias"
+    );
     assert!(diags.is_empty(), "Unexpected diagnostics: {diags:?}");
 
     let yield_clause = yield_opt.unwrap();
     assert_eq!(yield_clause.items.items.len(), 1);
     assert!(yield_clause.items.items[0].alias.is_some());
     assert_eq!(
-        yield_clause.items.items[0].alias.as_ref().unwrap().name.as_str(),
+        yield_clause.items.items[0]
+            .alias
+            .as_ref()
+            .unwrap()
+            .name
+            .as_str(),
         "result"
     );
 }

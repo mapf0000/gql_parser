@@ -243,6 +243,9 @@ pub struct TypeTable {
     /// Type constraints for expressions.
     constraints: HashMap<ExprId, Vec<TypeConstraint>>,
 
+    /// Span-based type lookup for expressions (temporary solution until ExprId is integrated into AST).
+    span_types: HashMap<(usize, usize), Type>,
+
     /// Next expression ID to assign.
     next_id: usize,
 }
@@ -253,6 +256,7 @@ impl TypeTable {
         Self {
             types: HashMap::new(),
             constraints: HashMap::new(),
+            span_types: HashMap::new(),
             next_id: 0,
         }
     }
@@ -272,6 +276,16 @@ impl TypeTable {
     /// Gets the type of an expression.
     pub fn get_type(&self, expr_id: ExprId) -> Option<&Type> {
         self.types.get(&expr_id)
+    }
+
+    /// Sets the type for an expression by span (temporary solution).
+    pub fn set_type_by_span(&mut self, span: &crate::ast::Span, ty: Type) {
+        self.span_types.insert((span.start, span.end), ty);
+    }
+
+    /// Gets the type of an expression by span (temporary solution).
+    pub fn get_type_by_span(&self, span: &crate::ast::Span) -> Option<&Type> {
+        self.span_types.get(&(span.start, span.end))
     }
 
     /// Adds a constraint for an expression.

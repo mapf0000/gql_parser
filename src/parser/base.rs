@@ -4,9 +4,9 @@
 //! code duplication. All parsers use composition with `TokenStream` rather than
 //! reimplementing these methods.
 
+use crate::ast::Span;
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
-use crate::ast::Span;
 
 /// Common error type for parsing operations.
 pub type ParseError = Box<Diag>;

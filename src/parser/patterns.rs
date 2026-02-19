@@ -4,8 +4,8 @@ use crate::ast::expression::{Expression, Literal};
 use crate::ast::query::*;
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
-use crate::parser::expression::parse_expression;
 use crate::parser::LegacyParseResult;
+use crate::parser::expression::parse_expression;
 use smol_str::SmolStr;
 
 /// Parse result with optional value and diagnostics.

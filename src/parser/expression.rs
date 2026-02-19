@@ -391,7 +391,8 @@ impl<'a> ExpressionParser<'a> {
             | TokenKind::Timestamp
             | TokenKind::Datetime
             | TokenKind::Duration
-                if self.stream
+                if self
+                    .stream
                     .peek()
                     .map(|token| &token.kind)
                     .is_some_and(|kind| matches!(kind, TokenKind::StringLiteral(_))) =>
@@ -438,19 +439,27 @@ impl<'a> ExpressionParser<'a> {
                 Ok(Expression::AggregateFunction(Box::new(agg_func)))
             }
 
-            TokenKind::Path if self.stream.peek().map(|t| &t.kind) == Some(&TokenKind::LBracket) => {
+            TokenKind::Path
+                if self.stream.peek().map(|t| &t.kind) == Some(&TokenKind::LBracket) =>
+            {
                 self.parse_path_constructor()
             }
 
-            TokenKind::Record if self.stream.peek().map(|t| &t.kind) == Some(&TokenKind::LBrace) => {
+            TokenKind::Record
+                if self.stream.peek().map(|t| &t.kind) == Some(&TokenKind::LBrace) =>
+            {
                 self.parse_record_constructor()
             }
 
-            TokenKind::Property if self.stream.peek().map(|t| &t.kind) == Some(&TokenKind::Graph) => {
+            TokenKind::Property
+                if self.stream.peek().map(|t| &t.kind) == Some(&TokenKind::Graph) =>
+            {
                 self.parse_property_graph_expression()
             }
 
-            TokenKind::Binding if self.stream.peek().map(|t| &t.kind) == Some(&TokenKind::Table) => {
+            TokenKind::Binding
+                if self.stream.peek().map(|t| &t.kind) == Some(&TokenKind::Table) =>
+            {
                 self.parse_binding_table_expression()
             }
 
@@ -553,7 +562,9 @@ impl<'a> ExpressionParser<'a> {
                 Literal::ByteString(value)
             }
             _ => {
-                return Err(self.stream.error_here(format!("expected literal, found {}", token.kind)));
+                return Err(self
+                    .stream
+                    .error_here(format!("expected literal, found {}", token.kind)));
             }
         };
 
@@ -1023,7 +1034,9 @@ impl<'a> ExpressionParser<'a> {
 
             while depth > 0 {
                 if self.stream.check(&TokenKind::Eof) {
-                    return Err(self.stream.error_here("unclosed EXISTS graph pattern, expected '}'"));
+                    return Err(self
+                        .stream
+                        .error_here("unclosed EXISTS graph pattern, expected '}'"));
                 }
 
                 let span = self.stream.current().span.clone();
@@ -1112,7 +1125,8 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_value_type_inline(&mut self) -> ParseResult<ValueType> {
-        let (value_type, consumed) = parse_value_type_prefix(&self.stream.tokens()[self.stream.position()..])?;
+        let (value_type, consumed) =
+            parse_value_type_prefix(&self.stream.tokens()[self.stream.position()..])?;
         if consumed == 0 {
             return Err(self.stream.error_here("expected type"));
         }

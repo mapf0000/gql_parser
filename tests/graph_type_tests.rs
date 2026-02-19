@@ -18,8 +18,8 @@ fn test_basic_compilation() {
 #[test]
 fn test_graph_type_parser_module_exists() {
     // Verify the graph_type parser module is accessible
-    use gql_parser::parser::graph_type::GraphTypeParser;
     use gql_parser::lexer::token::{Token, TokenKind};
+    use gql_parser::parser::graph_type::GraphTypeParser;
 
     let tokens = vec![
         Token::new(TokenKind::LBrace, 0..1),
@@ -36,8 +36,8 @@ fn test_graph_type_parser_module_exists() {
 
 #[test]
 fn test_property_types_specification_empty() {
-    use gql_parser::parser::graph_type::GraphTypeParser;
     use gql_parser::lexer::token::{Token, TokenKind};
+    use gql_parser::parser::graph_type::GraphTypeParser;
 
     let tokens = vec![
         Token::new(TokenKind::LBrace, 0..1),
@@ -55,8 +55,8 @@ fn test_property_types_specification_empty() {
 
 #[test]
 fn test_label_set_phrase_single_label() {
-    use gql_parser::parser::graph_type::GraphTypeParser;
     use gql_parser::lexer::token::{Token, TokenKind};
+    use gql_parser::parser::graph_type::GraphTypeParser;
     use smol_str::SmolStr;
 
     let tokens = vec![
@@ -73,8 +73,8 @@ fn test_label_set_phrase_single_label() {
 
 #[test]
 fn test_label_set_specification_multiple_labels() {
-    use gql_parser::parser::graph_type::GraphTypeParser;
     use gql_parser::lexer::token::{Token, TokenKind};
+    use gql_parser::parser::graph_type::GraphTypeParser;
     use smol_str::SmolStr;
 
     let tokens = vec![

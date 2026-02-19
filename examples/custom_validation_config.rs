@@ -2,8 +2,11 @@
 //!
 //! This example shows how to configure the semantic validator with custom settings.
 
-use gql_parser::{parse, semantic::{SemanticValidator, ValidationConfig}};
 use gql_parser::diag::DiagSeverity;
+use gql_parser::{
+    parse,
+    semantic::{SemanticValidator, ValidationConfig},
+};
 
 fn main() {
     println!("=== Custom Validation Configuration Demo ===\n");
@@ -55,8 +58,7 @@ fn demo_default_config() {
 fn demo_strict_mode() {
     println!("--- Example 2: Strict Mode ---");
 
-    let validator = SemanticValidator::new()
-        .with_strict_mode(true);
+    let validator = SemanticValidator::new().with_strict_mode(true);
 
     let source = "MATCH (n:Person) RETURN n";
 
@@ -97,7 +99,7 @@ fn demo_custom_config() {
     };
 
     let validator = SemanticValidator::with_config(config);
-    let source = "MATCH (n:Person) LET n = n.name RETURN n";  // Variable shadowing
+    let source = "MATCH (n:Person) LET n = n.name RETURN n"; // Variable shadowing
 
     let parse_result = parse(source);
     if let Some(ast) = parse_result.ast {

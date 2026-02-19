@@ -13,7 +13,10 @@ pub enum SchemaError {
     LabelNotFound { label: String },
 
     /// A property was not found for a given label.
-    PropertyNotFound { label: Option<String>, property: String },
+    PropertyNotFound {
+        label: Option<String>,
+        property: String,
+    },
 
     /// A property has an incompatible type.
     PropertyTypeMismatch {
@@ -267,13 +270,11 @@ impl MockSchema {
         // Add KNOWS edge label
         schema.add_edge_label(
             "KNOWS",
-            vec![
-                PropertyDefinition {
-                    name: "since".to_string(),
-                    property_type: "INTEGER".to_string(),
-                    required: false,
-                },
-            ],
+            vec![PropertyDefinition {
+                name: "since".to_string(),
+                property_type: "INTEGER".to_string(),
+                required: false,
+            }],
         );
 
         // Add WORKS_AT edge label
@@ -316,15 +317,17 @@ impl Schema for MockSchema {
         if let Some(lbl) = label {
             // Search in node labels first
             if let Some(node_label) = self.get_node_label(lbl)
-                && let Some(prop) = node_label.properties.iter().find(|p| p.name == property) {
-                    return Some(prop);
-                }
+                && let Some(prop) = node_label.properties.iter().find(|p| p.name == property)
+            {
+                return Some(prop);
+            }
 
             // Then search in edge labels
             if let Some(edge_label) = self.get_edge_label(lbl)
-                && let Some(prop) = edge_label.properties.iter().find(|p| p.name == property) {
-                    return Some(prop);
-                }
+                && let Some(prop) = edge_label.properties.iter().find(|p| p.name == property)
+            {
+                return Some(prop);
+            }
 
             None
         } else {
@@ -419,6 +422,10 @@ mod tests {
         assert!(schema.validate_property(None, "name").is_ok());
 
         // Invalid properties
-        assert!(schema.validate_property(Some("Person"), "nonexistent").is_err());
+        assert!(
+            schema
+                .validate_property(Some("Person"), "nonexistent")
+                .is_err()
+        );
     }
 }

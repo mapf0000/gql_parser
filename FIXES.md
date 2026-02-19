@@ -1,6 +1,6 @@
 # Fixes Tracker (Active)
 
-Last reviewed: 2026-02-18
+Last reviewed: 2026-02-19
 
 ## Scope
 This file is intentionally short and tracks only active fix streams. Detailed implementation plans live in sprint-specific fix files.
@@ -17,27 +17,27 @@ This file is intentionally short and tracks only active fix streams. Detailed im
 
 ### S14-001: Semantic warnings are not surfaced on success
 - Priority: P0
-- Detailed plan: `SPRINT14_FIXES.md` (F1)
+- Detailed plan: `SPRINT14.md` (Current Remaining TODO / F1)
 
 ### S14-002: Scope resolution is unsound (leakage + non-reference-site lookup)
 - Priority: P0
-- Detailed plan: `SPRINT14_FIXES.md` (F2)
+- Detailed plan: `SPRINT14.md` (Current Remaining TODO / F2)
 
 ### S14-003: Full semantic enforcement is incomplete (TODO paths)
 - Priority: P0
-- Detailed plan: `SPRINT14_FIXES.md` (F3)
+- Detailed plan: `SPRINT14.md` (Current Remaining TODO / F3)
 
 ### S14-004: Type inference is not persisted in IR type table
 - Priority: P1
-- Detailed plan: `SPRINT14_FIXES.md` (F4)
+- Detailed plan: `SPRINT14.md` (Current Remaining TODO / F4)
 
 ### S14-005: Strict-mode aggregation/grouping checks are no-op
 - Priority: P1
-- Detailed plan: `SPRINT14_FIXES.md` (F5)
+- Detailed plan: `SPRINT14.md` (Current Remaining TODO / F5)
 
 ### S14-006: Semantic docs/examples are out of sync
 - Priority: P1
-- Detailed plan: `SPRINT14_FIXES.md` (F6)
+- Detailed plan: `SPRINT14.md` (Current Remaining TODO / F6)
 
 ## Definition of Done
 - All `S14-*` streams closed with tests.

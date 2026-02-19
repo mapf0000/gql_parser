@@ -4,12 +4,12 @@ use crate::ast::{
     CallCatalogModifyingProcedureStatement, CatalogStatement, CatalogStatementKind, CommitCommand,
     CreateGraphStatement, CreateGraphTypeStatement, CreateSchemaStatement, DropGraphStatement,
     DropGraphTypeStatement, DropSchemaStatement, Expression, GraphReference, GraphTypeReference,
-    GraphTypeSource, GraphTypeSpec, MutationStatement, Program, QueryStatement,
-    RollbackCommand, SchemaReference, SessionCloseCommand, SessionCommand, SessionResetCommand,
-    SessionResetTarget, SessionSetCommand, SessionSetGraphClause, SessionSetParameterClause,
-    SessionSetSchemaClause, SessionSetTimeZoneClause, SessionStatement, Span,
-    StartTransactionCommand, Statement, TransactionAccessMode, TransactionCharacteristics,
-    TransactionCommand, TransactionMode, TransactionStatement,
+    GraphTypeSource, GraphTypeSpec, MutationStatement, Program, QueryStatement, RollbackCommand,
+    SchemaReference, SessionCloseCommand, SessionCommand, SessionResetCommand, SessionResetTarget,
+    SessionSetCommand, SessionSetGraphClause, SessionSetParameterClause, SessionSetSchemaClause,
+    SessionSetTimeZoneClause, SessionStatement, Span, StartTransactionCommand, Statement,
+    TransactionAccessMode, TransactionCharacteristics, TransactionCommand, TransactionMode,
+    TransactionStatement,
 };
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
@@ -52,8 +52,10 @@ pub(crate) fn parse_program_tokens(tokens: &[Token], source_len: usize) -> (Prog
     while cursor < tokens.len() {
         let start_cursor = cursor;
         let syntax = if matches!(tokens[cursor].kind, TokenKind::Optional)
-            && matches!(tokens.get(cursor + 1).map(|t| &t.kind), Some(TokenKind::Call))
-        {
+            && matches!(
+                tokens.get(cursor + 1).map(|t| &t.kind),
+                Some(TokenKind::Call)
+            ) {
             SyntaxToken::CatalogStart
         } else {
             classify(&tokens[cursor].kind)
@@ -171,14 +173,20 @@ fn find_statement_end(tokens: &[Token], start: usize, class: StatementClass) -> 
         let starts_with_optional_call = matches!(
             tokens.get(start).map(|t| &t.kind),
             Some(TokenKind::Optional)
-        ) && matches!(tokens.get(start + 1).map(|t| &t.kind), Some(TokenKind::Call));
+        ) && matches!(
+            tokens.get(start + 1).map(|t| &t.kind),
+            Some(TokenKind::Call)
+        );
 
         while cursor < tokens.len() {
             let kind = &tokens[cursor].kind;
             let at_top_level = paren_depth == 0 && brace_depth == 0 && bracket_depth == 0;
 
             if at_top_level {
-                if matches!(kind, TokenKind::Semicolon | TokenKind::Next | TokenKind::Eof) {
+                if matches!(
+                    kind,
+                    TokenKind::Semicolon | TokenKind::Next | TokenKind::Eof
+                ) {
                     return cursor;
                 }
 
@@ -1249,12 +1257,7 @@ fn parse_inline_graph_type_spec(tokens: &[Token], start: usize) -> ParseOutcome<
     }
 
     let end_idx = end.ok_or_else(|| {
-        expected_token_diag(
-            tokens,
-            tokens.len(),
-            "}",
-            "inline graph type specification",
-        )
+        expected_token_diag(tokens, tokens.len(), "}", "inline graph type specification")
     })?;
 
     let mut inline_tokens = tokens[start..=end_idx].to_vec();

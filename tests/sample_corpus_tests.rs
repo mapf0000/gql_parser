@@ -36,7 +36,11 @@ fn assert_sample_parses(filename: &str, description: &str) {
 
     // Log diagnostics if any (for debugging)
     if !result.diagnostics.is_empty() {
-        eprintln!("Sample '{}' has {} diagnostics:", filename, result.diagnostics.len());
+        eprintln!(
+            "Sample '{}' has {} diagnostics:",
+            filename,
+            result.diagnostics.len()
+        );
         for diag in &result.diagnostics {
             eprintln!("  - {}", diag);
         }
@@ -48,7 +52,7 @@ fn sample_01_create_closed_graph_from_graph_type_double_colon() {
     // CREATE GRAPH mySocialNetwork ::socialNetworkGraphType
     assert_sample_parses(
         "create_closed_graph_from_graph_type_(double_colon).gql",
-        "Graph creation with double-colon type annotation syntax"
+        "Graph creation with double-colon type annotation syntax",
     );
 }
 
@@ -57,7 +61,7 @@ fn sample_02_create_closed_graph_from_graph_type_lexical() {
     // CREATE GRAPH mySocialNetwork TYPED socialNetworkGraphType
     assert_sample_parses(
         "create_closed_graph_from_graph_type_(lexical).gql",
-        "Graph creation with lexical TYPED keyword"
+        "Graph creation with lexical TYPED keyword",
     );
 }
 
@@ -66,26 +70,20 @@ fn sample_03_create_closed_graph_from_nested_graph_type_double_colon() {
     // CREATE GRAPH mySocialNetwork ::{...inline graph type...}
     assert_sample_parses(
         "create_closed_graph_from_nested_graph_type_(double_colon).gql",
-        "Graph creation with inline nested graph type specification"
+        "Graph creation with inline nested graph type specification",
     );
 }
 
 #[test]
 fn sample_04_create_graph() {
     // Multiple graph creation variants: ANY, with type, LIKE, AS COPY OF
-    assert_sample_parses(
-        "create_graph.gql",
-        "Various graph creation forms"
-    );
+    assert_sample_parses("create_graph.gql", "Various graph creation forms");
 }
 
 #[test]
 fn sample_05_create_schema() {
     // Schema creation with paths and NEXT chaining
-    assert_sample_parses(
-        "create_schema.gql",
-        "Schema DDL with procedure chaining"
-    );
+    assert_sample_parses("create_schema.gql", "Schema DDL with procedure chaining");
 }
 
 #[test]
@@ -93,7 +91,7 @@ fn sample_06_insert_statement() {
     // Node and edge insertion with properties
     assert_sample_parses(
         "insert_statement.gql",
-        "INSERT patterns with temporal literals and properties"
+        "INSERT patterns with temporal literals and properties",
     );
 }
 
@@ -102,7 +100,7 @@ fn sample_07_match_and_insert_example() {
     // Combined MATCH and INSERT
     assert_sample_parses(
         "match_and_insert_example.gql",
-        "Combined data-accessing and data-modifying query"
+        "Combined data-accessing and data-modifying query",
     );
 }
 
@@ -111,7 +109,7 @@ fn sample_08_match_with_exists_predicate_match_block_in_braces() {
     // EXISTS with braced MATCH block
     assert_sample_parses(
         "match_with_exists_predicate_(match_block_statement_in_braces).gql",
-        "EXISTS predicate with braced MATCH block"
+        "EXISTS predicate with braced MATCH block",
     );
 }
 
@@ -120,7 +118,7 @@ fn sample_09_match_with_exists_predicate_match_block_in_parentheses() {
     // EXISTS with parenthesized MATCH block
     assert_sample_parses(
         "match_with_exists_predicate_(match_block_statement_in_parentheses).gql",
-        "EXISTS predicate with parenthesized MATCH block"
+        "EXISTS predicate with parenthesized MATCH block",
     );
 }
 
@@ -129,7 +127,7 @@ fn sample_10_match_with_exists_predicate_nested_match_statement() {
     // EXISTS with nested MATCH and RETURN
     assert_sample_parses(
         "match_with_exists_predicate_(nested_match_statement).gql",
-        "EXISTS predicate with nested MATCH and RETURN clause"
+        "EXISTS predicate with nested MATCH and RETURN clause",
     );
 }
 
@@ -138,7 +136,7 @@ fn sample_11_session_set_graph_to_current_graph() {
     // SESSION SET GRAPH CURRENT_GRAPH
     assert_sample_parses(
         "session_set_graph_to_current_graph.gql",
-        "Session management with CURRENT_GRAPH function"
+        "Session management with CURRENT_GRAPH function",
     );
 }
 
@@ -147,7 +145,7 @@ fn sample_12_session_set_graph_to_current_property_graph() {
     // SESSION SET GRAPH CURRENT_PROPERTY_GRAPH
     assert_sample_parses(
         "session_set_graph_to_current_property_graph.gql",
-        "Session management with CURRENT_PROPERTY_GRAPH function"
+        "Session management with CURRENT_PROPERTY_GRAPH function",
     );
 }
 
@@ -156,7 +154,7 @@ fn sample_13_session_set_property_as_value() {
     // SESSION SET VALUE IF NOT EXISTS $exampleProperty = DATE '2023-10-10'
     assert_sample_parses(
         "session_set_property_as_value.gql",
-        "Session parameter with conditional assignment and temporal literal"
+        "Session parameter with conditional assignment and temporal literal",
     );
 }
 
@@ -165,7 +163,7 @@ fn sample_14_session_set_time_zone() {
     // SESSION SET TIME ZONE "utc"
     assert_sample_parses(
         "session_set_time_zone.gql",
-        "Session timezone configuration"
+        "Session timezone configuration",
     );
 }
 
@@ -229,20 +227,73 @@ fn all_samples_parse_successfully() {
 fn sample_coverage_report() {
     // Generate a coverage report showing which GQL features each sample exercises
     let samples_with_features = vec![
-        ("create_closed_graph_from_graph_type_(double_colon).gql", vec!["CREATE GRAPH", "type annotation (::)"]),
-        ("create_closed_graph_from_graph_type_(lexical).gql", vec!["CREATE GRAPH", "TYPED keyword"]),
-        ("create_closed_graph_from_nested_graph_type_(double_colon).gql", vec!["CREATE GRAPH", "inline graph type", "node element type"]),
-        ("create_graph.gql", vec!["CREATE GRAPH", "graph types", "LIKE", "AS COPY OF"]),
-        ("create_schema.gql", vec!["CREATE SCHEMA", "NEXT", "graph patterns"]),
-        ("insert_statement.gql", vec!["INSERT", "node patterns", "edge patterns", "temporal literals"]),
-        ("match_and_insert_example.gql", vec!["MATCH", "INSERT", "combined query"]),
-        ("match_with_exists_predicate_(match_block_statement_in_braces).gql", vec!["MATCH", "EXISTS", "braced block"]),
-        ("match_with_exists_predicate_(match_block_statement_in_parentheses).gql", vec!["MATCH", "EXISTS", "parenthesized block"]),
-        ("match_with_exists_predicate_(nested_match_statement).gql", vec!["MATCH", "EXISTS", "nested MATCH", "RETURN"]),
-        ("session_set_graph_to_current_graph.gql", vec!["SESSION", "SET GRAPH", "CURRENT_GRAPH"]),
-        ("session_set_graph_to_current_property_graph.gql", vec!["SESSION", "SET GRAPH", "CURRENT_PROPERTY_GRAPH"]),
-        ("session_set_property_as_value.gql", vec!["SESSION", "SET VALUE", "IF NOT EXISTS", "parameters", "DATE literal"]),
-        ("session_set_time_zone.gql", vec!["SESSION", "SET TIME ZONE"]),
+        (
+            "create_closed_graph_from_graph_type_(double_colon).gql",
+            vec!["CREATE GRAPH", "type annotation (::)"],
+        ),
+        (
+            "create_closed_graph_from_graph_type_(lexical).gql",
+            vec!["CREATE GRAPH", "TYPED keyword"],
+        ),
+        (
+            "create_closed_graph_from_nested_graph_type_(double_colon).gql",
+            vec!["CREATE GRAPH", "inline graph type", "node element type"],
+        ),
+        (
+            "create_graph.gql",
+            vec!["CREATE GRAPH", "graph types", "LIKE", "AS COPY OF"],
+        ),
+        (
+            "create_schema.gql",
+            vec!["CREATE SCHEMA", "NEXT", "graph patterns"],
+        ),
+        (
+            "insert_statement.gql",
+            vec![
+                "INSERT",
+                "node patterns",
+                "edge patterns",
+                "temporal literals",
+            ],
+        ),
+        (
+            "match_and_insert_example.gql",
+            vec!["MATCH", "INSERT", "combined query"],
+        ),
+        (
+            "match_with_exists_predicate_(match_block_statement_in_braces).gql",
+            vec!["MATCH", "EXISTS", "braced block"],
+        ),
+        (
+            "match_with_exists_predicate_(match_block_statement_in_parentheses).gql",
+            vec!["MATCH", "EXISTS", "parenthesized block"],
+        ),
+        (
+            "match_with_exists_predicate_(nested_match_statement).gql",
+            vec!["MATCH", "EXISTS", "nested MATCH", "RETURN"],
+        ),
+        (
+            "session_set_graph_to_current_graph.gql",
+            vec!["SESSION", "SET GRAPH", "CURRENT_GRAPH"],
+        ),
+        (
+            "session_set_graph_to_current_property_graph.gql",
+            vec!["SESSION", "SET GRAPH", "CURRENT_PROPERTY_GRAPH"],
+        ),
+        (
+            "session_set_property_as_value.gql",
+            vec![
+                "SESSION",
+                "SET VALUE",
+                "IF NOT EXISTS",
+                "parameters",
+                "DATE literal",
+            ],
+        ),
+        (
+            "session_set_time_zone.gql",
+            vec!["SESSION", "SET TIME ZONE"],
+        ),
     ];
 
     eprintln!("\n==== Sample Corpus Feature Coverage ====");

@@ -103,7 +103,8 @@ impl<'a> ReferenceParser<'a> {
                     return Err(self.error_here("absolute schema path cannot be empty"));
                 }
                 let end = self
-                    .stream.tokens()
+                    .stream
+                    .tokens()
                     .get(self.stream.position().saturating_sub(1))
                     .map(|t| t.span.end)
                     .unwrap_or(start);
@@ -117,7 +118,8 @@ impl<'a> ReferenceParser<'a> {
             TokenKind::DotDot => {
                 let (up_levels, components) = self.parse_relative_schema_path()?;
                 let end = self
-                    .stream.tokens()
+                    .stream
+                    .tokens()
                     .get(self.stream.position().saturating_sub(1))
                     .map(|t| t.span.end)
                     .unwrap_or(start);
@@ -173,7 +175,8 @@ impl<'a> ReferenceParser<'a> {
                 if self.stream.check(&TokenKind::Schema) {
                     self.stream.advance();
                     let end = self
-                        .stream.tokens()
+                        .stream
+                        .tokens()
                         .get(self.stream.position().saturating_sub(1))
                         .map(|t| t.span.end)
                         .unwrap_or(start_span.start);
@@ -192,7 +195,8 @@ impl<'a> ReferenceParser<'a> {
                 if self.stream.check(&TokenKind::Schema) {
                     self.stream.advance();
                     let end = self
-                        .stream.tokens()
+                        .stream
+                        .tokens()
                         .get(self.stream.position().saturating_sub(1))
                         .map(|t| t.span.end)
                         .unwrap_or(start_span.start);
@@ -358,7 +362,8 @@ impl<'a> ReferenceParser<'a> {
                     TokenKind::Graph => {
                         self.stream.advance();
                         let end = self
-                            .stream.tokens()
+                            .stream
+                            .tokens()
                             .get(self.stream.position().saturating_sub(1))
                             .map(|t| t.span.end)
                             .unwrap_or(start_span.start);
@@ -370,7 +375,8 @@ impl<'a> ReferenceParser<'a> {
                         self.stream.advance();
                         self.stream.expect(TokenKind::Graph)?;
                         let end = self
-                            .stream.tokens()
+                            .stream
+                            .tokens()
                             .get(self.stream.position().saturating_sub(1))
                             .map(|t| t.span.end)
                             .unwrap_or(start_span.start);
@@ -582,7 +588,8 @@ impl<'a> ReferenceParser<'a> {
         let (name, _) = self.parse_regular_identifier("object name")?;
 
         let end = self
-            .stream.tokens()
+            .stream
+            .tokens()
             .get(self.stream.position().saturating_sub(1))
             .map(|t| t.span.end)
             .unwrap_or(start);
@@ -683,7 +690,8 @@ impl<'a> ReferenceParser<'a> {
                         if self.stream.check(&TokenKind::DoubleColon) {
                             self.stream.advance();
                             let end = self
-                                .stream.tokens()
+                                .stream
+                                .tokens()
                                 .get(self.stream.position().saturating_sub(1))
                                 .map(|t| t.span.end)
                                 .unwrap_or(schema.span().start);
@@ -713,7 +721,8 @@ impl<'a> ReferenceParser<'a> {
                         if self.stream.check(&TokenKind::DoubleColon) {
                             self.stream.advance();
                             let end = self
-                                .stream.tokens()
+                                .stream
+                                .tokens()
                                 .get(self.stream.position().saturating_sub(1))
                                 .map(|t| t.span.end)
                                 .unwrap_or(schema.span().start);
@@ -745,7 +754,8 @@ impl<'a> ReferenceParser<'a> {
                             if self.stream.check(&TokenKind::DoubleColon) {
                                 self.stream.advance();
                                 let end = self
-                                    .stream.tokens()
+                                    .stream
+                                    .tokens()
                                     .get(self.stream.position().saturating_sub(1))
                                     .map(|t| t.span.end)
                                     .unwrap_or(schema.span().start);
@@ -834,7 +844,8 @@ impl<'a> ReferenceParser<'a> {
             self.stream.expect(TokenKind::DoubleColon)?;
 
             let end = self
-                .stream.tokens()
+                .stream
+                .tokens()
                 .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(saved_start);
@@ -858,7 +869,8 @@ impl<'a> ReferenceParser<'a> {
             self.stream.expect(TokenKind::DoubleColon)?;
 
             let end = self
-                .stream.tokens()
+                .stream
+                .tokens()
                 .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(saved_start);
@@ -893,7 +905,8 @@ impl<'a> ReferenceParser<'a> {
             };
 
             let end = self
-                .stream.tokens()
+                .stream
+                .tokens()
                 .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
@@ -910,7 +923,8 @@ impl<'a> ReferenceParser<'a> {
             self.stream.expect(TokenKind::DoubleColon)?;
 
             let parent_end = self
-                .stream.tokens()
+                .stream
+                .tokens()
                 .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
@@ -932,7 +946,8 @@ impl<'a> ReferenceParser<'a> {
             };
 
             let end = self
-                .stream.tokens()
+                .stream
+                .tokens()
                 .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
@@ -963,7 +978,8 @@ impl<'a> ReferenceParser<'a> {
                 let schema = self.parse_schema_reference()?;
                 self.stream.expect(TokenKind::DoubleColon)?;
                 let end = self
-                    .stream.tokens()
+                    .stream
+                    .tokens()
                     .get(self.stream.position().saturating_sub(1))
                     .map(|t| t.span.end)
                     .unwrap_or(start);
@@ -980,7 +996,8 @@ impl<'a> ReferenceParser<'a> {
                     let schema = self.parse_schema_reference()?;
                     self.stream.expect(TokenKind::DoubleColon)?;
                     let end = self
-                        .stream.tokens()
+                        .stream
+                        .tokens()
                         .get(self.stream.position().saturating_sub(1))
                         .map(|t| t.span.end)
                         .unwrap_or(start);

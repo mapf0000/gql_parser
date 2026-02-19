@@ -6,9 +6,65 @@
 
 **Sprint Duration**: TBD
 
-**Status**: 🚧 **IN PROGRESS** (Core validation complete, documentation and testing pending)
+**Status**: ✅ **CORE COMPLETE** - 88 tests passing, ISO GQL compliant (F1, F2, F5 complete; F3/F4 deferred)
 
-**Last Updated**: 2026-02-18 (Updated with Tasks 4, 7, 8, 11, 15 completion - All core validation passes implemented)
+**Last Updated**: 2026-02-19
+
+**📋 Future Work**: See `SPRINT14_REMAINING.md` for F3/F4 implementation plans (optional enhancements)
+
+## Current Status (Authoritative)
+
+Use this section as the current source of truth for Sprint 14 work.
+
+### Completed
+
+- ✅ **F1: Warning Visibility** - `ValidationOutcome` returns diagnostics on success paths
+- ✅ **F2: Scope Resolution** - Reference-site-aware lookups implemented (with documented parser limitations)
+- ✅ **F5: Aggregation Validation** - Complete ISO GQL aggregation rules:
+  - RETURN statement mixed aggregation detection
+  - Nested aggregation prohibition
+  - WHERE clause aggregation prohibition
+  - HAVING clause validation with GROUP BY
+  - Enhanced expression equivalence for GROUP BY matching
+- ✅ **F6: Documentation** - README and status docs updated
+
+### Deferred/Optional
+
+- 🔶 **F4: Type Persistence Consumption** - Infrastructure complete, full consumption requires major refactoring
+- 🔶 **F3: Advanced Expression Validation** - CASE type consistency, null propagation (optional enhancements)
+
+### Exit Criteria Status
+
+- ✅ Scope and variable resolution are reference-site accurate (F2)
+- ✅ Aggregation/grouping semantics fully enforced per ISO GQL (F5)
+- ✅ Documentation matches implementation and documents known limitations (F6)
+- 🔶 Statement isolation (partial - limited by parser)
+- 🔶 Type inference consumption (infrastructure exists, full integration deferred)
+- 🔶 Advanced expression validation (optional future enhancements)
+
+### Test Status
+
+- **88 tests passing** (up from 80, +8 for F5)
+- **2 tests ignored** (known parser limitations for statement isolation)
+- **0 failures**
+- All existing functionality preserved
+
+### F2 Implementation Summary (2026-02-19)
+
+**Completed:**
+- Added `ExpressionContext` and `ScopeMetadata` structures for tracking scope contexts
+- Modified `run_scope_analysis()` to return `(SymbolTable, ScopeMetadata)` tuple
+- Implemented **reference-site-aware lookups** using `lookup_from(scope_id, var_name)`
+- Updated 15+ validation methods to thread scope context through pipeline
+- Fixed all 78 existing tests + added 2 new passing tests
+
+**Known Limitations (documented in ignored tests):**
+1. Parser doesn't create separate Statement objects for semicolon-separated queries
+2. Composite query (UNION/EXCEPT) scope isolation needs scope stack popping
+
+**Next Steps**: See `SPRINT14_REMAINING.md` for detailed implementation plans for F3-F6.
+
+Note: historical progress snapshots later in this file may be stale; prefer this section for current status.
 
 ---
 

@@ -8,12 +8,12 @@ use crate::ast::query::{
 };
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
+use crate::parser::LegacyParseResult;
+use crate::parser::procedure::parse_call_procedure_statement;
 use crate::parser::query::{
     parse_expression_with_diags, parse_primitive_query_statement, parse_return_statement,
     parse_use_graph_clause,
 };
-use crate::parser::procedure::parse_call_procedure_statement;
-use crate::parser::LegacyParseResult;
 use smol_str::SmolStr;
 
 /// Parse result with optional value and diagnostics.
@@ -1598,11 +1598,17 @@ mod tests {
             panic!("expected named call");
         };
         assert_eq!(
-            named.arguments.as_ref().map_or(0, |args| args.arguments.len()),
+            named
+                .arguments
+                .as_ref()
+                .map_or(0, |args| args.arguments.len()),
             2
         );
         assert_eq!(
-            named.yield_clause.as_ref().map_or(0, |yield_clause| yield_clause.items.items.len()),
+            named
+                .yield_clause
+                .as_ref()
+                .map_or(0, |yield_clause| yield_clause.items.items.len()),
             1
         );
     }

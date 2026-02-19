@@ -1091,7 +1091,14 @@ mod tests {
 
         // Reserved - Types
         let reserved_types = vec![
-            "INT", "STRING", "BOOLEAN", "DATE", "TIME", "TIMESTAMP", "FLOAT", "DOUBLE",
+            "INT",
+            "STRING",
+            "BOOLEAN",
+            "DATE",
+            "TIME",
+            "TIMESTAMP",
+            "FLOAT",
+            "DOUBLE",
         ];
         for kw in reserved_types {
             assert!(is_reserved_word(kw), "{} should be reserved", kw);

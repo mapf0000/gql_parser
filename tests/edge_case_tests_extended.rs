@@ -192,7 +192,7 @@ fn map_literals_comprehensive() {
         "RETURN {a: 1, b: 2}",
         "RETURN {a: 1, b: 'two', c: TRUE}",
         "RETURN {nested: {a: 1, b: 2}}",
-        "RETURN {items: [1, 2, 3]}",  // Changed 'list' to 'items' to avoid keyword
+        "RETURN {items: [1, 2, 3]}", // Changed 'list' to 'items' to avoid keyword
     ];
 
     for query in queries {
@@ -325,10 +325,7 @@ fn create_graph_statements() {
 
 #[test]
 fn drop_statements() {
-    let queries = vec![
-        "DROP GRAPH mygraph",
-        "DROP SCHEMA myschema",
-    ];
+    let queries = vec!["DROP GRAPH mygraph", "DROP SCHEMA myschema"];
 
     for query in queries {
         let result = parse(query);
@@ -346,7 +343,10 @@ fn partial_ast_on_error() {
     let result = parse(query);
 
     // Should have diagnostics
-    assert!(!result.diagnostics.is_empty(), "Should have diagnostics for invalid operator");
+    assert!(
+        !result.diagnostics.is_empty(),
+        "Should have diagnostics for invalid operator"
+    );
 
     // May or may not have partial AST depending on recovery strategy
     let _ = result.ast;
@@ -359,5 +359,8 @@ fn multiple_errors_reported() {
     let result = parse(query);
 
     // Should report multiple errors: unclosed paren, invalid operator, unexpected EOF
-    assert!(!result.diagnostics.is_empty(), "Should have multiple diagnostics");
+    assert!(
+        !result.diagnostics.is_empty(),
+        "Should have multiple diagnostics"
+    );
 }

@@ -35,11 +35,8 @@ use crate::ast::{
     ValueType,
 };
 use crate::diag::Diag;
-use crate::parser::base::{ParseError, ParseResult, TokenStream};
 use crate::lexer::token::{Token, TokenKind};
-
-
-
+use crate::parser::base::{ParseError, ParseResult, TokenStream};
 
 /// Parser for type specifications.
 pub struct TypeParser<'a> {
@@ -76,7 +73,10 @@ impl<'a> TypeParser<'a> {
         // Postfix list forms:
         //   value_type LIST
         //   value_type ARRAY
-        while matches!(self.stream.current().kind, TokenKind::List | TokenKind::Array) {
+        while matches!(
+            self.stream.current().kind,
+            TokenKind::List | TokenKind::Array
+        ) {
             let syntax_form = match self.stream.current().kind {
                 TokenKind::List => ListSyntaxForm::PostfixList,
                 TokenKind::Array => ListSyntaxForm::PostfixArray,
@@ -85,7 +85,8 @@ impl<'a> TypeParser<'a> {
             let start = value_type.span().start;
             self.stream.advance();
             let end = self
-                .stream.tokens()
+                .stream
+                .tokens()
                 .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
@@ -252,7 +253,10 @@ impl<'a> TypeParser<'a> {
                 }
             }
 
-            _ => Err(self.error_here(format!("expected type, found {}", self.stream.current().kind))),
+            _ => Err(self.error_here(format!(
+                "expected type, found {}",
+                self.stream.current().kind
+            ))),
         }
     }
 
@@ -546,7 +550,8 @@ impl<'a> TypeParser<'a> {
 
         let (precision, scale) = self.parse_optional_precision_scale()?;
         let end = self
-            .stream.tokens()
+            .stream
+            .tokens()
             .get(self.stream.position().saturating_sub(1))
             .map(|t| t.span.end)
             .unwrap_or(start);
@@ -834,7 +839,8 @@ impl<'a> TypeParser<'a> {
 
             let not_null = self.check_not_null();
             let end = self
-                .stream.tokens()
+                .stream
+                .tokens()
                 .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
@@ -858,11 +864,15 @@ impl<'a> TypeParser<'a> {
                 },
                 span: spec_span.clone(),
             };
-            let spec = Box::new(NestedGraphTypeSpecification { body, span: spec_span });
+            let spec = Box::new(NestedGraphTypeSpecification {
+                body,
+                span: spec_span,
+            });
 
             let not_null = self.check_not_null();
             let end = self
-                .stream.tokens()
+                .stream
+                .tokens()
                 .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
@@ -905,7 +915,8 @@ impl<'a> TypeParser<'a> {
 
         let not_null = self.check_not_null();
         let end = self
-            .stream.tokens()
+            .stream
+            .tokens()
             .get(self.stream.position().saturating_sub(1))
             .map(|t| t.span.end)
             .unwrap_or(start);
@@ -942,7 +953,8 @@ impl<'a> TypeParser<'a> {
 
             let not_null = self.check_not_null();
             let end = self
-                .stream.tokens()
+                .stream
+                .tokens()
                 .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
@@ -966,11 +978,15 @@ impl<'a> TypeParser<'a> {
                 },
                 span: spec_span.clone(),
             };
-            let spec = Box::new(NodeTypeSpecification { pattern, span: spec_span });
+            let spec = Box::new(NodeTypeSpecification {
+                pattern,
+                span: spec_span,
+            });
 
             let not_null = self.check_not_null();
             let end = self
-                .stream.tokens()
+                .stream
+                .tokens()
                 .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
@@ -1007,7 +1023,8 @@ impl<'a> TypeParser<'a> {
 
             let not_null = self.check_not_null();
             let end = self
-                .stream.tokens()
+                .stream
+                .tokens()
                 .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
@@ -1046,11 +1063,15 @@ impl<'a> TypeParser<'a> {
                     span: spec_span.clone(),
                 },
             );
-            let spec = Box::new(EdgeTypeSpecification { pattern, span: spec_span });
+            let spec = Box::new(EdgeTypeSpecification {
+                pattern,
+                span: spec_span,
+            });
 
             let not_null = self.check_not_null();
             let end = self
-                .stream.tokens()
+                .stream
+                .tokens()
                 .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
@@ -1115,7 +1136,8 @@ impl<'a> TypeParser<'a> {
         self.stream.expect(TokenKind::Gt)?;
 
         let end = self
-            .stream.tokens()
+            .stream
+            .tokens()
             .get(self.stream.position().saturating_sub(1))
             .map(|t| t.span.end)
             .unwrap_or(start);
@@ -1148,7 +1170,8 @@ impl<'a> TypeParser<'a> {
             self.stream.advance();
             self.stream.expect(TokenKind::Record)?;
             let end = self
-                .stream.tokens()
+                .stream
+                .tokens()
                 .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
@@ -1261,7 +1284,9 @@ impl<'a> TypeParser<'a> {
         if self.stream.check(&TokenKind::LBrace) {
             self.stream.advance();
             let mut depth = 1usize;
-            let mut end = self.stream.tokens()[self.stream.position().saturating_sub(1)].span.end;
+            let mut end = self.stream.tokens()[self.stream.position().saturating_sub(1)]
+                .span
+                .end;
             while depth > 0 {
                 if self.stream.check(&TokenKind::Eof) {
                     return Err(self
@@ -1281,7 +1306,9 @@ impl<'a> TypeParser<'a> {
         if self.stream.check(&TokenKind::LParen) {
             self.stream.advance();
             let mut depth = 1usize;
-            let mut end = self.stream.tokens()[self.stream.position().saturating_sub(1)].span.end;
+            let mut end = self.stream.tokens()[self.stream.position().saturating_sub(1)]
+                .span
+                .end;
             while depth > 0 {
                 if self.stream.check(&TokenKind::Eof) {
                     return Err(self
@@ -1352,7 +1379,8 @@ impl<'a> TypeParser<'a> {
     fn check_not_null(&mut self) -> bool {
         if self.stream.check(&TokenKind::Not)
             && self
-                .stream.peek()
+                .stream
+                .peek()
                 .is_some_and(|next| matches!(next.kind, TokenKind::Null))
         {
             self.stream.advance(); // consume NOT
@@ -1364,7 +1392,8 @@ impl<'a> TypeParser<'a> {
 
     fn wrap_predefined(&self, predefined: PredefinedType, start: usize) -> ValueType {
         let end = self
-            .stream.tokens()
+            .stream
+            .tokens()
             .get(self.stream.position().saturating_sub(1))
             .map(|t| t.span.end)
             .unwrap_or(start);

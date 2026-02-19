@@ -44,10 +44,7 @@ fn large_query_1000_return_items() {
     let result = parse(&query);
 
     // Should handle wide return lists
-    assert!(
-        result.ast.is_some(),
-        "1000 return items should parse"
-    );
+    assert!(result.ast.is_some(), "1000 return items should parse");
 }
 
 #[test]
@@ -107,10 +104,7 @@ fn wide_query_100_where_conditions() {
 
     let result = parse(&query);
 
-    assert!(
-        result.ast.is_some(),
-        "100 WHERE conditions should parse"
-    );
+    assert!(result.ast.is_some(), "100 WHERE conditions should parse");
 }
 
 #[test]
@@ -127,10 +121,7 @@ fn wide_query_100_union_operations() {
 
     let result = parse(&query);
 
-    assert!(
-        result.ast.is_some(),
-        "100 UNION operations should parse"
-    );
+    assert!(result.ast.is_some(), "100 UNION operations should parse");
 }
 
 #[test]
@@ -165,10 +156,7 @@ fn large_string_literal_1kb() {
 
     let result = parse(&query);
 
-    assert!(
-        result.ast.is_some(),
-        "1KB string literal should parse"
-    );
+    assert!(result.ast.is_some(), "1KB string literal should parse");
 }
 
 #[test]
@@ -179,10 +167,7 @@ fn large_string_literal_10kb() {
 
     let result = parse(&query);
 
-    assert!(
-        result.ast.is_some(),
-        "10KB string literal should parse"
-    );
+    assert!(result.ast.is_some(), "10KB string literal should parse");
 }
 
 #[test]
@@ -201,10 +186,7 @@ fn many_parameters_100() {
 
     let result = parse(&query);
 
-    assert!(
-        result.ast.is_some(),
-        "100 parameters should parse"
-    );
+    assert!(result.ast.is_some(), "100 parameters should parse");
 }
 
 #[test]
@@ -332,10 +314,7 @@ fn large_list_literal_1000_elements() {
 
     let result = parse(&query);
 
-    assert!(
-        result.ast.is_some(),
-        "List with 1000 elements should parse"
-    );
+    assert!(result.ast.is_some(), "List with 1000 elements should parse");
 }
 
 #[test]
@@ -395,10 +374,7 @@ fn stress_test_combined() {
 
     let result = parse(&query);
 
-    assert!(
-        result.ast.is_some(),
-        "Combined stress test should parse"
-    );
+    assert!(result.ast.is_some(), "Combined stress test should parse");
 }
 
 #[test]
@@ -477,10 +453,7 @@ fn utf8_identifiers_and_strings() {
     let result = parse(query);
 
     // UTF-8 should be handled correctly
-    assert!(
-        result.ast.is_some(),
-        "UTF-8 identifiers should parse"
-    );
+    assert!(result.ast.is_some(), "UTF-8 identifiers should parse");
 }
 
 #[test]

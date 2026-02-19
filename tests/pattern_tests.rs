@@ -373,7 +373,8 @@ fn parse_node_pattern_rejects_mixed_property_and_where_predicates() {
 
     let diag_text = diagnostics_text(&result.diagnostics);
     assert!(
-        diag_text.contains("Element pattern can have either property specification or WHERE predicate"),
+        diag_text
+            .contains("Element pattern can have either property specification or WHERE predicate"),
         "unexpected diagnostics: {diag_text}"
     );
 }

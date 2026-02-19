@@ -2,8 +2,8 @@
 //!
 //! This example shows how to use the semantic validator to validate GQL queries.
 
-use gql_parser::{parse, semantic::SemanticValidator};
 use gql_parser::diag::DiagSeverity;
+use gql_parser::{parse, semantic::SemanticValidator};
 
 fn main() {
     println!("=== Semantic Validation Demo ===\n");
@@ -58,7 +58,7 @@ fn demo_valid_query() {
 
 fn demo_undefined_variable() {
     println!("--- Example 2: Undefined Variable ---");
-    let source = "MATCH (n:Person) RETURN m";  // 'm' is undefined
+    let source = "MATCH (n:Person) RETURN m"; // 'm' is undefined
 
     let parse_result = parse(source);
     if let Some(ast) = parse_result.ast {
@@ -99,7 +99,9 @@ fn demo_disconnected_pattern() {
         let outcome = validator.validate(&ast);
 
         if outcome.is_success() {
-            println!("✓ Query is semantically valid (ISO-conformant disconnected patterns allowed)");
+            println!(
+                "✓ Query is semantically valid (ISO-conformant disconnected patterns allowed)"
+            );
             if !outcome.diagnostics.is_empty() {
                 println!("  Warnings:");
                 for diag in &outcome.diagnostics {

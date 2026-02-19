@@ -5,16 +5,15 @@
 //! keyword works correctly in UPPERCASE, lowercase, and MiXeDcAsE forms.
 
 use gql_parser::lexer::keywords::lookup_keyword;
-use gql_parser::{classify_keyword, parse, KeywordClassification, TokenKind};
+use gql_parser::{KeywordClassification, TokenKind, classify_keyword, parse};
 
 #[test]
 fn all_reserved_keywords_case_insensitive() {
     // Query keywords
     let query_keywords = vec![
-        "SELECT", "MATCH", "WHERE", "RETURN", "WITH", "FILTER", "ORDER", "BY", "GROUP",
-        "HAVING", "LIMIT", "OFFSET", "SKIP", "DISTINCT", "ALL", "ANY", "EXISTS",
-        "CASE", "WHEN", "THEN", "ELSE", "END", "IF", "AS", "FROM", "FOR", "LET", "FINISH",
-        "NEXT",
+        "SELECT", "MATCH", "WHERE", "RETURN", "WITH", "FILTER", "ORDER", "BY", "GROUP", "HAVING",
+        "LIMIT", "OFFSET", "SKIP", "DISTINCT", "ALL", "ANY", "EXISTS", "CASE", "WHEN", "THEN",
+        "ELSE", "END", "IF", "AS", "FROM", "FOR", "LET", "FINISH", "NEXT",
     ];
 
     for keyword in query_keywords {
@@ -82,11 +81,42 @@ fn data_modification_keywords_case_insensitive() {
 #[test]
 fn type_keywords_case_insensitive() {
     let type_keywords = vec![
-        "INT", "INTEGER", "BIGINT", "SMALLINT", "FLOAT", "DOUBLE", "REAL", "DECIMAL", "DEC",
-        "BOOL", "BOOLEAN", "STRING", "BYTES", "DATE", "TIME", "TIMESTAMP", "DATETIME",
-        "DURATION", "INT8", "INT16", "INT32", "INT64", "INT128", "INT256", "UINT", "UINT8",
-        "UINT16", "UINT32", "UINT64", "UINT128", "UINT256", "FLOAT16", "FLOAT32", "FLOAT64",
-        "FLOAT128", "FLOAT256",
+        "INT",
+        "INTEGER",
+        "BIGINT",
+        "SMALLINT",
+        "FLOAT",
+        "DOUBLE",
+        "REAL",
+        "DECIMAL",
+        "DEC",
+        "BOOL",
+        "BOOLEAN",
+        "STRING",
+        "BYTES",
+        "DATE",
+        "TIME",
+        "TIMESTAMP",
+        "DATETIME",
+        "DURATION",
+        "INT8",
+        "INT16",
+        "INT32",
+        "INT64",
+        "INT128",
+        "INT256",
+        "UINT",
+        "UINT8",
+        "UINT16",
+        "UINT32",
+        "UINT64",
+        "UINT128",
+        "UINT256",
+        "FLOAT16",
+        "FLOAT32",
+        "FLOAT64",
+        "FLOAT128",
+        "FLOAT256",
     ];
 
     for keyword in type_keywords {
@@ -487,8 +517,25 @@ fn graph_specific_keywords_case_insensitive() {
 #[test]
 fn built_in_function_keywords_case_insensitive() {
     let function_keywords = vec![
-        "ABS", "ACOS", "ASIN", "ATAN", "CEIL", "COS", "EXP", "FLOOR", "LN", "LOG", "MOD",
-        "POWER", "SIN", "SQRT", "TAN", "UPPER", "LOWER", "TRIM", "NORMALIZE",
+        "ABS",
+        "ACOS",
+        "ASIN",
+        "ATAN",
+        "CEIL",
+        "COS",
+        "EXP",
+        "FLOOR",
+        "LN",
+        "LOG",
+        "MOD",
+        "POWER",
+        "SIN",
+        "SQRT",
+        "TAN",
+        "UPPER",
+        "LOWER",
+        "TRIM",
+        "NORMALIZE",
     ];
 
     for keyword in function_keywords {
@@ -602,6 +649,9 @@ fn capitalize_first(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {
         None => String::new(),
-        Some(first) => first.to_uppercase().chain(chars.as_str().to_lowercase().chars()).collect(),
+        Some(first) => first
+            .to_uppercase()
+            .chain(chars.as_str().to_lowercase().chars())
+            .collect(),
     }
 }
