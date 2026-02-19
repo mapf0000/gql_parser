@@ -13,9 +13,9 @@ mod schema_validation;
 use std::collections::HashMap;
 
 use crate::ast::program::Program;
-use crate::diag::{Diag, DiagSeverity};
+use crate::diag::DiagSeverity;
 use crate::ir::symbol_table::ScopeId;
-use crate::ir::{IR, SymbolTable, TypeTable, ValidationOutcome};
+use crate::ir::{IR, ValidationOutcome};
 
 /// Tracks the scope context where an expression is evaluated.
 #[derive(Debug, Clone, Copy)]

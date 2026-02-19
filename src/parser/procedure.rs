@@ -18,6 +18,7 @@ use crate::ast::references::BindingVariable;
 use crate::ast::{Expression, ProcedureStatement, Span};
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
+use crate::parser::base::{check_token, consume_if, expect_token};
 use crate::parser::LegacyParseResult;
 use crate::parser::expression::parse_expression;
 use crate::parser::mutation::parse_linear_data_modifying_statement;
@@ -35,51 +36,6 @@ pub(crate) type ParseResult<T> = LegacyParseResult<T>;
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-/// Consume a token of a specific kind, returning an error if not found.
-fn expect_token(
-    tokens: &[Token],
-    pos: &mut usize,
-    kind: TokenKind,
-    context: &str,
-) -> Result<Span, Box<Diag>> {
-    if *pos >= tokens.len() {
-        return Err(Box::new(
-            Diag::error(format!("Expected {kind} in {context}"))
-                .with_primary_label(*pos..*pos, "expected here"),
-        ));
-    }
-
-    if tokens[*pos].kind == kind {
-        let span = tokens[*pos].span.clone();
-        *pos += 1;
-        Ok(span)
-    } else {
-        let actual = &tokens[*pos];
-        Err(Box::new(
-            Diag::error(format!(
-                "Expected {kind} in {context}, found {}",
-                actual.kind
-            ))
-            .with_primary_label(actual.span.clone(), format!("expected {kind} here")),
-        ))
-    }
-}
-
-/// Check if the current token matches the specified kind.
-fn check_token(tokens: &[Token], pos: usize, kind: TokenKind) -> bool {
-    pos < tokens.len() && tokens[pos].kind == kind
-}
-
-/// Conditionally consume a token if it matches.
-fn consume_if(tokens: &[Token], pos: &mut usize, kind: TokenKind) -> bool {
-    if check_token(tokens, *pos, kind) {
-        *pos += 1;
-        true
-    } else {
-        false
-    }
-}
 
 /// Parse an identifier or identifier-like keyword as SmolStr.
 fn parse_identifier(tokens: &[Token], pos: &mut usize) -> Result<(SmolStr, Span), Box<Diag>> {

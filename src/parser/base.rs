@@ -124,6 +124,72 @@ impl<'a> TokenStream<'a> {
     }
 }
 
+/// Checks whether the token at `pos` matches `kind`.
+///
+/// This keeps legacy `tokens + cursor` parser code aligned with `TokenStream`
+/// without duplicating token navigation logic.
+pub fn check_token(tokens: &[Token], pos: usize, kind: TokenKind) -> bool {
+    if tokens.is_empty() || pos >= tokens.len() {
+        return false;
+    }
+
+    let mut stream = TokenStream::new(tokens);
+    stream.set_position(pos);
+    stream.check(&kind)
+}
+
+/// Consumes `kind` at `pos` when present and updates `pos` on success.
+pub fn consume_if(tokens: &[Token], pos: &mut usize, kind: TokenKind) -> bool {
+    if tokens.is_empty() || *pos >= tokens.len() {
+        return false;
+    }
+
+    if !check_token(tokens, *pos, kind.clone()) {
+        return false;
+    }
+
+    // Keep legacy cursor semantics for slice-based parsers: successful
+    // consumption may advance one past the final token.
+    *pos += 1;
+    true
+}
+
+/// Expects `kind` at `pos`, updating `pos` when successful and preserving
+/// the legacy contextual diagnostic format used by existing parser modules.
+pub fn expect_token(
+    tokens: &[Token],
+    pos: &mut usize,
+    kind: TokenKind,
+    context: &str,
+) -> ParseResult<Span> {
+    if tokens.is_empty() || *pos >= tokens.len() {
+        return Err(Box::new(
+            Diag::error(format!("Expected {kind} in {context}"))
+                .with_primary_label(*pos..*pos, "expected here"),
+        ));
+    }
+
+    let mut stream = TokenStream::new(tokens);
+    stream.set_position(*pos);
+
+    if stream.check(&kind) {
+        let span = tokens[*pos].span.clone();
+        // Keep legacy cursor semantics for slice-based parsers: successful
+        // consumption may advance one past the final token.
+        *pos += 1;
+        Ok(span)
+    } else {
+        let actual = stream.current();
+        Err(Box::new(
+            Diag::error(format!(
+                "Expected {kind} in {context}, found {}",
+                actual.kind
+            ))
+            .with_primary_label(actual.span.clone(), format!("expected {kind} here")),
+        ))
+    }
+}
+
 /// Merges two spans into a single span covering both.
 pub fn merge_spans(start: &Span, end: &Span) -> Span {
     start.start..end.end

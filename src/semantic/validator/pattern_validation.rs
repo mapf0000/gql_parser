@@ -249,7 +249,7 @@ fn extract_connectivity_from_term(
 }
 
 /// Gets the variable name from an edge pattern if it exists.
-fn get_edge_variable<'a>(edge: &'a EdgePattern) -> Option<&'a str> {
+fn get_edge_variable(edge: &EdgePattern) -> Option<&str> {
     match edge {
         EdgePattern::Full(full) => full.filler.variable.as_ref().map(|v| v.variable.as_str()),
         EdgePattern::Abbreviated(_) => None,

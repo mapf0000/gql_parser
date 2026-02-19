@@ -13,6 +13,7 @@ use crate::ast::{
 };
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
+use crate::parser::base::TokenStream;
 use crate::parser::mutation::parse_linear_data_modifying_statement;
 use crate::parser::procedure::parse_call_procedure_statement;
 use crate::parser::query::parse_query;
@@ -1536,11 +1537,24 @@ fn is_graph_type_source_start(kind: &TokenKind) -> bool {
 }
 
 fn consume_if_not_exists(tokens: &[Token], cursor: &mut usize) -> bool {
-    if *cursor + 2 < tokens.len()
-        && matches!(tokens[*cursor].kind, TokenKind::If)
-        && matches!(tokens[*cursor + 1].kind, TokenKind::Not)
-        && matches!(tokens[*cursor + 2].kind, TokenKind::Exists)
+    if tokens.is_empty() {
+        return false;
+    }
+
+    let mut stream = TokenStream::new(tokens);
+    stream.set_position(*cursor);
+
+    if stream.check(&TokenKind::If)
+        && matches!(
+            stream.tokens().get(stream.position() + 1).map(|token| &token.kind),
+            Some(TokenKind::Not)
+        )
+        && matches!(
+            stream.tokens().get(stream.position() + 2).map(|token| &token.kind),
+            Some(TokenKind::Exists)
+        )
     {
+        // Preserve legacy cursor behavior for statement slices without EOF.
         *cursor += 3;
         true
     } else {
@@ -1549,10 +1563,20 @@ fn consume_if_not_exists(tokens: &[Token], cursor: &mut usize) -> bool {
 }
 
 fn consume_if_exists(tokens: &[Token], cursor: &mut usize) -> bool {
-    if *cursor + 1 < tokens.len()
-        && matches!(tokens[*cursor].kind, TokenKind::If)
-        && matches!(tokens[*cursor + 1].kind, TokenKind::Exists)
+    if tokens.is_empty() {
+        return false;
+    }
+
+    let mut stream = TokenStream::new(tokens);
+    stream.set_position(*cursor);
+
+    if stream.check(&TokenKind::If)
+        && matches!(
+            stream.tokens().get(stream.position() + 1).map(|token| &token.kind),
+            Some(TokenKind::Exists)
+        )
     {
+        // Preserve legacy cursor behavior for statement slices without EOF.
         *cursor += 2;
         true
     } else {

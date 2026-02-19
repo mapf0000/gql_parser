@@ -158,7 +158,6 @@ fn validate_primitive_statement_variables(
                 MatchStatement::Simple(simple) => {
                     if let Some(where_clause) = &simple.pattern.where_clause {
                         validate_expression_variables(
-                            validator,
                             &where_clause.condition,
                             symbol_table,
                             scope_metadata,
@@ -171,7 +170,6 @@ fn validate_primitive_statement_variables(
                     crate::ast::query::OptionalOperand::Match { pattern } => {
                         if let Some(where_clause) = &pattern.where_clause {
                             validate_expression_variables(
-                                validator,
                                 &where_clause.condition,
                                 symbol_table,
                                 scope_metadata,
@@ -184,7 +182,6 @@ fn validate_primitive_statement_variables(
                     | crate::ast::query::OptionalOperand::ParenthesizedBlock { statements } => {
                         for stmt in statements {
                             validate_match_statement_variables(
-                                validator,
                                 stmt,
                                 symbol_table,
                                 scope_metadata,
@@ -200,7 +197,6 @@ fn validate_primitive_statement_variables(
             // Validate LET value expressions
             for binding in &let_stmt.bindings {
                 validate_expression_variables(
-                    validator,
                     &binding.value,
                     symbol_table,
                     scope_metadata,
@@ -212,7 +208,6 @@ fn validate_primitive_statement_variables(
         PrimitiveQueryStatement::For(for_stmt) => {
             // Validate FOR collection expression
             validate_expression_variables(
-                validator,
                 &for_stmt.item.collection,
                 symbol_table,
                 scope_metadata,
@@ -223,7 +218,6 @@ fn validate_primitive_statement_variables(
         PrimitiveQueryStatement::Filter(filter) => {
             // Validate FILTER condition
             validate_expression_variables(
-                validator,
                 &filter.condition,
                 symbol_table,
                 scope_metadata,
@@ -247,7 +241,6 @@ fn validate_primitive_statement_variables(
             if let Some(order_by) = &order_by_page.order_by {
                 for sort_spec in &order_by.sort_specifications {
                     validate_expression_variables(
-                        validator,
                         &sort_spec.key,
                         symbol_table,
                         scope_metadata,
@@ -259,7 +252,6 @@ fn validate_primitive_statement_variables(
             // Validate LIMIT/OFFSET expressions if present
             if let Some(limit) = &order_by_page.limit {
                 validate_expression_variables(
-                    validator,
                     &limit.count,
                     symbol_table,
                     scope_metadata,
@@ -269,7 +261,6 @@ fn validate_primitive_statement_variables(
             }
             if let Some(offset) = &order_by_page.offset {
                 validate_expression_variables(
-                    validator,
                     &offset.count,
                     symbol_table,
                     scope_metadata,
@@ -287,7 +278,6 @@ fn validate_primitive_statement_variables(
                 crate::ast::query::SelectItemList::Items { items } => {
                     for item in items {
                         validate_expression_variables(
-                            validator,
                             &item.expression,
                             symbol_table,
                             scope_metadata,
@@ -302,7 +292,6 @@ fn validate_primitive_statement_variables(
                 for elem in &group_by.elements {
                     if let crate::ast::query::GroupingElement::Expression(expr) = elem {
                         validate_expression_variables(
-                            validator,
                             expr,
                             symbol_table,
                             scope_metadata,
@@ -315,7 +304,6 @@ fn validate_primitive_statement_variables(
             // Validate HAVING if present
             if let Some(having) = &select.having {
                 validate_expression_variables(
-                    validator,
                     &having.condition,
                     symbol_table,
                     scope_metadata,
@@ -342,7 +330,6 @@ fn validate_primitive_statement_variables(
                     if let Some(args) = &named_call.arguments {
                         for arg in &args.arguments {
                             validate_expression_variables(
-                                validator,
                                 &arg.expression,
                                 symbol_table,
                                 scope_metadata,
@@ -379,7 +366,6 @@ fn validate_primitive_statement_variables(
 
 /// Validates variable references in a MATCH statement (helper for nested validations).
 fn validate_match_statement_variables(
-    validator: &super::SemanticValidator,
     match_stmt: &MatchStatement,
     symbol_table: &SymbolTable,
     scope_metadata: &super::ScopeMetadata,
@@ -390,7 +376,6 @@ fn validate_match_statement_variables(
         MatchStatement::Simple(simple) => {
             if let Some(where_clause) = &simple.pattern.where_clause {
                 validate_expression_variables(
-                    validator,
                     &where_clause.condition,
                     symbol_table,
                     scope_metadata,
@@ -403,7 +388,6 @@ fn validate_match_statement_variables(
             crate::ast::query::OptionalOperand::Match { pattern } => {
                 if let Some(where_clause) = &pattern.where_clause {
                     validate_expression_variables(
-                        validator,
                         &where_clause.condition,
                         symbol_table,
                         scope_metadata,
@@ -416,7 +400,6 @@ fn validate_match_statement_variables(
             | crate::ast::query::OptionalOperand::ParenthesizedBlock { statements } => {
                 for stmt in statements {
                     validate_match_statement_variables(
-                        validator,
                         stmt,
                         symbol_table,
                         scope_metadata,
@@ -449,7 +432,6 @@ fn validate_result_statement_variables(
             ReturnItemList::Items { items } => {
                 for item in items {
                     validate_expression_variables(
-                        validator,
                         &item.expression,
                         symbol_table,
                         scope_metadata,
@@ -516,7 +498,6 @@ fn validate_return_aggregation(
 
 /// Validates variable references in an expression with reference-site-aware lookups.
 fn validate_expression_variables(
-    validator: &super::SemanticValidator,
     expression: &crate::ast::expression::Expression,
     symbol_table: &SymbolTable,
     scope_metadata: &super::ScopeMetadata,
@@ -547,7 +528,6 @@ fn validate_expression_variables(
         }
         Expression::Binary(_, left, right, _) => {
             validate_expression_variables(
-                validator,
                 left,
                 symbol_table,
                 scope_metadata,
@@ -555,7 +535,6 @@ fn validate_expression_variables(
                 diagnostics,
             );
             validate_expression_variables(
-                validator,
                 right,
                 symbol_table,
                 scope_metadata,
@@ -565,7 +544,6 @@ fn validate_expression_variables(
         }
         Expression::Unary(_, operand, _) => {
             validate_expression_variables(
-                validator,
                 operand,
                 symbol_table,
                 scope_metadata,
@@ -575,7 +553,6 @@ fn validate_expression_variables(
         }
         Expression::Comparison(_, left, right, _) => {
             validate_expression_variables(
-                validator,
                 left,
                 symbol_table,
                 scope_metadata,
@@ -583,7 +560,6 @@ fn validate_expression_variables(
                 diagnostics,
             );
             validate_expression_variables(
-                validator,
                 right,
                 symbol_table,
                 scope_metadata,
@@ -593,7 +569,6 @@ fn validate_expression_variables(
         }
         Expression::Logical(_, left, right, _) => {
             validate_expression_variables(
-                validator,
                 left,
                 symbol_table,
                 scope_metadata,
@@ -601,7 +576,6 @@ fn validate_expression_variables(
                 diagnostics,
             );
             validate_expression_variables(
-                validator,
                 right,
                 symbol_table,
                 scope_metadata,
@@ -611,7 +585,6 @@ fn validate_expression_variables(
         }
         Expression::PropertyReference(object, _, _) => {
             validate_expression_variables(
-                validator,
                 object,
                 symbol_table,
                 scope_metadata,
@@ -621,7 +594,6 @@ fn validate_expression_variables(
         }
         Expression::Parenthesized(expr, _) => {
             validate_expression_variables(
-                validator,
                 expr,
                 symbol_table,
                 scope_metadata,
@@ -633,7 +605,6 @@ fn validate_expression_variables(
             // Validate function arguments
             for arg in &func_call.arguments {
                 validate_expression_variables(
-                    validator,
                     arg,
                     symbol_table,
                     scope_metadata,
@@ -648,7 +619,6 @@ fn validate_expression_variables(
                 crate::ast::expression::CaseExpression::Searched(searched) => {
                     for when in &searched.when_clauses {
                         validate_expression_variables(
-                            validator,
                             &when.condition,
                             symbol_table,
                             scope_metadata,
@@ -656,7 +626,6 @@ fn validate_expression_variables(
                             diagnostics,
                         );
                         validate_expression_variables(
-                            validator,
                             &when.then_result,
                             symbol_table,
                             scope_metadata,
@@ -666,7 +635,6 @@ fn validate_expression_variables(
                     }
                     if let Some(else_expr) = &searched.else_clause {
                         validate_expression_variables(
-                            validator,
                             else_expr,
                             symbol_table,
                             scope_metadata,
@@ -677,7 +645,6 @@ fn validate_expression_variables(
                 }
                 crate::ast::expression::CaseExpression::Simple(simple) => {
                     validate_expression_variables(
-                        validator,
                         &simple.operand,
                         symbol_table,
                         scope_metadata,
@@ -686,7 +653,6 @@ fn validate_expression_variables(
                     );
                     for when in &simple.when_clauses {
                         validate_expression_variables(
-                            validator,
                             &when.when_value,
                             symbol_table,
                             scope_metadata,
@@ -694,7 +660,6 @@ fn validate_expression_variables(
                             diagnostics,
                         );
                         validate_expression_variables(
-                            validator,
                             &when.then_result,
                             symbol_table,
                             scope_metadata,
@@ -704,7 +669,6 @@ fn validate_expression_variables(
                     }
                     if let Some(else_expr) = &simple.else_clause {
                         validate_expression_variables(
-                            validator,
                             else_expr,
                             symbol_table,
                             scope_metadata,
@@ -718,7 +682,6 @@ fn validate_expression_variables(
         Expression::Cast(cast) => {
             // Validate cast operand
             validate_expression_variables(
-                validator,
                 &cast.operand,
                 symbol_table,
                 scope_metadata,
@@ -734,7 +697,6 @@ fn validate_expression_variables(
                 }
                 crate::ast::expression::AggregateFunction::GeneralSetFunction(gsf) => {
                     validate_expression_variables(
-                        validator,
                         &gsf.expression,
                         symbol_table,
                         scope_metadata,
@@ -744,7 +706,6 @@ fn validate_expression_variables(
                 }
                 crate::ast::expression::AggregateFunction::BinarySetFunction(bsf) => {
                     validate_expression_variables(
-                        validator,
                         &bsf.inverse_distribution_argument,
                         symbol_table,
                         scope_metadata,
@@ -752,7 +713,6 @@ fn validate_expression_variables(
                         diagnostics,
                     );
                     validate_expression_variables(
-                        validator,
                         &bsf.expression,
                         symbol_table,
                         scope_metadata,
@@ -765,7 +725,6 @@ fn validate_expression_variables(
         Expression::TypeAnnotation(inner, _, _) => {
             // Validate annotated expression
             validate_expression_variables(
-                validator,
                 inner,
                 symbol_table,
                 scope_metadata,
@@ -777,7 +736,6 @@ fn validate_expression_variables(
             // Validate list element expressions
             for elem in elements {
                 validate_expression_variables(
-                    validator,
                     elem,
                     symbol_table,
                     scope_metadata,
@@ -790,7 +748,6 @@ fn validate_expression_variables(
             // Validate record field expressions
             for field in fields {
                 validate_expression_variables(
-                    validator,
                     &field.value,
                     symbol_table,
                     scope_metadata,
@@ -803,7 +760,6 @@ fn validate_expression_variables(
             // Validate path element expressions
             for elem in elements {
                 validate_expression_variables(
-                    validator,
                     elem,
                     symbol_table,
                     scope_metadata,
@@ -825,7 +781,6 @@ fn validate_expression_variables(
                     // NOTE: Subqueries should have their own isolated scope, but that requires
                     // more complex scope tracking during analysis. For now, use same statement_id.
                     validate_expression_variables(
-                        validator,
                         subquery_expr,
                         symbol_table,
                         scope_metadata,
@@ -841,7 +796,6 @@ fn validate_expression_variables(
             match predicate {
                 Predicate::IsNull(operand, _, _) => {
                     validate_expression_variables(
-                        validator,
                         operand.as_ref(),
                         symbol_table,
                         scope_metadata,
@@ -851,7 +805,6 @@ fn validate_expression_variables(
                 }
                 Predicate::IsTyped(operand, _, _, _) => {
                     validate_expression_variables(
-                        validator,
                         operand.as_ref(),
                         symbol_table,
                         scope_metadata,
@@ -861,7 +814,6 @@ fn validate_expression_variables(
                 }
                 Predicate::IsNormalized(operand, _, _) => {
                     validate_expression_variables(
-                        validator,
                         operand.as_ref(),
                         symbol_table,
                         scope_metadata,
@@ -871,7 +823,6 @@ fn validate_expression_variables(
                 }
                 Predicate::IsDirected(operand, _, _) => {
                     validate_expression_variables(
-                        validator,
                         operand.as_ref(),
                         symbol_table,
                         scope_metadata,
@@ -881,7 +832,6 @@ fn validate_expression_variables(
                 }
                 Predicate::IsLabeled(operand, _, _, _) => {
                     validate_expression_variables(
-                        validator,
                         operand.as_ref(),
                         symbol_table,
                         scope_metadata,
@@ -891,7 +841,6 @@ fn validate_expression_variables(
                 }
                 Predicate::IsTruthValue(operand, _, _, _) => {
                     validate_expression_variables(
-                        validator,
                         operand.as_ref(),
                         symbol_table,
                         scope_metadata,
@@ -902,7 +851,6 @@ fn validate_expression_variables(
                 Predicate::IsSource(operand, of, _, _)
                 | Predicate::IsDestination(operand, of, _, _) => {
                     validate_expression_variables(
-                        validator,
                         operand.as_ref(),
                         symbol_table,
                         scope_metadata,
@@ -910,7 +858,6 @@ fn validate_expression_variables(
                         diagnostics,
                     );
                     validate_expression_variables(
-                        validator,
                         of.as_ref(),
                         symbol_table,
                         scope_metadata,
@@ -921,7 +868,6 @@ fn validate_expression_variables(
                 Predicate::AllDifferent(operands, _) => {
                     for operand in operands {
                         validate_expression_variables(
-                            validator,
                             operand,
                             symbol_table,
                             scope_metadata,
@@ -932,7 +878,6 @@ fn validate_expression_variables(
                 }
                 Predicate::Same(left, right, _) => {
                     validate_expression_variables(
-                        validator,
                         left.as_ref(),
                         symbol_table,
                         scope_metadata,
@@ -940,7 +885,6 @@ fn validate_expression_variables(
                         diagnostics,
                     );
                     validate_expression_variables(
-                        validator,
                         right.as_ref(),
                         symbol_table,
                         scope_metadata,
@@ -950,7 +894,6 @@ fn validate_expression_variables(
                 }
                 Predicate::PropertyExists(operand, _, _) => {
                     validate_expression_variables(
-                        validator,
                         operand.as_ref(),
                         symbol_table,
                         scope_metadata,
@@ -963,7 +906,6 @@ fn validate_expression_variables(
         Expression::GraphExpression(inner, _) => {
             // Validate graph expression
             validate_expression_variables(
-                validator,
                 inner,
                 symbol_table,
                 scope_metadata,
@@ -974,7 +916,6 @@ fn validate_expression_variables(
         Expression::BindingTableExpression(inner, _) => {
             // Validate binding table expression
             validate_expression_variables(
-                validator,
                 inner,
                 symbol_table,
                 scope_metadata,
@@ -985,7 +926,6 @@ fn validate_expression_variables(
         Expression::SubqueryExpression(inner, _) => {
             // Validate subquery expression
             validate_expression_variables(
-                validator,
                 inner,
                 symbol_table,
                 scope_metadata,
@@ -1197,7 +1137,7 @@ fn validate_having_clause(
         for expr in non_agg_exprs {
             let found_in_group_by = group_by_exprs
                 .iter()
-                .any(|gb_expr| expressions_equivalent(validator, expr, gb_expr));
+                .any(|gb_expr| expressions_equivalent(expr, gb_expr));
 
             if !found_in_group_by {
                 let diag = SemanticDiagBuilder::aggregation_error(
@@ -1224,9 +1164,9 @@ fn validate_having_clause(
 }
 
 /// Collects non-aggregated expressions from an expression tree.
-fn collect_non_aggregated_expressions<'a>(
-    expr: &'a crate::ast::expression::Expression,
-) -> Vec<&'a crate::ast::expression::Expression> {
+fn collect_non_aggregated_expressions(
+    expr: &crate::ast::expression::Expression,
+) -> Vec<&crate::ast::expression::Expression> {
     let mut result = Vec::new();
     collect_non_aggregated_expressions_recursive(expr, false, &mut result);
     result
@@ -1291,9 +1231,9 @@ fn collect_non_aggregated_expressions_recursive<'a>(
 }
 
 /// Collects expressions from GROUP BY clause.
-fn collect_group_by_expressions<'a>(
-    group_by: &'a crate::ast::query::GroupByClause,
-) -> Vec<&'a crate::ast::expression::Expression> {
+fn collect_group_by_expressions(
+    group_by: &crate::ast::query::GroupByClause,
+) -> Vec<&crate::ast::expression::Expression> {
     use crate::ast::query::GroupingElement;
 
     let mut expressions = Vec::new();
@@ -1313,7 +1253,6 @@ fn collect_group_by_expressions<'a>(
 /// Checks if two expressions are semantically equivalent per ISO GQL standard.
 /// Used for GROUP BY validation and expression matching.
 fn expressions_equivalent(
-    validator: &super::SemanticValidator,
     expr1: &crate::ast::expression::Expression,
     expr2: &crate::ast::expression::Expression,
 ) -> bool {
@@ -1330,18 +1269,18 @@ fn expressions_equivalent(
         (
             Expression::PropertyReference(base1, prop1, _),
             Expression::PropertyReference(base2, prop2, _),
-        ) => prop1 == prop2 && expressions_equivalent(validator, base1, base2),
+        ) => prop1 == prop2 && expressions_equivalent(base1, base2),
 
         // Binary operations
         (Expression::Binary(op1, l1, r1, _), Expression::Binary(op2, l2, r2, _)) => {
             op1 == op2
-                && expressions_equivalent(validator, l1, l2)
-                && expressions_equivalent(validator, r1, r2)
+                && expressions_equivalent(l1, l2)
+                && expressions_equivalent(r1, r2)
         }
 
         // Unary operations
         (Expression::Unary(op1, e1, _), Expression::Unary(op2, e2, _)) => {
-            op1 == op2 && expressions_equivalent(validator, e1, e2)
+            op1 == op2 && expressions_equivalent(e1, e2)
         }
 
         // Function calls
@@ -1352,29 +1291,29 @@ fn expressions_equivalent(
                     .arguments
                     .iter()
                     .zip(&f2.arguments)
-                    .all(|(a1, a2)| expressions_equivalent(validator, a1, a2))
+                    .all(|(a1, a2)| expressions_equivalent(a1, a2))
         }
 
         // Parenthesized (unwrap and compare)
-        (Expression::Parenthesized(e1, _), e2) => expressions_equivalent(validator, e1, e2),
-        (e1, Expression::Parenthesized(e2, _)) => expressions_equivalent(validator, e1, e2),
+        (Expression::Parenthesized(e1, _), e2) => expressions_equivalent(e1, e2),
+        (e1, Expression::Parenthesized(e2, _)) => expressions_equivalent(e1, e2),
 
         // Type annotations (ignore annotation, compare base)
-        (Expression::TypeAnnotation(e1, _, _), e2) => expressions_equivalent(validator, e1, e2),
-        (e1, Expression::TypeAnnotation(e2, _, _)) => expressions_equivalent(validator, e1, e2),
+        (Expression::TypeAnnotation(e1, _, _), e2) => expressions_equivalent(e1, e2),
+        (e1, Expression::TypeAnnotation(e2, _, _)) => expressions_equivalent(e1, e2),
 
         // Comparison operations
         (Expression::Comparison(op1, l1, r1, _), Expression::Comparison(op2, l2, r2, _)) => {
             op1 == op2
-                && expressions_equivalent(validator, l1, l2)
-                && expressions_equivalent(validator, r1, r2)
+                && expressions_equivalent(l1, l2)
+                && expressions_equivalent(r1, r2)
         }
 
         // Logical operations
         (Expression::Logical(op1, l1, r1, _), Expression::Logical(op2, l2, r2, _)) => {
             op1 == op2
-                && expressions_equivalent(validator, l1, l2)
-                && expressions_equivalent(validator, r1, r2)
+                && expressions_equivalent(l1, l2)
+                && expressions_equivalent(r1, r2)
         }
 
         // Default: not equivalent
