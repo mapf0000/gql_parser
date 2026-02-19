@@ -2,20 +2,19 @@
 
 ## Goal
 Pure-Rust ISO GQL parser with high-quality (rustc-like) diagnostics.
-Stack: `logos` (lexer) + `chumsky` (parser/recovery) + `miette` (rendering) + custom `ast`.
+Stack: `logos` (lexer) + hand-rolled recursive descent parser + `miette` (rendering) + custom `ast`.
 
 ## Crates
 - `logos` (tokenizer)
-- `chumsky` (token-stream parser + recovery)
 - `miette` (diagnostic reporting with labeled spans/snippets)
 - `smol_str` (identifiers/keys in AST; cheap clones, fewer heap allocs)
-- `thiserror` (optional: internal error types)
 
 ## Architecture
 1. **Lexer**: `&str -> Vec<Token> + Vec<Diag>`
    - `Token { kind: TokenKind, span: Range<usize> }`
    - Emit diagnostics for unknown chars/unterminated strings, keep lexing.
 2. **Parser**: `Vec<Token> -> (Option<Ast>, Vec<Diag>)`
+   - Hand-written recursive descent parser with specialized parser structs for each grammar domain
    - Parse from tokens (not chars).
    - Use clause boundaries for recovery (`;`, `MATCH`, `WHERE`, `RETURN`, `WITH`, `)` etc.).
    - Prefer returning partial AST when possible.
@@ -31,9 +30,11 @@ Stack: `logos` (lexer) + `chumsky` (parser/recovery) + `miette` (rendering) + cu
    - Convert to `miette::Report` at the API boundary for rendering.
 
 ## Repo Layout
-- `src/lexer.rs` (logos rules + TokenKind)
-- `src/parser/mod.rs` (chumsky grammar, recovery helpers)
-- `src/ast.rs` (AST + Span/Spanned)
+- `src/lexer/` (logos rules + TokenKind + keyword classification)
+- `src/parser/` (hand-rolled recursive descent parser modules: query, expression, types, patterns, mutation, procedure, references, graph_type)
+- `src/ast/` (AST node definitions + Span/Spanned)
+- `src/semantic/` (semantic validation with symbol table and type inference)
+- `src/ir/` (intermediate representation with symbol table and type table)
 - `src/diag.rs` (Diag model + miette conversion)
 - `src/lib.rs` (public API: `parse(query: &str) -> ParseResult`)
 
