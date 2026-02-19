@@ -38,60 +38,25 @@ use crate::ast::references::{
 };
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
+use crate::parser::base::{ParseError, ParseResult, TokenStream};
 use smol_str::SmolStr;
-
-type ParseError = Box<Diag>;
-type ParseResult<T> = Result<T, ParseError>;
 
 /// Parser for catalog and object references.
 pub struct ReferenceParser<'a> {
-    tokens: &'a [Token],
-    pos: usize,
+    stream: TokenStream<'a>,
 }
 
 impl<'a> ReferenceParser<'a> {
     /// Creates a new reference parser.
     pub fn new(tokens: &'a [Token]) -> Self {
-        Self { tokens, pos: 0 }
-    }
-
-    /// Returns the current token.
-    fn current(&self) -> &Token {
-        self.tokens
-            .get(self.pos)
-            .unwrap_or_else(|| self.tokens.last().expect("token stream must be non-empty"))
-    }
-
-    /// Advances to the next token.
-    fn advance(&mut self) {
-        if self.pos < self.tokens.len().saturating_sub(1) {
-            self.pos += 1;
+        Self {
+            stream: TokenStream::new(tokens),
         }
     }
 
-    /// Checks if the current token matches the given kind.
-    fn check(&self, kind: &TokenKind) -> bool {
-        &self.current().kind == kind
-    }
-
-    /// Expects a specific token kind and returns its span.
-    fn expect(&mut self, kind: TokenKind) -> ParseResult<Span> {
-        if self.check(&kind) {
-            let span = self.current().span.clone();
-            self.advance();
-            Ok(span)
-        } else {
-            Err(self.error_here(format!("expected {kind}, found {}", self.current().kind)))
-        }
-    }
-
-    /// Creates an error at the current position.
+    /// Creates an error at the current position with the P_REF code.
     fn error_here(&self, message: impl Into<String>) -> ParseError {
-        Box::new(
-            Diag::error(message.into())
-                .with_primary_label(self.current().span.clone(), "here")
-                .with_code("P_REF"),
-        )
+        self.stream.error_here_with_code(message, "P_REF")
     }
 
     // ========================================================================
@@ -127,19 +92,19 @@ impl<'a> ReferenceParser<'a> {
     /// $$schema_param
     /// ```
     pub fn parse_schema_reference(&mut self) -> ParseResult<SchemaReference> {
-        let start = self.current().span.start;
+        let start = self.stream.current().span.start;
 
-        match &self.current().kind {
+        match &self.stream.current().kind {
             // Absolute path: /schema or /dir/schema
             TokenKind::Slash => {
-                self.advance();
+                self.stream.advance();
                 let components = self.parse_schema_path_components()?;
                 if components.is_empty() {
                     return Err(self.error_here("absolute schema path cannot be empty"));
                 }
                 let end = self
-                    .tokens
-                    .get(self.pos.saturating_sub(1))
+                    .stream.tokens()
+                    .get(self.stream.position().saturating_sub(1))
                     .map(|t| t.span.end)
                     .unwrap_or(start);
                 Ok(SchemaReference::AbsolutePath {
@@ -152,8 +117,8 @@ impl<'a> ReferenceParser<'a> {
             TokenKind::DotDot => {
                 let (up_levels, components) = self.parse_relative_schema_path()?;
                 let end = self
-                    .tokens
-                    .get(self.pos.saturating_sub(1))
+                    .stream.tokens()
+                    .get(self.stream.position().saturating_sub(1))
                     .map(|t| t.span.end)
                     .unwrap_or(start);
                 Ok(SchemaReference::RelativePath {
@@ -165,16 +130,16 @@ impl<'a> ReferenceParser<'a> {
 
             // Dot: . (current schema)
             TokenKind::Dot => {
-                let span = self.current().span.clone();
-                self.advance();
+                let span = self.stream.current().span.clone();
+                self.stream.advance();
                 Ok(SchemaReference::Dot { span })
             }
 
             // Reference parameter: $$name
             TokenKind::ReferenceParameter(name) => {
                 let name = name.clone();
-                let span = self.current().span.clone();
-                self.advance();
+                let span = self.stream.current().span.clone();
+                self.stream.advance();
                 Ok(SchemaReference::ReferenceParameter { name, span })
             }
 
@@ -183,19 +148,19 @@ impl<'a> ReferenceParser<'a> {
                 let name_upper = name.to_ascii_uppercase();
                 match name_upper.as_str() {
                     "HOME_SCHEMA" => {
-                        let span = self.current().span.clone();
-                        self.advance();
+                        let span = self.stream.current().span.clone();
+                        self.stream.advance();
                         Ok(SchemaReference::HomeSchema { span })
                     }
                     "CURRENT_SCHEMA" => {
-                        let span = self.current().span.clone();
-                        self.advance();
+                        let span = self.stream.current().span.clone();
+                        self.stream.advance();
                         Ok(SchemaReference::CurrentSchema { span })
                     }
                     _ => {
                         let name = name.clone();
-                        let span = self.current().span.clone();
-                        self.advance();
+                        let span = self.stream.current().span.clone();
+                        self.stream.advance();
                         Ok(SchemaReference::Identifier { name, span })
                     }
                 }
@@ -203,13 +168,13 @@ impl<'a> ReferenceParser<'a> {
 
             // HOME keyword followed by SCHEMA
             TokenKind::Home => {
-                let start_span = self.current().span.clone();
-                self.advance();
-                if self.check(&TokenKind::Schema) {
-                    self.advance();
+                let start_span = self.stream.current().span.clone();
+                self.stream.advance();
+                if self.stream.check(&TokenKind::Schema) {
+                    self.stream.advance();
                     let end = self
-                        .tokens
-                        .get(self.pos.saturating_sub(1))
+                        .stream.tokens()
+                        .get(self.stream.position().saturating_sub(1))
                         .map(|t| t.span.end)
                         .unwrap_or(start_span.start);
                     Ok(SchemaReference::HomeSchema {
@@ -222,13 +187,13 @@ impl<'a> ReferenceParser<'a> {
 
             // CURRENT keyword followed by SCHEMA
             TokenKind::Current => {
-                let start_span = self.current().span.clone();
-                self.advance();
-                if self.check(&TokenKind::Schema) {
-                    self.advance();
+                let start_span = self.stream.current().span.clone();
+                self.stream.advance();
+                if self.stream.check(&TokenKind::Schema) {
+                    self.stream.advance();
                     let end = self
-                        .tokens
-                        .get(self.pos.saturating_sub(1))
+                        .stream.tokens()
+                        .get(self.stream.position().saturating_sub(1))
                         .map(|t| t.span.end)
                         .unwrap_or(start_span.start);
                     Ok(SchemaReference::CurrentSchema {
@@ -241,7 +206,7 @@ impl<'a> ReferenceParser<'a> {
 
             _ => Err(self.error_here(format!(
                 "expected schema reference, found {}",
-                self.current().kind
+                self.stream.current().kind
             ))),
         }
     }
@@ -252,15 +217,15 @@ impl<'a> ReferenceParser<'a> {
     fn parse_schema_path_components(&mut self) -> ParseResult<Vec<SmolStr>> {
         let mut components = Vec::new();
 
-        while let TokenKind::Identifier(name) = &self.current().kind {
+        while let TokenKind::Identifier(name) = &self.stream.current().kind {
             components.push(name.clone());
-            self.advance();
+            self.stream.advance();
 
             // Check for continuation with /
-            if self.check(&TokenKind::Slash) {
-                self.advance();
+            if self.stream.check(&TokenKind::Slash) {
+                self.stream.advance();
                 // Must be followed by another identifier
-                if !matches!(self.current().kind, TokenKind::Identifier(_)) {
+                if !matches!(self.stream.current().kind, TokenKind::Identifier(_)) {
                     return Err(self.error_here("expected identifier after /"));
                 }
             } else {
@@ -278,15 +243,15 @@ impl<'a> ReferenceParser<'a> {
         let mut up_levels = 0;
 
         // Count the number of .. segments
-        while self.check(&TokenKind::DotDot) {
+        while self.stream.check(&TokenKind::DotDot) {
             up_levels += 1;
-            self.advance();
+            self.stream.advance();
 
             // Expect /
-            if !self.check(&TokenKind::Slash) {
+            if !self.stream.check(&TokenKind::Slash) {
                 return Err(self.error_here("expected / after .."));
             }
-            self.advance();
+            self.stream.advance();
         }
 
         if up_levels == 0 {
@@ -329,22 +294,22 @@ impl<'a> ReferenceParser<'a> {
     /// $$graph_param
     /// ```
     pub fn parse_graph_reference(&mut self) -> ParseResult<GraphReference> {
-        let start = self.current().span.start;
+        let start = self.stream.current().span.start;
 
-        match &self.current().kind {
+        match &self.stream.current().kind {
             // Delimited identifier
             TokenKind::DelimitedIdentifier(name) => {
                 let name = name.clone();
-                let span = self.current().span.clone();
-                self.advance();
+                let span = self.stream.current().span.clone();
+                self.stream.advance();
                 Ok(GraphReference::Delimited { name, span })
             }
 
             // Reference parameter: $$name
             TokenKind::ReferenceParameter(name) => {
                 let name = name.clone();
-                let span = self.current().span.clone();
-                self.advance();
+                let span = self.stream.current().span.clone();
+                self.stream.advance();
                 Ok(GraphReference::ReferenceParameter { name, span })
             }
 
@@ -353,23 +318,23 @@ impl<'a> ReferenceParser<'a> {
                 let name_upper = name.to_ascii_uppercase();
                 match name_upper.as_str() {
                     "HOME_GRAPH" => {
-                        let span = self.current().span.clone();
-                        self.advance();
+                        let span = self.stream.current().span.clone();
+                        self.stream.advance();
                         Ok(GraphReference::HomeGraph { span })
                     }
                     "HOME_PROPERTY_GRAPH" => {
-                        let span = self.current().span.clone();
-                        self.advance();
+                        let span = self.stream.current().span.clone();
+                        self.stream.advance();
                         Ok(GraphReference::HomePropertyGraph { span })
                     }
                     "CURRENT_GRAPH" => {
-                        let span = self.current().span.clone();
-                        self.advance();
+                        let span = self.stream.current().span.clone();
+                        self.stream.advance();
                         Ok(GraphReference::CurrentGraph { span })
                     }
                     "CURRENT_PROPERTY_GRAPH" => {
-                        let span = self.current().span.clone();
-                        self.advance();
+                        let span = self.stream.current().span.clone();
+                        self.stream.advance();
                         Ok(GraphReference::CurrentPropertyGraph { span })
                     }
                     _ => {
@@ -386,15 +351,15 @@ impl<'a> ReferenceParser<'a> {
 
             // HOME keyword followed by GRAPH or PROPERTY
             TokenKind::Home => {
-                let start_span = self.current().span.clone();
-                self.advance();
+                let start_span = self.stream.current().span.clone();
+                self.stream.advance();
 
-                match &self.current().kind {
+                match &self.stream.current().kind {
                     TokenKind::Graph => {
-                        self.advance();
+                        self.stream.advance();
                         let end = self
-                            .tokens
-                            .get(self.pos.saturating_sub(1))
+                            .stream.tokens()
+                            .get(self.stream.position().saturating_sub(1))
                             .map(|t| t.span.end)
                             .unwrap_or(start_span.start);
                         Ok(GraphReference::HomeGraph {
@@ -402,11 +367,11 @@ impl<'a> ReferenceParser<'a> {
                         })
                     }
                     TokenKind::Property => {
-                        self.advance();
-                        self.expect(TokenKind::Graph)?;
+                        self.stream.advance();
+                        self.stream.expect(TokenKind::Graph)?;
                         let end = self
-                            .tokens
-                            .get(self.pos.saturating_sub(1))
+                            .stream.tokens()
+                            .get(self.stream.position().saturating_sub(1))
                             .map(|t| t.span.end)
                             .unwrap_or(start_span.start);
                         Ok(GraphReference::HomePropertyGraph {
@@ -435,7 +400,7 @@ impl<'a> ReferenceParser<'a> {
 
             _ => Err(self.error_here(format!(
                 "expected graph reference, found {}",
-                self.current().kind
+                self.stream.current().kind
             ))),
         }
     }
@@ -461,14 +426,14 @@ impl<'a> ReferenceParser<'a> {
     /// $$type_param
     /// ```
     pub fn parse_graph_type_reference(&mut self) -> ParseResult<GraphTypeReference> {
-        let start = self.current().span.start;
+        let start = self.stream.current().span.start;
 
-        match &self.current().kind {
+        match &self.stream.current().kind {
             // Reference parameter: $$name
             TokenKind::ReferenceParameter(name) => {
                 let name = name.clone();
-                let span = self.current().span.clone();
-                self.advance();
+                let span = self.stream.current().span.clone();
+                self.stream.advance();
                 Ok(GraphTypeReference::ReferenceParameter { name, span })
             }
 
@@ -507,22 +472,22 @@ impl<'a> ReferenceParser<'a> {
     /// $$table_param
     /// ```
     pub fn parse_binding_table_reference(&mut self) -> ParseResult<BindingTableReference> {
-        let start = self.current().span.start;
+        let start = self.stream.current().span.start;
 
-        match &self.current().kind {
+        match &self.stream.current().kind {
             // Delimited identifier
             TokenKind::DelimitedIdentifier(name) => {
                 let name = name.clone();
-                let span = self.current().span.clone();
-                self.advance();
+                let span = self.stream.current().span.clone();
+                self.stream.advance();
                 Ok(BindingTableReference::Delimited { name, span })
             }
 
             // Reference parameter: $$name
             TokenKind::ReferenceParameter(name) => {
                 let name = name.clone();
-                let span = self.current().span.clone();
-                self.advance();
+                let span = self.stream.current().span.clone();
+                self.stream.advance();
                 Ok(BindingTableReference::ReferenceParameter { name, span })
             }
 
@@ -559,14 +524,14 @@ impl<'a> ReferenceParser<'a> {
     /// $$proc_param
     /// ```
     pub fn parse_procedure_reference(&mut self) -> ParseResult<ProcedureReference> {
-        let start = self.current().span.start;
+        let start = self.stream.current().span.start;
 
-        match &self.current().kind {
+        match &self.stream.current().kind {
             // Reference parameter: $$name
             TokenKind::ReferenceParameter(name) => {
                 let name = name.clone();
-                let span = self.current().span.clone();
-                self.advance();
+                let span = self.stream.current().span.clone();
+                self.stream.advance();
                 Ok(ProcedureReference::ReferenceParameter { name, span })
             }
 
@@ -608,7 +573,7 @@ impl<'a> ReferenceParser<'a> {
     /// ../other::name                -- Relative schema path
     /// ```
     pub fn parse_catalog_qualified_name(&mut self) -> ParseResult<CatalogQualifiedName> {
-        let start = self.current().span.start;
+        let start = self.stream.current().span.start;
 
         // Try to parse parent reference
         let parent = self.try_parse_catalog_object_parent_reference()?;
@@ -617,8 +582,8 @@ impl<'a> ReferenceParser<'a> {
         let (name, _) = self.parse_regular_identifier("object name")?;
 
         let end = self
-            .tokens
-            .get(self.pos.saturating_sub(1))
+            .stream.tokens()
+            .get(self.stream.position().saturating_sub(1))
             .map(|t| t.span.end)
             .unwrap_or(start);
 
@@ -630,15 +595,15 @@ impl<'a> ReferenceParser<'a> {
     }
 
     fn parse_absolute_path_graph_name(&mut self) -> ParseResult<(CatalogQualifiedName, Span)> {
-        let start = self.current().span.start;
-        self.expect(TokenKind::Slash)?;
+        let start = self.stream.current().span.start;
+        self.stream.expect(TokenKind::Slash)?;
 
         let mut components: Vec<(SmolStr, Span)> = Vec::new();
-        while !matches!(self.current().kind, TokenKind::Eof) {
+        while !matches!(self.stream.current().kind, TokenKind::Eof) {
             let (name, span) = self.parse_regular_identifier("graph path component")?;
             components.push((name, span));
-            if self.check(&TokenKind::Slash) {
-                self.advance();
+            if self.stream.check(&TokenKind::Slash) {
+                self.stream.advance();
             } else {
                 break;
             }
@@ -681,14 +646,14 @@ impl<'a> ReferenceParser<'a> {
     }
 
     fn parse_regular_identifier(&mut self, expected: &str) -> ParseResult<(SmolStr, Span)> {
-        let token = self.current().clone();
+        let token = self.stream.current().clone();
         match &token.kind {
             TokenKind::Identifier(name) => {
-                self.advance();
+                self.stream.advance();
                 Ok((name.clone(), token.span))
             }
             kind if kind.is_non_reserved_identifier_keyword() => {
-                self.advance();
+                self.stream.advance();
                 Ok((SmolStr::new(kind.to_string()), token.span))
             }
             _ => Err(self.error_here(format!("expected {expected}"))),
@@ -705,21 +670,21 @@ impl<'a> ReferenceParser<'a> {
         // We need to check if there's a :: following a potential parent
 
         // Save current position for potential backtracking
-        let saved_pos = self.pos;
-        let saved_start = self.current().span.start;
+        let saved_pos = self.stream.position();
+        let saved_start = self.stream.current().span.start;
 
         // Try to parse as schema reference first (/, .., ., HOME_SCHEMA, CURRENT_SCHEMA)
-        let parent = match &self.current().kind {
+        let parent = match &self.stream.current().kind {
             TokenKind::Slash | TokenKind::DotDot | TokenKind::Dot => {
                 // Try parsing schema reference
                 match self.parse_schema_reference() {
                     Ok(schema) => {
                         // Check for ::
-                        if self.check(&TokenKind::DoubleColon) {
-                            self.advance();
+                        if self.stream.check(&TokenKind::DoubleColon) {
+                            self.stream.advance();
                             let end = self
-                                .tokens
-                                .get(self.pos.saturating_sub(1))
+                                .stream.tokens()
+                                .get(self.stream.position().saturating_sub(1))
                                 .map(|t| t.span.end)
                                 .unwrap_or(schema.span().start);
                             Some(CatalogObjectParentReference::Schema {
@@ -728,13 +693,13 @@ impl<'a> ReferenceParser<'a> {
                             })
                         } else {
                             // No ::, backtrack
-                            self.pos = saved_pos;
+                            self.stream.set_position(saved_pos);
                             None
                         }
                     }
                     Err(_) => {
                         // Failed to parse, backtrack
-                        self.pos = saved_pos;
+                        self.stream.set_position(saved_pos);
                         None
                     }
                 }
@@ -745,11 +710,11 @@ impl<'a> ReferenceParser<'a> {
                 match self.parse_schema_reference() {
                     Ok(schema) => {
                         // Check for ::
-                        if self.check(&TokenKind::DoubleColon) {
-                            self.advance();
+                        if self.stream.check(&TokenKind::DoubleColon) {
+                            self.stream.advance();
                             let end = self
-                                .tokens
-                                .get(self.pos.saturating_sub(1))
+                                .stream.tokens()
+                                .get(self.stream.position().saturating_sub(1))
                                 .map(|t| t.span.end)
                                 .unwrap_or(schema.span().start);
                             Some(CatalogObjectParentReference::Schema {
@@ -758,13 +723,13 @@ impl<'a> ReferenceParser<'a> {
                             })
                         } else {
                             // No ::, backtrack
-                            self.pos = saved_pos;
+                            self.stream.set_position(saved_pos);
                             None
                         }
                     }
                     Err(_) => {
                         // Failed to parse, backtrack
-                        self.pos = saved_pos;
+                        self.stream.set_position(saved_pos);
                         None
                     }
                 }
@@ -777,11 +742,11 @@ impl<'a> ReferenceParser<'a> {
                     match self.parse_schema_reference() {
                         Ok(schema) => {
                             // Check for ::
-                            if self.check(&TokenKind::DoubleColon) {
-                                self.advance();
+                            if self.stream.check(&TokenKind::DoubleColon) {
+                                self.stream.advance();
                                 let end = self
-                                    .tokens
-                                    .get(self.pos.saturating_sub(1))
+                                    .stream.tokens()
+                                    .get(self.stream.position().saturating_sub(1))
                                     .map(|t| t.span.end)
                                     .unwrap_or(schema.span().start);
                                 Some(CatalogObjectParentReference::Schema {
@@ -790,13 +755,13 @@ impl<'a> ReferenceParser<'a> {
                                 })
                             } else {
                                 // No ::, backtrack
-                                self.pos = saved_pos;
+                                self.stream.set_position(saved_pos);
                                 None
                             }
                         }
                         Err(_) => {
                             // Failed to parse, backtrack
-                            self.pos = saved_pos;
+                            self.stream.set_position(saved_pos);
                             None
                         }
                     }
@@ -823,9 +788,9 @@ impl<'a> ReferenceParser<'a> {
     ) -> ParseResult<Option<CatalogObjectParentReference>> {
         // Count how many :: we have to determine nesting depth
         let mut depth = 0;
-        let mut temp_pos = self.pos;
+        let mut temp_pos = self.stream.position();
 
-        while let Some(token) = self.tokens.get(temp_pos) {
+        while let Some(token) = self.stream.tokens().get(temp_pos) {
             // Look for identifier
             if !matches!(token.kind, TokenKind::Identifier(_)) {
                 break;
@@ -833,7 +798,7 @@ impl<'a> ReferenceParser<'a> {
             temp_pos += 1;
 
             // Look for ::
-            if let Some(token) = self.tokens.get(temp_pos) {
+            if let Some(token) = self.stream.tokens().get(temp_pos) {
                 if matches!(token.kind, TokenKind::DoubleColon) {
                     depth += 1;
                     temp_pos += 1;
@@ -847,30 +812,30 @@ impl<'a> ReferenceParser<'a> {
 
         if depth == 0 {
             // No :: found, no parent
-            self.pos = saved_pos;
+            self.stream.set_position(saved_pos);
             return Ok(None);
         }
 
         if depth == 1 {
             // Single level: identifier::
             // This is a simple parent reference
-            let name = match &self.current().kind {
+            let name = match &self.stream.current().kind {
                 TokenKind::Identifier(n) => {
                     let name = n.clone();
-                    self.advance();
+                    self.stream.advance();
                     name
                 }
                 _ => {
-                    self.pos = saved_pos;
+                    self.stream.set_position(saved_pos);
                     return Ok(None);
                 }
             };
 
-            self.expect(TokenKind::DoubleColon)?;
+            self.stream.expect(TokenKind::DoubleColon)?;
 
             let end = self
-                .tokens
-                .get(self.pos.saturating_sub(1))
+                .stream.tokens()
+                .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(saved_start);
 
@@ -890,11 +855,11 @@ impl<'a> ReferenceParser<'a> {
             // Recursively parse the nested structure
             let parent_name = self.parse_catalog_qualified_name_recursive(depth - 1)?;
 
-            self.expect(TokenKind::DoubleColon)?;
+            self.stream.expect(TokenKind::DoubleColon)?;
 
             let end = self
-                .tokens
-                .get(self.pos.saturating_sub(1))
+                .stream.tokens()
+                .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(saved_start);
 
@@ -912,14 +877,14 @@ impl<'a> ReferenceParser<'a> {
         &mut self,
         depth: usize,
     ) -> ParseResult<CatalogQualifiedName> {
-        let start = self.current().span.start;
+        let start = self.stream.current().span.start;
 
         if depth == 0 {
             // Base case: just parse identifier
-            let name = match &self.current().kind {
+            let name = match &self.stream.current().kind {
                 TokenKind::Identifier(n) => {
                     let name = n.clone();
-                    self.advance();
+                    self.stream.advance();
                     name
                 }
                 _ => {
@@ -928,8 +893,8 @@ impl<'a> ReferenceParser<'a> {
             };
 
             let end = self
-                .tokens
-                .get(self.pos.saturating_sub(1))
+                .stream.tokens()
+                .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
 
@@ -942,11 +907,11 @@ impl<'a> ReferenceParser<'a> {
             // Recursive case: parse parent, then ::, then identifier
             let parent_name = self.parse_catalog_qualified_name_recursive(depth - 1)?;
 
-            self.expect(TokenKind::DoubleColon)?;
+            self.stream.expect(TokenKind::DoubleColon)?;
 
             let parent_end = self
-                .tokens
-                .get(self.pos.saturating_sub(1))
+                .stream.tokens()
+                .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
 
@@ -955,10 +920,10 @@ impl<'a> ReferenceParser<'a> {
                 span: start..parent_end,
             });
 
-            let name = match &self.current().kind {
+            let name = match &self.stream.current().kind {
                 TokenKind::Identifier(n) => {
                     let name = n.clone();
-                    self.advance();
+                    self.stream.advance();
                     name
                 }
                 _ => {
@@ -967,8 +932,8 @@ impl<'a> ReferenceParser<'a> {
             };
 
             let end = self
-                .tokens
-                .get(self.pos.saturating_sub(1))
+                .stream.tokens()
+                .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
 
@@ -986,20 +951,20 @@ impl<'a> ReferenceParser<'a> {
     pub fn parse_catalog_object_parent_reference(
         &mut self,
     ) -> ParseResult<CatalogObjectParentReference> {
-        let start = self.current().span.start;
+        let start = self.stream.current().span.start;
 
         // Try schema reference first
-        match &self.current().kind {
+        match &self.stream.current().kind {
             TokenKind::Slash
             | TokenKind::DotDot
             | TokenKind::Dot
             | TokenKind::Home
             | TokenKind::Current => {
                 let schema = self.parse_schema_reference()?;
-                self.expect(TokenKind::DoubleColon)?;
+                self.stream.expect(TokenKind::DoubleColon)?;
                 let end = self
-                    .tokens
-                    .get(self.pos.saturating_sub(1))
+                    .stream.tokens()
+                    .get(self.stream.position().saturating_sub(1))
                     .map(|t| t.span.end)
                     .unwrap_or(start);
                 Ok(CatalogObjectParentReference::Schema {
@@ -1013,10 +978,10 @@ impl<'a> ReferenceParser<'a> {
                 // Check for predefined schema references
                 if matches!(name_upper.as_str(), "HOME_SCHEMA" | "CURRENT_SCHEMA") {
                     let schema = self.parse_schema_reference()?;
-                    self.expect(TokenKind::DoubleColon)?;
+                    self.stream.expect(TokenKind::DoubleColon)?;
                     let end = self
-                        .tokens
-                        .get(self.pos.saturating_sub(1))
+                        .stream.tokens()
+                        .get(self.stream.position().saturating_sub(1))
                         .map(|t| t.span.end)
                         .unwrap_or(start);
                     Ok(CatalogObjectParentReference::Schema {
@@ -1025,8 +990,8 @@ impl<'a> ReferenceParser<'a> {
                     })
                 } else {
                     // Parse as catalog-qualified name
-                    let saved_pos = self.pos;
-                    let saved_start = self.current().span.start;
+                    let saved_pos = self.stream.position();
+                    let saved_start = self.stream.current().span.start;
                     match self.try_parse_nested_parent_reference(saved_pos, saved_start)? {
                         Some(parent) => Ok(parent),
                         None => Err(self.error_here("expected catalog object parent reference")),
@@ -1036,7 +1001,7 @@ impl<'a> ReferenceParser<'a> {
 
             _ => Err(self.error_here(format!(
                 "expected catalog object parent reference, found {}",
-                self.current().kind
+                self.stream.current().kind
             ))),
         }
     }
@@ -1108,10 +1073,10 @@ fn parse_with_full_consumption<T>(
     let mut parser = ReferenceParser::new(&normalized);
     let parsed = parse(&mut parser)?;
 
-    if !matches!(parser.current().kind, TokenKind::Eof) {
+    if !matches!(parser.stream.current().kind, TokenKind::Eof) {
         return Err(Box::new(
             Diag::error("unexpected trailing tokens after reference")
-                .with_primary_label(parser.current().span.clone(), "unexpected token")
+                .with_primary_label(parser.stream.current().span.clone(), "unexpected token")
                 .with_code("P_REF"),
         ));
     }

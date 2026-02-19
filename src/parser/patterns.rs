@@ -5,10 +5,11 @@ use crate::ast::query::*;
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
 use crate::parser::expression::parse_expression;
+use crate::parser::LegacyParseResult;
 use smol_str::SmolStr;
 
 /// Parse result with optional value and diagnostics.
-type ParseResult<T> = (Option<T>, Vec<Diag>);
+type ParseResult<T> = LegacyParseResult<T>;
 
 /// Parses a graph pattern starting at the given position.
 pub fn parse_graph_pattern(tokens: &[Token], pos: &mut usize) -> ParseResult<GraphPattern> {

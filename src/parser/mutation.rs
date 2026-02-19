@@ -13,10 +13,11 @@ use crate::parser::query::{
     parse_use_graph_clause,
 };
 use crate::parser::procedure::parse_call_procedure_statement;
+use crate::parser::LegacyParseResult;
 use smol_str::SmolStr;
 
 /// Parse result with optional value and diagnostics.
-type ParseResult<T> = (Option<T>, Vec<Diag>);
+type ParseResult<T> = LegacyParseResult<T>;
 
 /// Parses a linear data modifying statement starting at the given position.
 pub fn parse_linear_data_modifying_statement(

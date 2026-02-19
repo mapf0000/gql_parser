@@ -15,22 +15,21 @@ use crate::ast::{
 };
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
+use crate::parser::base::{ParseResult, TokenStream};
 use crate::parser::types::parse_value_type_prefix;
 use smol_str::SmolStr;
 
-type ParseError = Box<Diag>;
-type ParseResult<T> = Result<T, ParseError>;
-
 /// Parser for expressions.
 pub struct ExpressionParser<'a> {
-    tokens: &'a [Token],
-    pos: usize,
+    stream: TokenStream<'a>,
 }
 
 impl<'a> ExpressionParser<'a> {
     /// Creates a new expression parser.
     pub fn new(tokens: &'a [Token]) -> Self {
-        Self { tokens, pos: 0 }
+        Self {
+            stream: TokenStream::new(tokens),
+        }
     }
 
     /// Parses an expression using standard precedence rules.
@@ -38,56 +37,11 @@ impl<'a> ExpressionParser<'a> {
         self.parse_or_expression()
     }
 
-    fn current(&self) -> &Token {
-        self.tokens
-            .get(self.pos)
-            .unwrap_or_else(|| self.tokens.last().expect("token stream must be non-empty"))
-    }
-
-    fn peek(&self) -> Option<&Token> {
-        self.tokens.get(self.pos + 1)
-    }
-
-    fn advance(&mut self) {
-        if self.pos < self.tokens.len().saturating_sub(1) {
-            self.pos += 1;
-        }
-    }
-
-    fn check(&self, kind: &TokenKind) -> bool {
-        &self.current().kind == kind
-    }
-
-    fn consume(&mut self, kind: &TokenKind) -> bool {
-        if self.check(kind) {
-            self.advance();
-            true
-        } else {
-            false
-        }
-    }
-
-    fn expect(&mut self, kind: TokenKind) -> ParseResult<Span> {
-        if self.check(&kind) {
-            let span = self.current().span.clone();
-            self.advance();
-            Ok(span)
-        } else {
-            Err(self.error_here(format!("expected {kind}, found {}", self.current().kind)))
-        }
-    }
-
-    fn error_here(&self, message: impl Into<String>) -> ParseError {
-        Box::new(
-            Diag::error(message.into()).with_primary_label(self.current().span.clone(), "here"),
-        )
-    }
-
     fn parse_or_expression(&mut self) -> ParseResult<Expression> {
         let mut left = self.parse_xor_expression()?;
 
-        while self.check(&TokenKind::Or) {
-            self.advance();
+        while self.stream.check(&TokenKind::Or) {
+            self.stream.advance();
             let right = self.parse_xor_expression()?;
             let span = left.span().start..right.span().end;
             left = Expression::Logical(LogicalOperator::Or, Box::new(left), Box::new(right), span);
@@ -99,8 +53,8 @@ impl<'a> ExpressionParser<'a> {
     fn parse_xor_expression(&mut self) -> ParseResult<Expression> {
         let mut left = self.parse_and_expression()?;
 
-        while self.check(&TokenKind::Xor) {
-            self.advance();
+        while self.stream.check(&TokenKind::Xor) {
+            self.stream.advance();
             let right = self.parse_and_expression()?;
             let span = left.span().start..right.span().end;
             left = Expression::Logical(LogicalOperator::Xor, Box::new(left), Box::new(right), span);
@@ -112,8 +66,8 @@ impl<'a> ExpressionParser<'a> {
     fn parse_and_expression(&mut self) -> ParseResult<Expression> {
         let mut left = self.parse_not_expression()?;
 
-        while self.check(&TokenKind::And) {
-            self.advance();
+        while self.stream.check(&TokenKind::And) {
+            self.stream.advance();
             let right = self.parse_not_expression()?;
             let span = left.span().start..right.span().end;
             left = Expression::Logical(LogicalOperator::And, Box::new(left), Box::new(right), span);
@@ -123,9 +77,9 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_not_expression(&mut self) -> ParseResult<Expression> {
-        if self.check(&TokenKind::Not) {
-            let start = self.current().span.start;
-            self.advance();
+        if self.stream.check(&TokenKind::Not) {
+            let start = self.stream.current().span.start;
+            self.stream.advance();
             let operand = self.parse_not_expression()?;
             let span = start..operand.span().end;
             Ok(Expression::Unary(
@@ -141,25 +95,25 @@ impl<'a> ExpressionParser<'a> {
     fn parse_is_expression(&mut self) -> ParseResult<Expression> {
         let mut expr = self.parse_comparison_expression()?;
 
-        while self.check(&TokenKind::Is) {
-            self.advance();
+        while self.stream.check(&TokenKind::Is) {
+            self.stream.advance();
 
-            let negated = if self.check(&TokenKind::Not) {
-                self.advance();
+            let negated = if self.stream.check(&TokenKind::Not) {
+                self.stream.advance();
                 true
             } else {
                 false
             };
 
-            expr = match &self.current().kind {
+            expr = match &self.stream.current().kind {
                 TokenKind::Null => {
-                    let end = self.current().span.end;
-                    self.advance();
+                    let end = self.stream.current().span.end;
+                    self.stream.advance();
                     let span = expr.span().start..end;
                     Expression::Predicate(Predicate::IsNull(Box::new(expr), negated, span))
                 }
                 TokenKind::Typed => {
-                    self.advance();
+                    self.stream.advance();
                     let type_ref = self.parse_value_type_inline()?;
                     let span = expr.span().start..type_ref.span().end;
                     Expression::Predicate(Predicate::IsTyped(
@@ -170,21 +124,21 @@ impl<'a> ExpressionParser<'a> {
                     ))
                 }
                 TokenKind::Normalized => {
-                    let end = self.current().span.end;
-                    self.advance();
+                    let end = self.stream.current().span.end;
+                    self.stream.advance();
                     let span = expr.span().start..end;
                     Expression::Predicate(Predicate::IsNormalized(Box::new(expr), negated, span))
                 }
                 TokenKind::Directed => {
-                    let end = self.current().span.end;
-                    self.advance();
+                    let end = self.stream.current().span.end;
+                    self.stream.advance();
                     let span = expr.span().start..end;
                     Expression::Predicate(Predicate::IsDirected(Box::new(expr), negated, span))
                 }
                 TokenKind::Labeled => {
-                    let labeled_span = self.current().span.clone();
-                    self.advance();
-                    let label = if self.check(&TokenKind::Colon) {
+                    let labeled_span = self.stream.current().span.clone();
+                    self.stream.advance();
+                    let label = if self.stream.check(&TokenKind::Colon) {
                         Some(self.parse_label_expression()?)
                     } else {
                         None
@@ -201,8 +155,8 @@ impl<'a> ExpressionParser<'a> {
                     ))
                 }
                 TokenKind::True => {
-                    let end = self.current().span.end;
-                    self.advance();
+                    let end = self.stream.current().span.end;
+                    self.stream.advance();
                     let span = expr.span().start..end;
                     Expression::Predicate(Predicate::IsTruthValue(
                         Box::new(expr),
@@ -212,8 +166,8 @@ impl<'a> ExpressionParser<'a> {
                     ))
                 }
                 TokenKind::False => {
-                    let end = self.current().span.end;
-                    self.advance();
+                    let end = self.stream.current().span.end;
+                    self.stream.advance();
                     let span = expr.span().start..end;
                     Expression::Predicate(Predicate::IsTruthValue(
                         Box::new(expr),
@@ -223,8 +177,8 @@ impl<'a> ExpressionParser<'a> {
                     ))
                 }
                 TokenKind::Unknown => {
-                    let end = self.current().span.end;
-                    self.advance();
+                    let end = self.stream.current().span.end;
+                    self.stream.advance();
                     let span = expr.span().start..end;
                     Expression::Predicate(Predicate::IsTruthValue(
                         Box::new(expr),
@@ -234,8 +188,8 @@ impl<'a> ExpressionParser<'a> {
                     ))
                 }
                 TokenKind::Source => {
-                    self.advance();
-                    self.expect(TokenKind::Of)?;
+                    self.stream.advance();
+                    self.stream.expect(TokenKind::Of)?;
                     let edge_expr = self.parse_comparison_expression()?;
                     let span = expr.span().start..edge_expr.span().end;
                     Expression::Predicate(Predicate::IsSource(
@@ -246,8 +200,8 @@ impl<'a> ExpressionParser<'a> {
                     ))
                 }
                 TokenKind::Destination => {
-                    self.advance();
-                    self.expect(TokenKind::Of)?;
+                    self.stream.advance();
+                    self.stream.expect(TokenKind::Of)?;
                     let edge_expr = self.parse_comparison_expression()?;
                     let span = expr.span().start..edge_expr.span().end;
                     Expression::Predicate(Predicate::IsDestination(
@@ -258,9 +212,9 @@ impl<'a> ExpressionParser<'a> {
                     ))
                 }
                 _ => {
-                    return Err(self.error_here(format!(
+                    return Err(self.stream.error_here(format!(
                         "expected IS predicate, found {}",
-                        self.current().kind
+                        self.stream.current().kind
                     )));
                 }
             };
@@ -278,7 +232,7 @@ impl<'a> ExpressionParser<'a> {
             left = Expression::Comparison(op, Box::new(left), Box::new(right), span);
 
             if self.is_comparison_operator() {
-                return Err(self.error_here(
+                return Err(self.stream.error_here(
                     "chained comparison operators are not allowed without parentheses",
                 ));
             }
@@ -290,8 +244,8 @@ impl<'a> ExpressionParser<'a> {
     fn parse_concatenation_expression(&mut self) -> ParseResult<Expression> {
         let mut left = self.parse_additive_expression()?;
 
-        while self.check(&TokenKind::DoublePipe) {
-            self.advance();
+        while self.stream.check(&TokenKind::DoublePipe) {
+            self.stream.advance();
             let right = self.parse_additive_expression()?;
             let span = left.span().start..right.span().end;
             left = Expression::Binary(
@@ -309,13 +263,13 @@ impl<'a> ExpressionParser<'a> {
         let mut left = self.parse_multiplicative_expression()?;
 
         loop {
-            let op = match &self.current().kind {
+            let op = match &self.stream.current().kind {
                 TokenKind::Plus => BinaryOperator::Add,
                 TokenKind::Minus => BinaryOperator::Subtract,
                 _ => break,
             };
 
-            self.advance();
+            self.stream.advance();
             let right = self.parse_multiplicative_expression()?;
             let span = left.span().start..right.span().end;
             left = Expression::Binary(op, Box::new(left), Box::new(right), span);
@@ -328,14 +282,14 @@ impl<'a> ExpressionParser<'a> {
         let mut left = self.parse_unary_expression()?;
 
         loop {
-            let op = match &self.current().kind {
+            let op = match &self.stream.current().kind {
                 TokenKind::Star => BinaryOperator::Multiply,
                 TokenKind::Slash => BinaryOperator::Divide,
                 TokenKind::Percent => BinaryOperator::Modulo,
                 _ => break,
             };
 
-            self.advance();
+            self.stream.advance();
             let right = self.parse_unary_expression()?;
             let span = left.span().start..right.span().end;
             left = Expression::Binary(op, Box::new(left), Box::new(right), span);
@@ -345,10 +299,10 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_unary_expression(&mut self) -> ParseResult<Expression> {
-        match &self.current().kind {
+        match &self.stream.current().kind {
             TokenKind::Plus => {
-                let start = self.current().span.start;
-                self.advance();
+                let start = self.stream.current().span.start;
+                self.stream.advance();
                 let operand = self.parse_unary_expression()?;
                 let span = start..operand.span().end;
                 Ok(Expression::Unary(
@@ -358,8 +312,8 @@ impl<'a> ExpressionParser<'a> {
                 ))
             }
             TokenKind::Minus => {
-                let start = self.current().span.start;
-                self.advance();
+                let start = self.stream.current().span.start;
+                self.stream.advance();
                 let operand = self.parse_unary_expression()?;
                 let span = start..operand.span().end;
                 Ok(Expression::Unary(
@@ -376,30 +330,31 @@ impl<'a> ExpressionParser<'a> {
         let mut expr = self.parse_primary_expression()?;
 
         loop {
-            if matches!(self.current().kind, TokenKind::Dot) {
-                self.advance();
+            if matches!(self.stream.current().kind, TokenKind::Dot) {
+                self.stream.advance();
                 let Some(name) = self.token_name_for_property_name() else {
-                    return Err(self.error_here(format!(
+                    return Err(self.stream.error_here(format!(
                         "expected property name, found {}",
-                        self.current().kind
+                        self.stream.current().kind
                     )));
                 };
-                self.advance();
-                let span = expr.span().start..self.tokens[self.pos - 1].span.end;
+                self.stream.advance();
+                let prev_pos = self.stream.position();
+                let span = expr.span().start..self.stream.tokens()[prev_pos - 1].span.end;
                 expr = Expression::PropertyReference(Box::new(expr), name, span);
                 continue;
             }
 
             if matches!(
-                self.current().kind,
+                self.stream.current().kind,
                 TokenKind::DoubleColon | TokenKind::Typed
             ) {
-                let annotation_start = self.current().span.start;
-                let operator = if self.check(&TokenKind::DoubleColon) {
-                    self.advance();
+                let annotation_start = self.stream.current().span.start;
+                let operator = if self.stream.check(&TokenKind::DoubleColon) {
+                    self.stream.advance();
                     TypeAnnotationOperator::DoubleColon
                 } else {
-                    self.advance();
+                    self.stream.advance();
                     TypeAnnotationOperator::Typed
                 };
                 let type_ref = Box::new(self.parse_value_type_inline()?);
@@ -421,7 +376,7 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_primary_expression(&mut self) -> ParseResult<Expression> {
-        match &self.current().kind {
+        match &self.stream.current().kind {
             TokenKind::True
             | TokenKind::False
             | TokenKind::Unknown
@@ -436,7 +391,7 @@ impl<'a> ExpressionParser<'a> {
             | TokenKind::Timestamp
             | TokenKind::Datetime
             | TokenKind::Duration
-                if self
+                if self.stream
                     .peek()
                     .map(|token| &token.kind)
                     .is_some_and(|kind| matches!(kind, TokenKind::StringLiteral(_))) =>
@@ -477,76 +432,76 @@ impl<'a> ExpressionParser<'a> {
             | TokenKind::StddevPop
             | TokenKind::PercentileCont
             | TokenKind::PercentileDisc
-                if self.peek().map(|t| &t.kind) == Some(&TokenKind::LParen) =>
+                if self.stream.peek().map(|t| &t.kind) == Some(&TokenKind::LParen) =>
             {
                 let agg_func = self.parse_aggregate_function()?;
                 Ok(Expression::AggregateFunction(Box::new(agg_func)))
             }
 
-            TokenKind::Path if self.peek().map(|t| &t.kind) == Some(&TokenKind::LBracket) => {
+            TokenKind::Path if self.stream.peek().map(|t| &t.kind) == Some(&TokenKind::LBracket) => {
                 self.parse_path_constructor()
             }
 
-            TokenKind::Record if self.peek().map(|t| &t.kind) == Some(&TokenKind::LBrace) => {
+            TokenKind::Record if self.stream.peek().map(|t| &t.kind) == Some(&TokenKind::LBrace) => {
                 self.parse_record_constructor()
             }
 
-            TokenKind::Property if self.peek().map(|t| &t.kind) == Some(&TokenKind::Graph) => {
+            TokenKind::Property if self.stream.peek().map(|t| &t.kind) == Some(&TokenKind::Graph) => {
                 self.parse_property_graph_expression()
             }
 
-            TokenKind::Binding if self.peek().map(|t| &t.kind) == Some(&TokenKind::Table) => {
+            TokenKind::Binding if self.stream.peek().map(|t| &t.kind) == Some(&TokenKind::Table) => {
                 self.parse_binding_table_expression()
             }
 
             TokenKind::Value => self.parse_value_subquery_expression(),
 
             TokenKind::LParen => {
-                let start = self.current().span.start;
-                self.advance();
+                let start = self.stream.current().span.start;
+                self.stream.advance();
                 let expr = self.parse_expression()?;
-                let end = self.expect(TokenKind::RParen)?.end;
+                let end = self.stream.expect(TokenKind::RParen)?.end;
                 let span = start..end;
                 Ok(Expression::Parenthesized(Box::new(expr), span))
             }
 
             TokenKind::Parameter(name) => {
                 let name = name.clone();
-                let span = self.current().span.clone();
-                self.advance();
+                let span = self.stream.current().span.clone();
+                self.stream.advance();
                 Ok(Expression::ParameterReference(name, span))
             }
 
             TokenKind::Identifier(_) | TokenKind::DelimitedIdentifier(_) => {
-                if self.peek().map(|t| &t.kind) == Some(&TokenKind::LParen) {
+                if self.stream.peek().map(|t| &t.kind) == Some(&TokenKind::LParen) {
                     let func_call = self.parse_function_call()?;
                     Ok(Expression::FunctionCall(func_call))
                 } else {
-                    let name = match &self.current().kind {
+                    let name = match &self.stream.current().kind {
                         TokenKind::Identifier(n) | TokenKind::DelimitedIdentifier(n) => n.clone(),
-                        _ => SmolStr::new(self.current().kind.to_string()),
+                        _ => SmolStr::new(self.stream.current().kind.to_string()),
                     };
-                    let span = self.current().span.clone();
-                    self.advance();
+                    let span = self.stream.current().span.clone();
+                    self.stream.advance();
                     Ok(Expression::VariableReference(name, span))
                 }
             }
 
-            _ if self.current().kind.is_keyword() => {
-                if self.peek().map(|t| &t.kind) == Some(&TokenKind::LParen) {
+            _ if self.stream.current().kind.is_keyword() => {
+                if self.stream.peek().map(|t| &t.kind) == Some(&TokenKind::LParen) {
                     let func_call = self.parse_function_call()?;
                     Ok(Expression::FunctionCall(func_call))
                 } else {
-                    let name = SmolStr::new(self.current().kind.to_string());
-                    let span = self.current().span.clone();
-                    self.advance();
+                    let name = SmolStr::new(self.stream.current().kind.to_string());
+                    let span = self.stream.current().span.clone();
+                    self.stream.advance();
                     Ok(Expression::VariableReference(name, span))
                 }
             }
 
-            _ => Err(self.error_here(format!(
+            _ => Err(self.stream.error_here(format!(
                 "expected expression, found {}",
-                self.current().kind
+                self.stream.current().kind
             ))),
         }
     }
@@ -557,48 +512,48 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_literal(&mut self) -> ParseResult<(Literal, Span)> {
-        let token = self.current();
+        let token = self.stream.current();
         let span = token.span.clone();
 
         let literal = match &token.kind {
             TokenKind::True => {
-                self.advance();
+                self.stream.advance();
                 Literal::Boolean(BooleanValue::True)
             }
             TokenKind::False => {
-                self.advance();
+                self.stream.advance();
                 Literal::Boolean(BooleanValue::False)
             }
             TokenKind::Unknown => {
-                self.advance();
+                self.stream.advance();
                 Literal::Boolean(BooleanValue::Unknown)
             }
             TokenKind::Null => {
-                self.advance();
+                self.stream.advance();
                 Literal::Null
             }
             TokenKind::IntegerLiteral(value) => {
                 let value = value.clone();
-                self.advance();
+                self.stream.advance();
                 Literal::Integer(value)
             }
             TokenKind::FloatLiteral(value) => {
                 let value = value.clone();
-                self.advance();
+                self.stream.advance();
                 Literal::Float(value)
             }
             TokenKind::StringLiteral(value) => {
                 let value = value.clone();
-                self.advance();
+                self.stream.advance();
                 Literal::String(value)
             }
             TokenKind::ByteStringLiteral(value) => {
                 let value = value.clone();
-                self.advance();
+                self.stream.advance();
                 Literal::ByteString(value)
             }
             _ => {
-                return Err(self.error_here(format!("expected literal, found {}", token.kind)));
+                return Err(self.stream.error_here(format!("expected literal, found {}", token.kind)));
             }
         };
 
@@ -611,8 +566,8 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_temporal_literal(&mut self) -> ParseResult<(Literal, Span)> {
-        let keyword_span = self.current().span.clone();
-        let kind = self.current().kind.clone();
+        let keyword_span = self.stream.current().span.clone();
+        let kind = self.stream.current().kind.clone();
 
         match kind {
             TokenKind::Date
@@ -620,24 +575,24 @@ impl<'a> ExpressionParser<'a> {
             | TokenKind::Timestamp
             | TokenKind::Datetime
             | TokenKind::Duration => {}
-            _ => return Err(self.error_here("expected temporal literal keyword")),
+            _ => return Err(self.stream.error_here("expected temporal literal keyword")),
         }
 
-        self.advance();
+        self.stream.advance();
 
-        let value = match &self.current().kind {
+        let value = match &self.stream.current().kind {
             TokenKind::StringLiteral(value) => value.clone(),
             _ => {
-                return Err(self.error_here(format!(
+                return Err(self.stream.error_here(format!(
                     "expected string literal after {}, found {}",
                     kind,
-                    self.current().kind
+                    self.stream.current().kind
                 )));
             }
         };
 
-        let value_span = self.current().span.clone();
-        self.advance();
+        let value_span = self.stream.current().span.clone();
+        self.stream.advance();
 
         let literal = match kind {
             TokenKind::Date => Literal::Date(value),
@@ -651,85 +606,85 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_list_literal(&mut self) -> ParseResult<Expression> {
-        let start = self.expect(TokenKind::LBracket)?.start;
+        let start = self.stream.expect(TokenKind::LBracket)?.start;
         let mut elements = Vec::new();
 
-        while !self.check(&TokenKind::RBracket) && !self.check(&TokenKind::Eof) {
+        while !self.stream.check(&TokenKind::RBracket) && !self.stream.check(&TokenKind::Eof) {
             elements.push(self.parse_expression()?);
 
-            if !self.consume(&TokenKind::Comma) {
+            if !self.stream.consume(&TokenKind::Comma) {
                 break;
             }
-            if self.check(&TokenKind::RBracket) {
+            if self.stream.check(&TokenKind::RBracket) {
                 break;
             }
         }
 
-        let end = self.expect(TokenKind::RBracket)?.end;
+        let end = self.stream.expect(TokenKind::RBracket)?.end;
         let span = start..end;
         Ok(Expression::Literal(Literal::List(elements), span))
     }
 
     fn parse_record_literal(&mut self) -> ParseResult<Expression> {
-        let start = self.expect(TokenKind::LBrace)?.start;
+        let start = self.stream.expect(TokenKind::LBrace)?.start;
         let mut fields = Vec::new();
 
-        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+        while !self.stream.check(&TokenKind::RBrace) && !self.stream.check(&TokenKind::Eof) {
             fields.push(self.parse_record_field()?);
 
-            if !self.consume(&TokenKind::Comma) {
+            if !self.stream.consume(&TokenKind::Comma) {
                 break;
             }
-            if self.check(&TokenKind::RBrace) {
+            if self.stream.check(&TokenKind::RBrace) {
                 break;
             }
         }
 
-        let end = self.expect(TokenKind::RBrace)?.end;
+        let end = self.stream.expect(TokenKind::RBrace)?.end;
         let span = start..end;
         Ok(Expression::Literal(Literal::Record(fields), span))
     }
 
     fn parse_record_constructor(&mut self) -> ParseResult<Expression> {
-        let start = self.expect(TokenKind::Record)?.start;
-        self.expect(TokenKind::LBrace)?;
+        let start = self.stream.expect(TokenKind::Record)?.start;
+        self.stream.expect(TokenKind::LBrace)?;
 
         let mut fields = Vec::new();
-        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+        while !self.stream.check(&TokenKind::RBrace) && !self.stream.check(&TokenKind::Eof) {
             fields.push(self.parse_record_field()?);
 
-            if !self.consume(&TokenKind::Comma) {
+            if !self.stream.consume(&TokenKind::Comma) {
                 break;
             }
-            if self.check(&TokenKind::RBrace) {
+            if self.stream.check(&TokenKind::RBrace) {
                 break;
             }
         }
 
-        let end = self.expect(TokenKind::RBrace)?.end;
+        let end = self.stream.expect(TokenKind::RBrace)?.end;
         let span = start..end;
         Ok(Expression::RecordConstructor(fields, span))
     }
 
     fn parse_record_field(&mut self) -> ParseResult<RecordField> {
-        let field_start = self.current().span.start;
-        let name = match &self.current().kind {
+        let field_start = self.stream.current().span.start;
+        let name = match &self.stream.current().kind {
             TokenKind::Identifier(name)
             | TokenKind::DelimitedIdentifier(name)
             | TokenKind::StringLiteral(name) => {
                 let field_name = name.clone();
-                self.advance();
+                self.stream.advance();
                 field_name
             }
             _ => {
-                return Err(self.error_here(format!(
+                return Err(self.stream.error_here(format!(
                     "expected record field name, found {}",
-                    self.current().kind
+                    self.stream.current().kind
                 )));
             }
         };
 
-        self.expect(TokenKind::Colon)?;
+        self.stream.expect(TokenKind::Colon)?;
         let value = self.parse_expression()?;
         let span = field_start..value.span().end;
 
@@ -737,36 +692,36 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_path_constructor(&mut self) -> ParseResult<Expression> {
-        let start = self.expect(TokenKind::Path)?.start;
-        self.expect(TokenKind::LBracket)?;
+        let start = self.stream.expect(TokenKind::Path)?.start;
+        self.stream.expect(TokenKind::LBracket)?;
 
         let mut elements = Vec::new();
-        while !self.check(&TokenKind::RBracket) && !self.check(&TokenKind::Eof) {
+        while !self.stream.check(&TokenKind::RBracket) && !self.stream.check(&TokenKind::Eof) {
             elements.push(self.parse_expression()?);
 
-            if !self.consume(&TokenKind::Comma) {
+            if !self.stream.consume(&TokenKind::Comma) {
                 break;
             }
-            if self.check(&TokenKind::RBracket) {
+            if self.stream.check(&TokenKind::RBracket) {
                 break;
             }
         }
 
-        let end = self.expect(TokenKind::RBracket)?.end;
+        let end = self.stream.expect(TokenKind::RBracket)?.end;
         Ok(Expression::PathConstructor(elements, start..end))
     }
 
     fn parse_property_graph_expression(&mut self) -> ParseResult<Expression> {
-        let start = self.expect(TokenKind::Property)?.start;
-        self.expect(TokenKind::Graph)?;
+        let start = self.stream.expect(TokenKind::Property)?.start;
+        self.stream.expect(TokenKind::Graph)?;
         let graph_expr = self.parse_unary_expression()?;
         let span = start..graph_expr.span().end;
         Ok(Expression::GraphExpression(Box::new(graph_expr), span))
     }
 
     fn parse_binding_table_expression(&mut self) -> ParseResult<Expression> {
-        let start = self.expect(TokenKind::Binding)?.start;
-        self.expect(TokenKind::Table)?;
+        let start = self.stream.expect(TokenKind::Binding)?.start;
+        self.stream.expect(TokenKind::Table)?;
         let table_expr = self.parse_unary_expression()?;
         let span = start..table_expr.span().end;
         Ok(Expression::BindingTableExpression(
@@ -776,11 +731,11 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_value_subquery_expression(&mut self) -> ParseResult<Expression> {
-        let start = self.expect(TokenKind::Value)?.start;
-        let inner = if self.check(&TokenKind::LParen) {
-            self.advance();
+        let start = self.stream.expect(TokenKind::Value)?.start;
+        let inner = if self.stream.check(&TokenKind::LParen) {
+            self.stream.advance();
             let nested = self.parse_expression()?;
-            self.expect(TokenKind::RParen)?;
+            self.stream.expect(TokenKind::RParen)?;
             nested
         } else {
             self.parse_primary_expression()?
@@ -791,24 +746,24 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_function_call(&mut self) -> ParseResult<FunctionCall> {
-        let start = self.current().span.start;
+        let start = self.stream.current().span.start;
         let name = self.parse_function_name()?;
 
-        self.expect(TokenKind::LParen)?;
+        self.stream.expect(TokenKind::LParen)?;
         let mut arguments = Vec::new();
 
-        while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
+        while !self.stream.check(&TokenKind::RParen) && !self.stream.check(&TokenKind::Eof) {
             arguments.push(self.parse_expression()?);
 
-            if !self.consume(&TokenKind::Comma) {
+            if !self.stream.consume(&TokenKind::Comma) {
                 break;
             }
-            if self.check(&TokenKind::RParen) {
+            if self.stream.check(&TokenKind::RParen) {
                 break;
             }
         }
 
-        let end = self.expect(TokenKind::RParen)?.end;
+        let end = self.stream.expect(TokenKind::RParen)?.end;
         Ok(FunctionCall {
             name,
             arguments,
@@ -817,7 +772,7 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_function_name(&mut self) -> ParseResult<FunctionName> {
-        let function = match &self.current().kind {
+        let function = match &self.stream.current().kind {
             TokenKind::Abs => FunctionName::Abs,
             TokenKind::Mod => FunctionName::Mod,
             TokenKind::Floor => FunctionName::Floor,
@@ -855,21 +810,21 @@ impl<'a> ExpressionParser<'a> {
 
             _ => {
                 let Some(name) = self.token_name_for_function() else {
-                    return Err(self.error_here(format!(
+                    return Err(self.stream.error_here(format!(
                         "expected function name, found {}",
-                        self.current().kind
+                        self.stream.current().kind
                     )));
                 };
                 self.classify_function_name(name)
             }
         };
 
-        self.advance();
+        self.stream.advance();
         Ok(function)
     }
 
     fn token_name_for_function(&self) -> Option<SmolStr> {
-        match &self.current().kind {
+        match &self.stream.current().kind {
             TokenKind::Identifier(name) | TokenKind::DelimitedIdentifier(name) => {
                 Some(name.clone())
             }
@@ -879,7 +834,7 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn token_name_for_property_name(&self) -> Option<SmolStr> {
-        match &self.current().kind {
+        match &self.stream.current().kind {
             TokenKind::Identifier(name) | TokenKind::DelimitedIdentifier(name) => {
                 Some(name.clone())
             }
@@ -958,9 +913,9 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_case_expression(&mut self) -> ParseResult<CaseExpression> {
-        let start = self.expect(TokenKind::Case)?.start;
+        let start = self.stream.expect(TokenKind::Case)?.start;
 
-        if self.check(&TokenKind::When) {
+        if self.stream.check(&TokenKind::When) {
             self.parse_searched_case(start)
         } else {
             self.parse_simple_case(start)
@@ -971,18 +926,18 @@ impl<'a> ExpressionParser<'a> {
         let operand = Box::new(self.parse_expression()?);
         let mut when_clauses = Vec::new();
 
-        while self.check(&TokenKind::When) {
+        while self.stream.check(&TokenKind::When) {
             when_clauses.push(self.parse_simple_when_clause()?);
         }
 
-        let else_clause = if self.check(&TokenKind::Else) {
-            self.advance();
+        let else_clause = if self.stream.check(&TokenKind::Else) {
+            self.stream.advance();
             Some(Box::new(self.parse_expression()?))
         } else {
             None
         };
 
-        let end = self.expect(TokenKind::End)?.end;
+        let end = self.stream.expect(TokenKind::End)?.end;
 
         Ok(CaseExpression::Simple(SimpleCaseExpression {
             operand,
@@ -995,18 +950,18 @@ impl<'a> ExpressionParser<'a> {
     fn parse_searched_case(&mut self, start: usize) -> ParseResult<CaseExpression> {
         let mut when_clauses = Vec::new();
 
-        while self.check(&TokenKind::When) {
+        while self.stream.check(&TokenKind::When) {
             when_clauses.push(self.parse_searched_when_clause()?);
         }
 
-        let else_clause = if self.check(&TokenKind::Else) {
-            self.advance();
+        let else_clause = if self.stream.check(&TokenKind::Else) {
+            self.stream.advance();
             Some(Box::new(self.parse_expression()?))
         } else {
             None
         };
 
-        let end = self.expect(TokenKind::End)?.end;
+        let end = self.stream.expect(TokenKind::End)?.end;
 
         Ok(CaseExpression::Searched(SearchedCaseExpression {
             when_clauses,
@@ -1016,9 +971,9 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_simple_when_clause(&mut self) -> ParseResult<SimpleWhenClause> {
-        let start = self.expect(TokenKind::When)?.start;
+        let start = self.stream.expect(TokenKind::When)?.start;
         let when_value = self.parse_expression()?;
-        self.expect(TokenKind::Then)?;
+        self.stream.expect(TokenKind::Then)?;
         let then_result = self.parse_expression()?;
 
         Ok(SimpleWhenClause {
@@ -1029,9 +984,9 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_searched_when_clause(&mut self) -> ParseResult<SearchedWhenClause> {
-        let start = self.expect(TokenKind::When)?.start;
+        let start = self.stream.expect(TokenKind::When)?.start;
         let condition = self.parse_expression()?;
-        self.expect(TokenKind::Then)?;
+        self.stream.expect(TokenKind::Then)?;
         let then_result = self.parse_expression()?;
 
         Ok(SearchedWhenClause {
@@ -1042,12 +997,12 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_cast_expression(&mut self) -> ParseResult<CastExpression> {
-        let start = self.expect(TokenKind::Cast)?.start;
-        self.expect(TokenKind::LParen)?;
+        let start = self.stream.expect(TokenKind::Cast)?.start;
+        self.stream.expect(TokenKind::LParen)?;
         let operand = Box::new(self.parse_expression()?);
-        self.expect(TokenKind::As)?;
+        self.stream.expect(TokenKind::As)?;
         let target_type = self.parse_value_type_inline()?;
-        let end = self.expect(TokenKind::RParen)?.end;
+        let end = self.stream.expect(TokenKind::RParen)?.end;
 
         Ok(CastExpression {
             operand,
@@ -1057,63 +1012,63 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_exists_expression(&mut self) -> ParseResult<ExistsExpression> {
-        let start = self.expect(TokenKind::Exists)?.start;
+        let start = self.stream.expect(TokenKind::Exists)?.start;
 
-        let variant = if self.check(&TokenKind::LBrace) {
-            let pattern_start = self.current().span.start;
-            self.advance();
+        let variant = if self.stream.check(&TokenKind::LBrace) {
+            let pattern_start = self.stream.current().span.start;
+            self.stream.advance();
 
             let mut depth = 1usize;
             let mut pattern_end = pattern_start;
 
             while depth > 0 {
-                if self.check(&TokenKind::Eof) {
-                    return Err(self.error_here("unclosed EXISTS graph pattern, expected '}'"));
+                if self.stream.check(&TokenKind::Eof) {
+                    return Err(self.stream.error_here("unclosed EXISTS graph pattern, expected '}'"));
                 }
 
-                let span = self.current().span.clone();
-                match self.current().kind {
+                let span = self.stream.current().span.clone();
+                match self.stream.current().kind {
                     TokenKind::LBrace => depth += 1,
                     TokenKind::RBrace => depth = depth.saturating_sub(1),
                     _ => {}
                 }
                 pattern_end = span.end;
-                self.advance();
+                self.stream.advance();
             }
 
             ExistsVariant::GraphPattern(GraphPatternPlaceholder {
                 span: pattern_start..pattern_end,
             })
-        } else if self.check(&TokenKind::LParen) {
-            self.advance();
+        } else if self.stream.check(&TokenKind::LParen) {
+            self.stream.advance();
             let query_expr = self.parse_expression()?;
-            self.expect(TokenKind::RParen)?;
+            self.stream.expect(TokenKind::RParen)?;
             ExistsVariant::Subquery(Box::new(query_expr))
         } else {
-            return Err(self.error_here("expected '{' or '(' after EXISTS"));
+            return Err(self.stream.error_here("expected '{' or '(' after EXISTS"));
         };
 
-        let span = start..self.tokens[self.pos - 1].span.end;
+        let span = start..self.stream.previous_span().end;
         Ok(ExistsExpression { variant, span })
     }
 
     fn parse_all_different_predicate(&mut self) -> ParseResult<Expression> {
-        let start = self.expect(TokenKind::AllDifferent)?.start;
-        self.expect(TokenKind::LParen)?;
+        let start = self.stream.expect(TokenKind::AllDifferent)?.start;
+        self.stream.expect(TokenKind::LParen)?;
 
         let mut exprs = Vec::new();
-        while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
+        while !self.stream.check(&TokenKind::RParen) && !self.stream.check(&TokenKind::Eof) {
             exprs.push(self.parse_expression()?);
 
-            if !self.consume(&TokenKind::Comma) {
+            if !self.stream.consume(&TokenKind::Comma) {
                 break;
             }
-            if self.check(&TokenKind::RParen) {
+            if self.stream.check(&TokenKind::RParen) {
                 break;
             }
         }
 
-        let end = self.expect(TokenKind::RParen)?.end;
+        let end = self.stream.expect(TokenKind::RParen)?.end;
         Ok(Expression::Predicate(Predicate::AllDifferent(
             exprs,
             start..end,
@@ -1121,12 +1076,12 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_same_predicate(&mut self) -> ParseResult<Expression> {
-        let start = self.expect(TokenKind::Same)?.start;
-        self.expect(TokenKind::LParen)?;
+        let start = self.stream.expect(TokenKind::Same)?.start;
+        self.stream.expect(TokenKind::LParen)?;
         let expr1 = Box::new(self.parse_expression()?);
-        self.expect(TokenKind::Comma)?;
+        self.stream.expect(TokenKind::Comma)?;
         let expr2 = Box::new(self.parse_expression()?);
-        let end = self.expect(TokenKind::RParen)?.end;
+        let end = self.stream.expect(TokenKind::RParen)?.end;
         Ok(Expression::Predicate(Predicate::Same(
             expr1,
             expr2,
@@ -1135,20 +1090,20 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_property_exists_predicate(&mut self) -> ParseResult<Expression> {
-        let start = self.expect(TokenKind::PropertyExists)?.start;
-        self.expect(TokenKind::LParen)?;
+        let start = self.stream.expect(TokenKind::PropertyExists)?.start;
+        self.stream.expect(TokenKind::LParen)?;
         let element = Box::new(self.parse_expression()?);
-        self.expect(TokenKind::Comma)?;
+        self.stream.expect(TokenKind::Comma)?;
 
         let property_name = match self.token_name_for_property_name() {
             Some(name) => {
-                self.advance();
+                self.stream.advance();
                 name
             }
-            None => return Err(self.error_here("expected property name")),
+            None => return Err(self.stream.error_here("expected property name")),
         };
 
-        let end = self.expect(TokenKind::RParen)?.end;
+        let end = self.stream.expect(TokenKind::RParen)?.end;
         Ok(Expression::Predicate(Predicate::PropertyExists(
             element,
             property_name,
@@ -1157,34 +1112,34 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn parse_value_type_inline(&mut self) -> ParseResult<ValueType> {
-        let (value_type, consumed) = parse_value_type_prefix(&self.tokens[self.pos..])?;
+        let (value_type, consumed) = parse_value_type_prefix(&self.stream.tokens()[self.stream.position()..])?;
         if consumed == 0 {
-            return Err(self.error_here("expected type"));
+            return Err(self.stream.error_here("expected type"));
         }
         for _ in 0..consumed {
-            self.advance();
+            self.stream.advance();
         }
         Ok(value_type)
     }
 
     fn parse_label_expression(&mut self) -> ParseResult<LabelExpression> {
-        self.expect(TokenKind::Colon)?;
-        let label = match &self.current().kind {
+        self.stream.expect(TokenKind::Colon)?;
+        let label = match &self.stream.current().kind {
             TokenKind::Identifier(name) | TokenKind::DelimitedIdentifier(name) => {
                 let label = name.clone();
-                self.advance();
+                self.stream.advance();
                 label
             }
-            _ => return Err(self.error_here("expected label name")),
+            _ => return Err(self.stream.error_here("expected label name")),
         };
 
-        let span = self.tokens[self.pos - 1].span.clone();
+        let span = self.stream.previous_span();
         Ok(LabelExpression { label, span })
     }
 
     fn is_comparison_operator(&self) -> bool {
         matches!(
-            self.current().kind,
+            self.stream.current().kind,
             TokenKind::Eq
                 | TokenKind::NotEq
                 | TokenKind::NotEqBang
@@ -1196,7 +1151,7 @@ impl<'a> ExpressionParser<'a> {
     }
 
     fn consume_comparison_operator(&mut self) -> Option<ComparisonOperator> {
-        let op = match self.current().kind {
+        let op = match self.stream.current().kind {
             TokenKind::Eq => ComparisonOperator::Eq,
             TokenKind::NotEq | TokenKind::NotEqBang => ComparisonOperator::NotEq,
             TokenKind::Lt => ComparisonOperator::Lt,
@@ -1205,7 +1160,7 @@ impl<'a> ExpressionParser<'a> {
             TokenKind::GtEq => ComparisonOperator::GtEq,
             _ => return None,
         };
-        self.advance();
+        self.stream.advance();
         Some(op)
     }
 
@@ -1224,23 +1179,23 @@ impl<'a> ExpressionParser<'a> {
     ///     | binarySetFunction
     /// ```
     fn parse_aggregate_function(&mut self) -> ParseResult<AggregateFunction> {
-        match &self.current().kind {
+        match &self.stream.current().kind {
             TokenKind::Count => {
-                let start = self.current().span.start;
-                let count_pos = self.pos;
-                self.advance();
-                self.expect(TokenKind::LParen)?;
+                let start = self.stream.current().span.start;
+                let count_pos = self.stream.position();
+                self.stream.advance();
+                self.stream.expect(TokenKind::LParen)?;
 
                 // Check for COUNT(*)
-                if self.check(&TokenKind::Star) {
-                    self.advance();
-                    let end = self.expect(TokenKind::RParen)?.end;
+                if self.stream.check(&TokenKind::Star) {
+                    self.stream.advance();
+                    let end = self.stream.expect(TokenKind::RParen)?.end;
                     return Ok(AggregateFunction::CountStar { span: start..end });
                 }
 
                 // Otherwise, it's COUNT(expr) which is a general set function
                 // Restore parser position and parse as a general set function.
-                self.pos = count_pos;
+                self.stream.set_position(count_pos);
                 self.parse_general_set_function()
             }
             TokenKind::PercentileCont | TokenKind::PercentileDisc => {
@@ -1259,9 +1214,9 @@ impl<'a> ExpressionParser<'a> {
     ///     generalSetFunctionType '(' [setQuantifier] expression ')'
     /// ```
     fn parse_general_set_function(&mut self) -> ParseResult<AggregateFunction> {
-        let start = self.current().span.start;
+        let start = self.stream.current().span.start;
 
-        let function_type = match &self.current().kind {
+        let function_type = match &self.stream.current().kind {
             TokenKind::Avg => GeneralSetFunctionType::Avg,
             TokenKind::Count => GeneralSetFunctionType::Count,
             TokenKind::Max => GeneralSetFunctionType::Max,
@@ -1271,15 +1226,15 @@ impl<'a> ExpressionParser<'a> {
             TokenKind::StddevSamp => GeneralSetFunctionType::StddevSamp,
             TokenKind::StddevPop => GeneralSetFunctionType::StddevPop,
             _ => {
-                return Err(self.error_here(format!(
+                return Err(self.stream.error_here(format!(
                     "expected aggregate function name, found {}",
-                    self.current().kind
+                    self.stream.current().kind
                 )));
             }
         };
 
-        self.advance();
-        self.expect(TokenKind::LParen)?;
+        self.stream.advance();
+        self.stream.expect(TokenKind::LParen)?;
 
         // Parse optional set quantifier (DISTINCT or ALL)
         let quantifier = self.parse_set_quantifier_opt();
@@ -1287,7 +1242,7 @@ impl<'a> ExpressionParser<'a> {
         // Parse the expression to aggregate
         let expression = Box::new(self.parse_expression()?);
 
-        let end = self.expect(TokenKind::RParen)?.end;
+        let end = self.stream.expect(TokenKind::RParen)?.end;
 
         Ok(AggregateFunction::GeneralSetFunction(GeneralSetFunction {
             function_type,
@@ -1306,31 +1261,31 @@ impl<'a> ExpressionParser<'a> {
     ///     binarySetFunctionType '(' dependentValueExpression ',' independentValueExpression ')'
     /// ```
     fn parse_binary_set_function(&mut self) -> ParseResult<AggregateFunction> {
-        let start = self.current().span.start;
+        let start = self.stream.current().span.start;
 
-        let function_type = match &self.current().kind {
+        let function_type = match &self.stream.current().kind {
             TokenKind::PercentileCont => BinarySetFunctionType::PercentileCont,
             TokenKind::PercentileDisc => BinarySetFunctionType::PercentileDisc,
             _ => {
-                return Err(self.error_here(format!(
+                return Err(self.stream.error_here(format!(
                     "expected PERCENTILE_CONT or PERCENTILE_DISC, found {}",
-                    self.current().kind
+                    self.stream.current().kind
                 )));
             }
         };
 
-        self.advance();
-        self.expect(TokenKind::LParen)?;
+        self.stream.advance();
+        self.stream.expect(TokenKind::LParen)?;
 
         // dependentValueExpression: [setQuantifier] numericValueExpression
         let quantifier = self.parse_set_quantifier_opt();
         let inverse_distribution_argument = Box::new(self.parse_expression()?);
 
-        self.expect(TokenKind::Comma)?;
+        self.stream.expect(TokenKind::Comma)?;
         // independentValueExpression: numericValueExpression
         let expression = Box::new(self.parse_expression()?);
 
-        let end = self.expect(TokenKind::RParen)?.end;
+        let end = self.stream.expect(TokenKind::RParen)?.end;
 
         Ok(AggregateFunction::BinarySetFunction(BinarySetFunction {
             function_type,
@@ -1350,13 +1305,13 @@ impl<'a> ExpressionParser<'a> {
     ///     DISTINCT | ALL
     /// ```
     fn parse_set_quantifier_opt(&mut self) -> Option<SetQuantifier> {
-        match &self.current().kind {
+        match &self.stream.current().kind {
             TokenKind::Distinct => {
-                self.advance();
+                self.stream.advance();
                 Some(SetQuantifier::Distinct)
             }
             TokenKind::All => {
-                self.advance();
+                self.stream.advance();
                 Some(SetQuantifier::All)
             }
             _ => None,
@@ -1377,10 +1332,10 @@ pub fn parse_expression(tokens: &[Token]) -> ParseResult<Expression> {
     let mut parser = ExpressionParser::new(&normalized);
     let expr = parser.parse_expression()?;
 
-    if !matches!(parser.current().kind, TokenKind::Eof) {
+    if !matches!(parser.stream.current().kind, TokenKind::Eof) {
         return Err(Box::new(
             Diag::error("unexpected trailing tokens after expression")
-                .with_primary_label(parser.current().span.clone(), "unexpected token"),
+                .with_primary_label(parser.stream.current().span.clone(), "unexpected token"),
         ));
     }
 

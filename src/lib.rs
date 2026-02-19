@@ -84,41 +84,7 @@ pub struct ParseAndValidateResult {
 /// }
 /// ```
 pub fn parse_and_validate(source: &str) -> ParseAndValidateResult {
-    // First, parse the source
-    let parse_result = parse(source);
-
-    // If there are any parse errors, return them immediately
-    if !parse_result.diagnostics.is_empty() {
-        return ParseAndValidateResult {
-            ir: None,
-            diagnostics: parse_result.diagnostics,
-        };
-    }
-
-    // If we don't have an AST (shouldn't happen if no diagnostics), return error
-    let Some(program) = parse_result.ast else {
-        return ParseAndValidateResult {
-            ir: None,
-            diagnostics: vec![miette::Report::msg("Failed to parse source (no AST produced)")],
-        };
-    };
-
-    // Run semantic validation
-    let validator = SemanticValidator::new();
-    let outcome = validator.validate(&program);
-
-    // Convert semantic diagnostics to Reports
-    let source_file = diag::SourceFile::new(source);
-    let reports = if !outcome.diagnostics.is_empty() {
-        diag::convert_diagnostics_to_reports(&outcome.diagnostics, &source_file)
-    } else {
-        Vec::new()
-    };
-
-    ParseAndValidateResult {
-        ir: outcome.ir,
-        diagnostics: reports,
-    }
+    parse_and_validate_internal(source, SemanticValidator::new())
 }
 
 /// Parses and semantically validates GQL source text with custom validation configuration.
@@ -153,6 +119,14 @@ pub fn parse_and_validate_with_config(
     source: &str,
     config: semantic::ValidationConfig,
 ) -> ParseAndValidateResult {
+    parse_and_validate_internal(source, SemanticValidator::with_config(config))
+}
+
+/// Internal helper for parse and validate operations.
+fn parse_and_validate_internal(
+    source: &str,
+    validator: SemanticValidator,
+) -> ParseAndValidateResult {
     // First, parse the source
     let parse_result = parse(source);
 
@@ -172,17 +146,12 @@ pub fn parse_and_validate_with_config(
         };
     };
 
-    // Run semantic validation with custom config
-    let validator = SemanticValidator::with_config(config);
+    // Run semantic validation
     let outcome = validator.validate(&program);
 
     // Convert semantic diagnostics to Reports
     let source_file = diag::SourceFile::new(source);
-    let reports = if !outcome.diagnostics.is_empty() {
-        diag::convert_diagnostics_to_reports(&outcome.diagnostics, &source_file)
-    } else {
-        Vec::new()
-    };
+    let reports = diag::convert_diagnostics_to_reports(&outcome.diagnostics, &source_file);
 
     ParseAndValidateResult {
         ir: outcome.ir,

@@ -3,6 +3,7 @@
 //! The parser consumes a token stream produced by the lexer and constructs
 //! an AST while preserving diagnostics and recovering at statement boundaries.
 
+pub mod base;
 pub mod expression;
 pub mod graph_type;
 pub mod mutation;
@@ -17,6 +18,10 @@ use crate::ast::Program;
 use crate::diag::{Diag, DiagSeverity, SourceFile, convert_diagnostics_to_reports};
 use crate::lexer::token::{Token, TokenKind};
 use miette::Report;
+
+/// Legacy parsing result used by query/procedure/mutation/patterns parsers.
+/// Returns optional value and collected diagnostics for incremental parsing.
+pub(crate) type LegacyParseResult<T> = (Option<T>, Vec<Diag>);
 
 /// Result of parsing a GQL program.
 #[derive(Debug)]

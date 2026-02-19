@@ -16,10 +16,11 @@ use crate::parser::expression::parse_expression;
 use crate::parser::patterns::parse_graph_pattern;
 use crate::parser::procedure::parse_call_procedure_statement;
 use crate::parser::types::parse_value_type_prefix;
+use crate::parser::LegacyParseResult;
 use smol_str::SmolStr;
 
 /// Parse result with optional value and diagnostics.
-pub(crate) type ParseResult<T> = (Option<T>, Vec<Diag>);
+pub(crate) type ParseResult<T> = LegacyParseResult<T>;
 
 // ============================================================================
 // Expression Parser Adapter

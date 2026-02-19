@@ -67,9 +67,7 @@ pub use types::{
 // Re-export reference types
 pub use references::{
     BindingTableReference, BindingVariable, CatalogObjectParentReference, CatalogQualifiedName,
-    GraphReference, GraphReference as GraphRef, GraphTypeReference,
-    GraphTypeReference as GraphTypeRef, ProcedureReference, SchemaReference,
-    SchemaReference as SchemaRef,
+    GraphReference, GraphTypeReference, ProcedureReference, SchemaReference,
 };
 
 // Re-export query types

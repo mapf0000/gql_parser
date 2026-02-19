@@ -26,10 +26,11 @@ use crate::parser::references::{parse_procedure_reference, parse_schema_referenc
 use crate::parser::types::{
     parse_binding_table_reference_value_type, parse_graph_reference_value_type, parse_value_type,
 };
+use crate::parser::LegacyParseResult;
 use smol_str::SmolStr;
 
 /// Parse result with optional value and diagnostics.
-pub(crate) type ParseResult<T> = (Option<T>, Vec<Diag>);
+pub(crate) type ParseResult<T> = LegacyParseResult<T>;
 
 // ============================================================================
 // Helper Functions

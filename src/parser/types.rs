@@ -35,75 +35,28 @@ use crate::ast::{
     ValueType,
 };
 use crate::diag::Diag;
+use crate::parser::base::{ParseError, ParseResult, TokenStream};
 use crate::lexer::token::{Token, TokenKind};
 
-type ParseError = Box<Diag>;
-type ParseResult<T> = Result<T, ParseError>;
+
+
 
 /// Parser for type specifications.
 pub struct TypeParser<'a> {
-    tokens: &'a [Token],
-    pos: usize,
+    stream: TokenStream<'a>,
 }
 
 impl<'a> TypeParser<'a> {
     /// Creates a new type parser.
     pub fn new(tokens: &'a [Token]) -> Self {
-        Self { tokens, pos: 0 }
-    }
-
-    /// Returns the current token.
-    fn current(&self) -> &Token {
-        self.tokens
-            .get(self.pos)
-            .unwrap_or_else(|| self.tokens.last().expect("token stream must be non-empty"))
-    }
-
-    /// Returns the next token without consuming current.
-    fn peek(&self) -> Option<&Token> {
-        self.tokens.get(self.pos + 1)
-    }
-
-    /// Advances to the next token.
-    fn advance(&mut self) {
-        if self.pos < self.tokens.len().saturating_sub(1) {
-            self.pos += 1;
+        Self {
+            stream: TokenStream::new(tokens),
         }
     }
 
-    /// Checks if the current token matches the given kind.
-    fn check(&self, kind: &TokenKind) -> bool {
-        &self.current().kind == kind
-    }
-
-    /// Consumes the current token if it matches the given kind.
-    fn consume(&mut self, kind: &TokenKind) -> bool {
-        if self.check(kind) {
-            self.advance();
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Expects a specific token kind and returns its span.
-    fn expect(&mut self, kind: TokenKind) -> ParseResult<Span> {
-        if self.check(&kind) {
-            let span = self.current().span.clone();
-            self.advance();
-            Ok(span)
-        } else {
-            Err(self.error_here(format!("expected {kind}, found {}", self.current().kind)))
-        }
-    }
-
-    /// Creates an error at the current position.
+    /// Creates an error at the current position with the P_TYPE code.
     fn error_here(&self, message: impl Into<String>) -> ParseError {
-        Box::new(
-            Diag::error(message.into())
-                .with_primary_label(self.current().span.clone(), "here")
-                .with_code("P_TYPE"),
-        )
+        self.stream.error_here_with_code(message, "P_TYPE")
     }
 
     /// Parses a value type (entry point).
@@ -123,17 +76,17 @@ impl<'a> TypeParser<'a> {
         // Postfix list forms:
         //   value_type LIST
         //   value_type ARRAY
-        while matches!(self.current().kind, TokenKind::List | TokenKind::Array) {
-            let syntax_form = match self.current().kind {
+        while matches!(self.stream.current().kind, TokenKind::List | TokenKind::Array) {
+            let syntax_form = match self.stream.current().kind {
                 TokenKind::List => ListSyntaxForm::PostfixList,
                 TokenKind::Array => ListSyntaxForm::PostfixArray,
                 _ => unreachable!("guarded by matches! above"),
             };
             let start = value_type.span().start;
-            self.advance();
+            self.stream.advance();
             let end = self
-                .tokens
-                .get(self.pos.saturating_sub(1))
+                .stream.tokens()
+                .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
             value_type = ValueType::List(ListValueType {
@@ -148,9 +101,9 @@ impl<'a> TypeParser<'a> {
 
     /// Parses a value type without consuming postfix LIST/ARRAY suffixes.
     fn parse_base_value_type(&mut self) -> ParseResult<ValueType> {
-        let start = self.current().span.start;
+        let start = self.stream.current().span.start;
 
-        match &self.current().kind {
+        match &self.stream.current().kind {
             // Boolean types
             TokenKind::Bool | TokenKind::Boolean => {
                 let bool_type = self.parse_boolean_type()?;
@@ -268,7 +221,7 @@ impl<'a> TypeParser<'a> {
 
             // ANY could be "ANY PROPERTY GRAPH", "ANY NODE", "ANY EDGE", or "ANY RECORD"
             TokenKind::Any => {
-                if let Some(next) = self.peek() {
+                if let Some(next) = self.stream.peek() {
                     match &next.kind {
                         TokenKind::Property | TokenKind::Graph => {
                             let ref_type = self.parse_graph_reference_value_type()?;
@@ -299,7 +252,7 @@ impl<'a> TypeParser<'a> {
                 }
             }
 
-            _ => Err(self.error_here(format!("expected type, found {}", self.current().kind))),
+            _ => Err(self.error_here(format!("expected type, found {}", self.stream.current().kind))),
         }
     }
 
@@ -315,12 +268,12 @@ impl<'a> TypeParser<'a> {
     /// boolean_type ::= BOOL | BOOLEAN
     /// ```
     pub fn parse_boolean_type(&mut self) -> ParseResult<BooleanType> {
-        let bool_type = match &self.current().kind {
+        let bool_type = match &self.stream.current().kind {
             TokenKind::Bool => BooleanType::Bool,
             TokenKind::Boolean => BooleanType::Boolean,
             _ => return Err(self.error_here("expected BOOL or BOOLEAN")),
         };
-        self.advance();
+        self.stream.advance();
         Ok(bool_type)
     }
 
@@ -339,18 +292,18 @@ impl<'a> TypeParser<'a> {
     ///     | VARCHAR [ ( n ) ]
     /// ```
     pub fn parse_character_string_type(&mut self) -> ParseResult<CharacterStringType> {
-        let char_type = match &self.current().kind {
+        let char_type = match &self.stream.current().kind {
             TokenKind::String => {
-                self.advance();
+                self.stream.advance();
                 CharacterStringType::String
             }
             TokenKind::Char => {
-                self.advance();
+                self.stream.advance();
                 let length = self.parse_optional_length_param()?;
                 CharacterStringType::Char(length)
             }
             TokenKind::Varchar => {
-                self.advance();
+                self.stream.advance();
                 let length = self.parse_optional_length_param()?;
                 CharacterStringType::VarChar(length)
             }
@@ -374,18 +327,18 @@ impl<'a> TypeParser<'a> {
     ///     | VARBINARY [ ( n ) ]
     /// ```
     pub fn parse_byte_string_type(&mut self) -> ParseResult<ByteStringType> {
-        let byte_type = match &self.current().kind {
+        let byte_type = match &self.stream.current().kind {
             TokenKind::Bytes => {
-                self.advance();
+                self.stream.advance();
                 ByteStringType::Bytes
             }
             TokenKind::Binary => {
-                self.advance();
+                self.stream.advance();
                 let length = self.parse_optional_length_param()?;
                 ByteStringType::Binary(length)
             }
             TokenKind::Varbinary => {
-                self.advance();
+                self.stream.advance();
                 let length = self.parse_optional_length_param()?;
                 ByteStringType::VarBinary(length)
             }
@@ -406,7 +359,7 @@ impl<'a> TypeParser<'a> {
     /// numeric_type ::= exact_numeric_type | approximate_numeric_type
     /// ```
     pub fn parse_numeric_type(&mut self) -> ParseResult<NumericType> {
-        match &self.current().kind {
+        match &self.stream.current().kind {
             // Approximate numeric types
             TokenKind::Float
             | TokenKind::Float16
@@ -439,7 +392,7 @@ impl<'a> TypeParser<'a> {
     ///     | decimal_exact_numeric_type
     /// ```
     fn parse_exact_numeric_type(&mut self) -> ParseResult<ExactNumericType> {
-        match &self.current().kind {
+        match &self.stream.current().kind {
             // Decimal types
             TokenKind::Decimal | TokenKind::Dec => {
                 let decimal_type = self.parse_decimal_exact_numeric_type()?;
@@ -448,7 +401,7 @@ impl<'a> TypeParser<'a> {
 
             // Unsigned types
             TokenKind::Unsigned => {
-                self.advance();
+                self.stream.advance();
                 let unsigned_type = self.parse_unsigned_binary_exact_numeric_type()?;
                 Ok(ExactNumericType::UnsignedBinary(unsigned_type))
             }
@@ -467,7 +420,7 @@ impl<'a> TypeParser<'a> {
 
             // Signed types (SIGNED keyword is optional)
             TokenKind::Signed => {
-                self.advance();
+                self.stream.advance();
                 let signed_type = self.parse_signed_binary_exact_numeric_type()?;
                 Ok(ExactNumericType::SignedBinary(signed_type))
             }
@@ -498,7 +451,7 @@ impl<'a> TypeParser<'a> {
     fn parse_signed_binary_exact_numeric_type(
         &mut self,
     ) -> ParseResult<SignedBinaryExactNumericType> {
-        let signed_type = match &self.current().kind {
+        let signed_type = match &self.stream.current().kind {
             TokenKind::Int8 => SignedBinaryExactNumericType::Int8,
             TokenKind::Int16 => SignedBinaryExactNumericType::Int16,
             TokenKind::Int32 => SignedBinaryExactNumericType::Int32,
@@ -513,7 +466,7 @@ impl<'a> TypeParser<'a> {
                 return Err(self.error_here("expected signed integer type"));
             }
         };
-        self.advance();
+        self.stream.advance();
         Ok(signed_type)
     }
 
@@ -545,7 +498,7 @@ impl<'a> TypeParser<'a> {
     fn parse_unsigned_binary_exact_numeric_type(
         &mut self,
     ) -> ParseResult<UnsignedBinaryExactNumericType> {
-        let unsigned_type = match &self.current().kind {
+        let unsigned_type = match &self.stream.current().kind {
             TokenKind::Uint8 => UnsignedBinaryExactNumericType::UInt8,
             TokenKind::Uint16 => UnsignedBinaryExactNumericType::UInt16,
             TokenKind::Uint32 => UnsignedBinaryExactNumericType::UInt32,
@@ -569,7 +522,7 @@ impl<'a> TypeParser<'a> {
                 return Err(self.error_here("expected unsigned integer type"));
             }
         };
-        self.advance();
+        self.stream.advance();
         Ok(unsigned_type)
     }
 
@@ -583,18 +536,18 @@ impl<'a> TypeParser<'a> {
     ///     | DEC [ ( precision [ , scale ] ) ]
     /// ```
     fn parse_decimal_exact_numeric_type(&mut self) -> ParseResult<DecimalExactNumericType> {
-        let start = self.current().span.start;
-        let kind = match &self.current().kind {
+        let start = self.stream.current().span.start;
+        let kind = match &self.stream.current().kind {
             TokenKind::Decimal => DecimalKind::Decimal,
             TokenKind::Dec => DecimalKind::Dec,
             _ => return Err(self.error_here("expected DECIMAL or DEC")),
         };
-        self.advance();
+        self.stream.advance();
 
         let (precision, scale) = self.parse_optional_precision_scale()?;
         let end = self
-            .tokens
-            .get(self.pos.saturating_sub(1))
+            .stream.tokens()
+            .get(self.stream.position().saturating_sub(1))
             .map(|t| t.span.end)
             .unwrap_or(start);
 
@@ -622,39 +575,39 @@ impl<'a> TypeParser<'a> {
     ///     | DOUBLE PRECISION
     /// ```
     fn parse_approximate_numeric_type(&mut self) -> ParseResult<ApproximateNumericType> {
-        let approx_type = match &self.current().kind {
+        let approx_type = match &self.stream.current().kind {
             TokenKind::Float16 => {
-                self.advance();
+                self.stream.advance();
                 ApproximateNumericType::Float16
             }
             TokenKind::Float32 => {
-                self.advance();
+                self.stream.advance();
                 ApproximateNumericType::Float32
             }
             TokenKind::Float64 => {
-                self.advance();
+                self.stream.advance();
                 ApproximateNumericType::Float64
             }
             TokenKind::Float128 => {
-                self.advance();
+                self.stream.advance();
                 ApproximateNumericType::Float128
             }
             TokenKind::Float256 => {
-                self.advance();
+                self.stream.advance();
                 ApproximateNumericType::Float256
             }
             TokenKind::Float => {
-                self.advance();
+                self.stream.advance();
                 let precision = self.parse_optional_length_param()?;
                 ApproximateNumericType::Float(precision)
             }
             TokenKind::Real => {
-                self.advance();
+                self.stream.advance();
                 ApproximateNumericType::Real
             }
             TokenKind::Double => {
-                self.advance();
-                self.expect(TokenKind::Precision)?;
+                self.stream.advance();
+                self.stream.expect(TokenKind::Precision)?;
                 ApproximateNumericType::DoublePrecision
             }
             _ => {
@@ -676,7 +629,7 @@ impl<'a> TypeParser<'a> {
     /// temporal_type ::= temporal_instant_type | temporal_duration_type
     /// ```
     pub fn parse_temporal_type(&mut self) -> ParseResult<TemporalType> {
-        match &self.current().kind {
+        match &self.stream.current().kind {
             TokenKind::Duration => {
                 let duration_type = self.parse_temporal_duration_type()?;
                 Ok(TemporalType::Duration(duration_type))
@@ -703,16 +656,16 @@ impl<'a> TypeParser<'a> {
     ///     | TIMESTAMP [ WITH[OUT] TIME ZONE ]
     /// ```
     fn parse_temporal_instant_type(&mut self) -> ParseResult<TemporalInstantType> {
-        let instant_type = match &self.current().kind {
+        let instant_type = match &self.stream.current().kind {
             TokenKind::Zoned => {
-                self.advance();
-                match &self.current().kind {
+                self.stream.advance();
+                match &self.stream.current().kind {
                     TokenKind::Datetime => {
-                        self.advance();
+                        self.stream.advance();
                         TemporalInstantType::ZonedDatetime
                     }
                     TokenKind::Time => {
-                        self.advance();
+                        self.stream.advance();
                         TemporalInstantType::ZonedTime
                     }
                     _ => {
@@ -721,14 +674,14 @@ impl<'a> TypeParser<'a> {
                 }
             }
             TokenKind::Local => {
-                self.advance();
-                match &self.current().kind {
+                self.stream.advance();
+                match &self.stream.current().kind {
                     TokenKind::Datetime => {
-                        self.advance();
+                        self.stream.advance();
                         TemporalInstantType::LocalDatetime
                     }
                     TokenKind::Time => {
-                        self.advance();
+                        self.stream.advance();
                         TemporalInstantType::LocalTime
                     }
                     _ => {
@@ -737,38 +690,38 @@ impl<'a> TypeParser<'a> {
                 }
             }
             TokenKind::Date => {
-                self.advance();
+                self.stream.advance();
                 TemporalInstantType::Date
             }
             TokenKind::Time => {
-                self.advance();
+                self.stream.advance();
                 // Check for optional WITHOUT TIME ZONE
-                if self.check(&TokenKind::Without) {
-                    self.advance();
-                    self.expect(TokenKind::Time)?;
-                    self.expect(TokenKind::Zone)?;
+                if self.stream.check(&TokenKind::Without) {
+                    self.stream.advance();
+                    self.stream.expect(TokenKind::Time)?;
+                    self.stream.expect(TokenKind::Zone)?;
                     TemporalInstantType::LocalTime
-                } else if self.check(&TokenKind::With) {
-                    self.advance();
-                    self.expect(TokenKind::Time)?;
-                    self.expect(TokenKind::Zone)?;
+                } else if self.stream.check(&TokenKind::With) {
+                    self.stream.advance();
+                    self.stream.expect(TokenKind::Time)?;
+                    self.stream.expect(TokenKind::Zone)?;
                     TemporalInstantType::ZonedTime
                 } else {
                     TemporalInstantType::LocalTime
                 }
             }
             TokenKind::Timestamp => {
-                self.advance();
+                self.stream.advance();
                 // Check for optional WITH/WITHOUT TIME ZONE
-                if self.check(&TokenKind::With) {
-                    self.advance();
-                    self.expect(TokenKind::Time)?;
-                    self.expect(TokenKind::Zone)?;
+                if self.stream.check(&TokenKind::With) {
+                    self.stream.advance();
+                    self.stream.expect(TokenKind::Time)?;
+                    self.stream.expect(TokenKind::Zone)?;
                     TemporalInstantType::ZonedDatetime
-                } else if self.check(&TokenKind::Without) {
-                    self.advance();
-                    self.expect(TokenKind::Time)?;
-                    self.expect(TokenKind::Zone)?;
+                } else if self.stream.check(&TokenKind::Without) {
+                    self.stream.advance();
+                    self.stream.expect(TokenKind::Time)?;
+                    self.stream.expect(TokenKind::Zone)?;
                     TemporalInstantType::LocalDatetime
                 } else {
                     TemporalInstantType::LocalDatetime
@@ -792,17 +745,17 @@ impl<'a> TypeParser<'a> {
     ///     | DURATION DAY TO SECOND
     /// ```
     fn parse_temporal_duration_type(&mut self) -> ParseResult<TemporalDurationType> {
-        self.expect(TokenKind::Duration)?;
+        self.stream.expect(TokenKind::Duration)?;
 
-        let duration_type = if self.check(&TokenKind::Year) {
-            self.advance();
-            self.expect(TokenKind::To)?;
-            self.expect(TokenKind::Month)?;
+        let duration_type = if self.stream.check(&TokenKind::Year) {
+            self.stream.advance();
+            self.stream.expect(TokenKind::To)?;
+            self.stream.expect(TokenKind::Month)?;
             TemporalDurationType::DurationYearToMonth
-        } else if self.check(&TokenKind::Day) {
-            self.advance();
-            self.expect(TokenKind::To)?;
-            self.expect(TokenKind::Second)?;
+        } else if self.stream.check(&TokenKind::Day) {
+            self.stream.advance();
+            self.stream.expect(TokenKind::To)?;
+            self.stream.expect(TokenKind::Second)?;
             TemporalDurationType::DurationDayToSecond
         } else {
             TemporalDurationType::Duration
@@ -825,15 +778,15 @@ impl<'a> TypeParser<'a> {
     ///     | NOTHING
     /// ```
     pub fn parse_immaterial_value_type(&mut self) -> ParseResult<ImmaterialValueType> {
-        let imm_type = match &self.current().kind {
+        let imm_type = match &self.stream.current().kind {
             TokenKind::Null => {
-                self.advance();
+                self.stream.advance();
                 // Check for NOT NULL (paradoxical type)
-                if self.check(&TokenKind::Not) {
-                    if let Some(next) = self.peek() {
+                if self.stream.check(&TokenKind::Not) {
+                    if let Some(next) = self.stream.peek() {
                         if matches!(next.kind, TokenKind::Null) {
-                            self.advance(); // consume NOT
-                            self.advance(); // consume NULL
+                            self.stream.advance(); // consume NOT
+                            self.stream.advance(); // consume NULL
                             ImmaterialValueType::NullNotNull
                         } else {
                             ImmaterialValueType::Null
@@ -846,7 +799,7 @@ impl<'a> TypeParser<'a> {
                 }
             }
             TokenKind::Nothing => {
-                self.advance();
+                self.stream.advance();
                 ImmaterialValueType::Nothing
             }
             _ => {
@@ -870,19 +823,19 @@ impl<'a> TypeParser<'a> {
     ///     | PROPERTY GRAPH <nested_spec> [ NOT NULL ]
     /// ```
     pub fn parse_graph_reference_value_type(&mut self) -> ParseResult<GraphReferenceValueType> {
-        let start = self.current().span.start;
+        let start = self.stream.current().span.start;
 
         // Check for ANY [PROPERTY] GRAPH
-        if self.check(&TokenKind::Any) {
-            self.advance();
+        if self.stream.check(&TokenKind::Any) {
+            self.stream.advance();
             // Optional PROPERTY keyword
-            self.consume(&TokenKind::Property);
-            self.expect(TokenKind::Graph)?;
+            self.stream.consume(&TokenKind::Property);
+            self.stream.expect(TokenKind::Graph)?;
 
             let not_null = self.check_not_null();
             let end = self
-                .tokens
-                .get(self.pos.saturating_sub(1))
+                .stream.tokens()
+                .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
 
@@ -890,10 +843,10 @@ impl<'a> TypeParser<'a> {
                 not_null,
                 span: start..end,
             })
-        } else if self.check(&TokenKind::Property) || self.check(&TokenKind::Graph) {
+        } else if self.stream.check(&TokenKind::Property) || self.stream.check(&TokenKind::Graph) {
             // PROPERTY GRAPH <nested_spec> [NOT NULL]
-            self.consume(&TokenKind::Property);
-            self.expect(TokenKind::Graph)?;
+            self.stream.consume(&TokenKind::Property);
+            self.stream.expect(TokenKind::Graph)?;
 
             let spec_span = self.parse_placeholder_spec_span("nested graph type specification")?;
 
@@ -909,8 +862,8 @@ impl<'a> TypeParser<'a> {
 
             let not_null = self.check_not_null();
             let end = self
-                .tokens
-                .get(self.pos.saturating_sub(1))
+                .stream.tokens()
+                .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
 
@@ -935,16 +888,16 @@ impl<'a> TypeParser<'a> {
     pub fn parse_binding_table_reference_value_type(
         &mut self,
     ) -> ParseResult<BindingTableReferenceValueType> {
-        let start = self.current().span.start;
-        if self.check(&TokenKind::Binding) {
-            self.advance();
-            self.expect(TokenKind::Table)?;
+        let start = self.stream.current().span.start;
+        if self.stream.check(&TokenKind::Binding) {
+            self.stream.advance();
+            self.stream.expect(TokenKind::Table)?;
         } else {
-            self.expect(TokenKind::Table)?;
+            self.stream.expect(TokenKind::Table)?;
         }
 
         // Optional field types specification
-        let field_types = if self.check(&TokenKind::LBrace) {
+        let field_types = if self.stream.check(&TokenKind::LBrace) {
             Some(self.parse_field_types_specification()?)
         } else {
             None
@@ -952,8 +905,8 @@ impl<'a> TypeParser<'a> {
 
         let not_null = self.check_not_null();
         let end = self
-            .tokens
-            .get(self.pos.saturating_sub(1))
+            .stream.tokens()
+            .get(self.stream.position().saturating_sub(1))
             .map(|t| t.span.end)
             .unwrap_or(start);
 
@@ -975,22 +928,22 @@ impl<'a> TypeParser<'a> {
     ///     | <node_type_spec> [ NOT NULL ]
     /// ```
     pub fn parse_node_reference_value_type(&mut self) -> ParseResult<NodeReferenceValueType> {
-        let start = self.current().span.start;
-        let had_any = self.consume(&TokenKind::Any);
+        let start = self.stream.current().span.start;
+        let had_any = self.stream.consume(&TokenKind::Any);
 
-        if self.check(&TokenKind::Vertex) || self.check(&TokenKind::Node) {
-            let use_vertex = if self.check(&TokenKind::Vertex) {
-                self.advance();
+        if self.stream.check(&TokenKind::Vertex) || self.stream.check(&TokenKind::Node) {
+            let use_vertex = if self.stream.check(&TokenKind::Vertex) {
+                self.stream.advance();
                 true
             } else {
-                self.advance();
+                self.stream.advance();
                 false
             };
 
             let not_null = self.check_not_null();
             let end = self
-                .tokens
-                .get(self.pos.saturating_sub(1))
+                .stream.tokens()
+                .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
 
@@ -1017,8 +970,8 @@ impl<'a> TypeParser<'a> {
 
             let not_null = self.check_not_null();
             let end = self
-                .tokens
-                .get(self.pos.saturating_sub(1))
+                .stream.tokens()
+                .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
             Ok(NodeReferenceValueType::Typed {
@@ -1040,22 +993,22 @@ impl<'a> TypeParser<'a> {
     ///     | <edge_type_spec> [ NOT NULL ]
     /// ```
     pub fn parse_edge_reference_value_type(&mut self) -> ParseResult<EdgeReferenceValueType> {
-        let start = self.current().span.start;
-        let had_any = self.consume(&TokenKind::Any);
+        let start = self.stream.current().span.start;
+        let had_any = self.stream.consume(&TokenKind::Any);
 
-        if self.check(&TokenKind::Relationship) || self.check(&TokenKind::Edge) {
-            let use_relationship = if self.check(&TokenKind::Relationship) {
-                self.advance();
+        if self.stream.check(&TokenKind::Relationship) || self.stream.check(&TokenKind::Edge) {
+            let use_relationship = if self.stream.check(&TokenKind::Relationship) {
+                self.stream.advance();
                 true
             } else {
-                self.advance();
+                self.stream.advance();
                 false
             };
 
             let not_null = self.check_not_null();
             let end = self
-                .tokens
-                .get(self.pos.saturating_sub(1))
+                .stream.tokens()
+                .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
 
@@ -1097,8 +1050,8 @@ impl<'a> TypeParser<'a> {
 
             let not_null = self.check_not_null();
             let end = self
-                .tokens
-                .get(self.pos.saturating_sub(1))
+                .stream.tokens()
+                .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
             Ok(EdgeReferenceValueType::Typed {
@@ -1121,7 +1074,7 @@ impl<'a> TypeParser<'a> {
     /// path_value_type ::= PATH
     /// ```
     pub fn parse_path_value_type(&mut self) -> ParseResult<PathValueType> {
-        let span = self.expect(TokenKind::Path)?;
+        let span = self.stream.expect(TokenKind::Path)?;
         Ok(PathValueType { span })
     }
 
@@ -1141,15 +1094,15 @@ impl<'a> TypeParser<'a> {
     ///     | value_type ARRAY
     /// ```
     pub fn parse_list_value_type(&mut self) -> ParseResult<ListValueType> {
-        let start = self.current().span.start;
+        let start = self.stream.current().span.start;
 
-        let syntax_form = match &self.current().kind {
+        let syntax_form = match &self.stream.current().kind {
             TokenKind::List => {
-                self.advance();
+                self.stream.advance();
                 ListSyntaxForm::List
             }
             TokenKind::Array => {
-                self.advance();
+                self.stream.advance();
                 ListSyntaxForm::Array
             }
             _ => {
@@ -1157,13 +1110,13 @@ impl<'a> TypeParser<'a> {
             }
         };
 
-        self.expect(TokenKind::Lt)?;
+        self.stream.expect(TokenKind::Lt)?;
         let element_type = Box::new(self.parse_value_type()?);
-        self.expect(TokenKind::Gt)?;
+        self.stream.expect(TokenKind::Gt)?;
 
         let end = self
-            .tokens
-            .get(self.pos.saturating_sub(1))
+            .stream.tokens()
+            .get(self.stream.position().saturating_sub(1))
             .map(|t| t.span.end)
             .unwrap_or(start);
 
@@ -1188,20 +1141,20 @@ impl<'a> TypeParser<'a> {
     ///     | RECORD <field_types_spec>
     /// ```
     pub fn parse_record_type(&mut self) -> ParseResult<RecordType> {
-        let start = self.current().span.start;
+        let start = self.stream.current().span.start;
 
         // Check for ANY RECORD
-        if self.check(&TokenKind::Any) {
-            self.advance();
-            self.expect(TokenKind::Record)?;
+        if self.stream.check(&TokenKind::Any) {
+            self.stream.advance();
+            self.stream.expect(TokenKind::Record)?;
             let end = self
-                .tokens
-                .get(self.pos.saturating_sub(1))
+                .stream.tokens()
+                .get(self.stream.position().saturating_sub(1))
                 .map(|t| t.span.end)
                 .unwrap_or(start);
             Ok(RecordType::AnyRecord { span: start..end })
-        } else if self.check(&TokenKind::Record) {
-            self.advance();
+        } else if self.stream.check(&TokenKind::Record) {
+            self.stream.advance();
             let field_types = self.parse_field_types_specification()?;
             let end = field_types.span.end;
             Ok(RecordType::Record {
@@ -1221,25 +1174,25 @@ impl<'a> TypeParser<'a> {
     /// field_types_specification ::= { field_type [ , field_type ]* }
     /// ```
     fn parse_field_types_specification(&mut self) -> ParseResult<FieldTypesSpecification> {
-        let start = self.current().span.start;
-        self.expect(TokenKind::LBrace)?;
+        let start = self.stream.current().span.start;
+        self.stream.expect(TokenKind::LBrace)?;
 
         let mut fields = Vec::new();
 
         // Parse first field
-        if !self.check(&TokenKind::RBrace) {
+        if !self.stream.check(&TokenKind::RBrace) {
             fields.push(self.parse_field_type()?);
 
             // Parse remaining fields
-            while self.consume(&TokenKind::Comma) {
-                if self.check(&TokenKind::RBrace) {
+            while self.stream.consume(&TokenKind::Comma) {
+                if self.stream.check(&TokenKind::RBrace) {
                     break; // Trailing comma
                 }
                 fields.push(self.parse_field_type()?);
             }
         }
 
-        let end_span = self.expect(TokenKind::RBrace)?;
+        let end_span = self.stream.expect(TokenKind::RBrace)?;
         let end = end_span.end;
 
         Ok(FieldTypesSpecification {
@@ -1256,13 +1209,13 @@ impl<'a> TypeParser<'a> {
     /// field_type ::= field_name :: value_type
     /// ```
     fn parse_field_type(&mut self) -> ParseResult<FieldType> {
-        let start = self.current().span.start;
+        let start = self.stream.current().span.start;
 
         // Parse field name
-        let field_name = match &self.current().kind {
+        let field_name = match &self.stream.current().kind {
             TokenKind::Identifier(name) => {
                 let name = name.clone();
-                self.advance();
+                self.stream.advance();
                 name
             }
             _ => {
@@ -1270,7 +1223,7 @@ impl<'a> TypeParser<'a> {
             }
         };
 
-        self.expect(TokenKind::DoubleColon)?;
+        self.stream.expect(TokenKind::DoubleColon)?;
         let field_type = Box::new(self.parse_value_type()?);
 
         let end = field_type.span().end;
@@ -1291,10 +1244,10 @@ impl<'a> TypeParser<'a> {
     /// This consumes at least one token and supports balanced delimiters when
     /// the placeholder starts with `{` or `(`.
     fn parse_placeholder_spec_span(&mut self, expected: &str) -> ParseResult<Span> {
-        let start = self.current().span.start;
+        let start = self.stream.current().span.start;
 
         if matches!(
-            self.current().kind,
+            self.stream.current().kind,
             TokenKind::Not
                 | TokenKind::Comma
                 | TokenKind::RParen
@@ -1305,57 +1258,57 @@ impl<'a> TypeParser<'a> {
             return Err(self.error_here(format!("expected {expected}")));
         }
 
-        if self.check(&TokenKind::LBrace) {
-            self.advance();
+        if self.stream.check(&TokenKind::LBrace) {
+            self.stream.advance();
             let mut depth = 1usize;
-            let mut end = self.tokens[self.pos.saturating_sub(1)].span.end;
+            let mut end = self.stream.tokens()[self.stream.position().saturating_sub(1)].span.end;
             while depth > 0 {
-                if self.check(&TokenKind::Eof) {
+                if self.stream.check(&TokenKind::Eof) {
                     return Err(self
                         .error_here(format!("unterminated placeholder while parsing {expected}")));
                 }
-                match self.current().kind {
+                match self.stream.current().kind {
                     TokenKind::LBrace => depth += 1,
                     TokenKind::RBrace => depth = depth.saturating_sub(1),
                     _ => {}
                 }
-                end = self.current().span.end;
-                self.advance();
+                end = self.stream.current().span.end;
+                self.stream.advance();
             }
             return Ok(start..end);
         }
 
-        if self.check(&TokenKind::LParen) {
-            self.advance();
+        if self.stream.check(&TokenKind::LParen) {
+            self.stream.advance();
             let mut depth = 1usize;
-            let mut end = self.tokens[self.pos.saturating_sub(1)].span.end;
+            let mut end = self.stream.tokens()[self.stream.position().saturating_sub(1)].span.end;
             while depth > 0 {
-                if self.check(&TokenKind::Eof) {
+                if self.stream.check(&TokenKind::Eof) {
                     return Err(self
                         .error_here(format!("unterminated placeholder while parsing {expected}")));
                 }
-                match self.current().kind {
+                match self.stream.current().kind {
                     TokenKind::LParen => depth += 1,
                     TokenKind::RParen => depth = depth.saturating_sub(1),
                     _ => {}
                 }
-                end = self.current().span.end;
-                self.advance();
+                end = self.stream.current().span.end;
+                self.stream.advance();
             }
             return Ok(start..end);
         }
 
-        let end = self.current().span.end;
-        self.advance();
+        let end = self.stream.current().span.end;
+        self.stream.advance();
         Ok(start..end)
     }
 
     /// Parses an optional length parameter: ( n )
     fn parse_optional_length_param(&mut self) -> ParseResult<Option<u32>> {
-        if self.check(&TokenKind::LParen) {
-            self.advance();
+        if self.stream.check(&TokenKind::LParen) {
+            self.stream.advance();
             let length = self.parse_unsigned_integer()?;
-            self.expect(TokenKind::RParen)?;
+            self.stream.expect(TokenKind::RParen)?;
             Ok(Some(length))
         } else {
             Ok(None)
@@ -1364,17 +1317,17 @@ impl<'a> TypeParser<'a> {
 
     /// Parses optional precision and scale: ( p [, s] )
     fn parse_optional_precision_scale(&mut self) -> ParseResult<(Option<u32>, Option<u32>)> {
-        if self.check(&TokenKind::LParen) {
-            self.advance();
+        if self.stream.check(&TokenKind::LParen) {
+            self.stream.advance();
             let precision = self.parse_unsigned_integer()?;
 
-            let scale = if self.consume(&TokenKind::Comma) {
+            let scale = if self.stream.consume(&TokenKind::Comma) {
                 Some(self.parse_unsigned_integer()?)
             } else {
                 None
             };
 
-            self.expect(TokenKind::RParen)?;
+            self.stream.expect(TokenKind::RParen)?;
             Ok((Some(precision), scale))
         } else {
             Ok((None, None))
@@ -1383,12 +1336,12 @@ impl<'a> TypeParser<'a> {
 
     /// Parses an unsigned integer from an integer literal.
     fn parse_unsigned_integer(&mut self) -> ParseResult<u32> {
-        match &self.current().kind {
+        match &self.stream.current().kind {
             TokenKind::IntegerLiteral(s) => {
                 let value = s
                     .parse::<u32>()
                     .map_err(|_| self.error_here(format!("invalid integer: {s}")))?;
-                self.advance();
+                self.stream.advance();
                 Ok(value)
             }
             _ => Err(self.error_here("expected integer literal")),
@@ -1397,13 +1350,13 @@ impl<'a> TypeParser<'a> {
 
     /// Checks for and consumes optional NOT NULL constraint.
     fn check_not_null(&mut self) -> bool {
-        if self.check(&TokenKind::Not)
+        if self.stream.check(&TokenKind::Not)
             && self
-                .peek()
+                .stream.peek()
                 .is_some_and(|next| matches!(next.kind, TokenKind::Null))
         {
-            self.advance(); // consume NOT
-            self.advance(); // consume NULL
+            self.stream.advance(); // consume NOT
+            self.stream.advance(); // consume NULL
             return true;
         }
         false
@@ -1411,8 +1364,8 @@ impl<'a> TypeParser<'a> {
 
     fn wrap_predefined(&self, predefined: PredefinedType, start: usize) -> ValueType {
         let end = self
-            .tokens
-            .get(self.pos.saturating_sub(1))
+            .stream.tokens()
+            .get(self.stream.position().saturating_sub(1))
             .map(|t| t.span.end)
             .unwrap_or(start);
         ValueType::Predefined(predefined, start..end)
@@ -1423,7 +1376,7 @@ impl<'a> TypeParser<'a> {
     /// This is useful for integrating with other parsers that need to know
     /// how many tokens were consumed.
     pub fn current_position(&self) -> usize {
-        self.pos
+        self.stream.position()
     }
 }
 
@@ -1528,7 +1481,7 @@ pub(crate) fn parse_value_type_prefix(tokens: &[Token]) -> ParseResult<(ValueTyp
     let normalized = normalize_tokens(tokens);
     let mut parser = TypeParser::new(&normalized);
     let value_type = parser.parse_value_type()?;
-    Ok((value_type, parser.pos))
+    Ok((value_type, parser.stream.position()))
 }
 
 fn parse_with_full_consumption<T>(
@@ -1539,10 +1492,10 @@ fn parse_with_full_consumption<T>(
     let mut parser = TypeParser::new(&normalized);
     let parsed = parse(&mut parser)?;
 
-    if !matches!(parser.current().kind, TokenKind::Eof) {
+    if !matches!(parser.stream.current().kind, TokenKind::Eof) {
         return Err(Box::new(
             Diag::error("unexpected trailing tokens after type")
-                .with_primary_label(parser.current().span.clone(), "unexpected token")
+                .with_primary_label(parser.stream.current().span.clone(), "unexpected token")
                 .with_code("P_TYPE"),
         ));
     }
