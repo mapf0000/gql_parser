@@ -128,6 +128,8 @@ You can modify these in `parser_benchmarks.rs` by adjusting the Criterion group 
 
 ## Continuous Performance Monitoring
 
+Release baseline numbers are tracked in `docs/BENCHMARK_BASELINE.md`.
+
 ### Baseline Comparison
 
 Save a baseline for comparison:

@@ -14,6 +14,7 @@ use crate::semantic::diag::SemanticDiagBuilder;
 
 /// Tracks the scope context where an expression is evaluated.
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 struct ExpressionContext {
     /// Scope ID where the expression is evaluated.
     scope_id: ScopeId,
@@ -24,6 +25,7 @@ struct ExpressionContext {
 
 /// Metadata collected during scope analysis for reference-site-aware lookups.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ScopeMetadata {
     /// Maps expression spans to their evaluation context.
     expr_contexts: HashMap<(usize, usize), ExpressionContext>,
@@ -1702,15 +1704,14 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
 
         // In strict mode or with GROUP BY, mixing requires GROUP BY
         // RETURN doesn't have GROUP BY, so this is an error in strict mode
-        if has_aggregation && !non_aggregated_expressions.is_empty() {
-            if self.config.strict_mode {
-                for expr in non_aggregated_expressions {
-                    let diag = SemanticDiagBuilder::aggregation_error(
-                        "Cannot mix aggregated and non-aggregated expressions in RETURN without GROUP BY",
-                        expr.span().clone()
-                    ).build();
-                    diagnostics.push(diag);
-                }
+        if has_aggregation && !non_aggregated_expressions.is_empty() && self.config.strict_mode {
+            for expr in non_aggregated_expressions {
+                let diag = SemanticDiagBuilder::aggregation_error(
+                    "Cannot mix aggregated and non-aggregated expressions in RETURN without GROUP BY",
+                    expr.span().clone(),
+                )
+                .build();
+                diagnostics.push(diag);
             }
         }
 
@@ -3211,8 +3212,19 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
                     | BinaryOperator::Multiply
                     | BinaryOperator::Divide
                     | BinaryOperator::Modulo => {
-                        // Arithmetic operations require numeric types
-                        // Detect obvious type errors (e.g., string literals in arithmetic)
+                        // F3: Check for NULL in arithmetic (ISO GQL null propagation)
+                        use crate::ast::expression::Literal;
+                        let left_is_null = matches!(left.as_ref(), Expression::Literal(Literal::Null, _));
+                        let right_is_null = matches!(right.as_ref(), Expression::Literal(Literal::Null, _));
+
+                        if left_is_null || right_is_null {
+                            diagnostics.push(
+                                Diag::warning("Arithmetic operation with NULL will always return NULL")
+                                    .with_primary_label(_span.clone(), "NULL propagation")
+                            );
+                        }
+
+                        // Simple literal type checking
                         if self.is_definitely_string(left) {
                             diagnostics.push(
                                 SemanticDiagBuilder::type_mismatch(
@@ -3448,6 +3460,7 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
         )
     }
 
+
     /// Checks types in a mutation statement.
     fn check_mutation_types(
         &self,
@@ -3555,10 +3568,10 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
             for element in &path.elements {
                 match element {
                     InsertElementPattern::Node(node) => {
-                        if let Some(filler) = &node.filler {
-                            if let Some(props) = &filler.properties {
-                                self.check_property_specification_types(props, diagnostics);
-                            }
+                        if let Some(filler) = &node.filler
+                            && let Some(props) = &filler.properties
+                        {
+                            self.check_property_specification_types(props, diagnostics);
                         }
                     }
                     InsertElementPattern::Edge(edge) => {
@@ -3568,10 +3581,10 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
                             InsertEdgePattern::PointingRight(e) => e.filler.as_ref(),
                             InsertEdgePattern::Undirected(e) => e.filler.as_ref(),
                         };
-                        if let Some(filler) = filler {
-                            if let Some(props) = &filler.properties {
-                                self.check_property_specification_types(props, diagnostics);
-                            }
+                        if let Some(filler) = filler
+                            && let Some(props) = &filler.properties
+                        {
+                            self.check_property_specification_types(props, diagnostics);
                         }
                     }
                 }
@@ -5275,6 +5288,11 @@ mod tests {
             let validator = SemanticValidator::new();
             let result = validator.validate(&program);
 
+            // Debug: print diagnostics if test fails
+            if !result.is_success() {
+                eprintln!("Diagnostics: {:?}", result.diagnostics);
+            }
+
             // Should pass - complex arithmetic is valid
             assert!(
                 result.is_success(),
@@ -6041,8 +6059,7 @@ mod tests {
                 .diagnostics
                 .iter()
                 .any(|d| d.severity == DiagSeverity::Warning && d.message.contains("NULL"));
-            // Note: This test documents expected behavior; may not be implemented yet
-            _ = has_null_warning;
+            assert!(has_null_warning, "Should warn about NULL propagation in arithmetic");
         }
     }
 }

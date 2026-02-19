@@ -484,7 +484,7 @@ fn decode_byte_string_literal(
         ""
     };
 
-    if !content.chars().all(|ch| ch.is_ascii_hexdigit()) || !content.len().is_multiple_of(2) {
+    if !content.chars().all(|ch| ch.is_ascii_hexdigit()) || content.len() % 2 != 0 {
         diagnostics.push(
             Diag::error("malformed byte string literal")
                 .with_primary_label(span_start..span_start + raw.len(), "here")

@@ -8,6 +8,8 @@ pub mod procedure;
 pub mod program;
 pub mod query;
 pub mod references;
+pub mod visitor;
+pub mod visitors;
 mod session;
 mod span;
 mod transaction;
@@ -81,6 +83,10 @@ pub use query::{
     SelectStatement, SetOperator, SetQuantifier, SimpleMatchStatement, SortSpecification,
     UseGraphClause, WhereClause,
 };
+
+// Re-export visitor infrastructure and concrete visitors.
+pub use visitor::{AstVisitor, AstVisitorMut, VisitResult};
+pub use visitors::{AstNode, CollectingVisitor, SpanCollector, VariableCollector};
 
 // Re-export mutation types
 pub use mutation::{

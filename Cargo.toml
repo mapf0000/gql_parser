@@ -2,6 +2,13 @@
 name = "gql_parser"
 version = "0.1.0"
 edition = "2024"
+description = "Pure-Rust ISO GQL parser with rich diagnostics, AST visitors, and query analysis APIs."
+license = "Apache-2.0"
+repository = "https://github.com/SAPDevelop/gql_parser"
+readme = "README.md"
+keywords = ["gql", "parser", "graph", "diagnostics", "compiler"]
+categories = ["parser-implementations", "compilers"]
+rust-version = "1.85"
 
 [dependencies]
 logos = "0.14"

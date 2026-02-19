@@ -1,22 +1,48 @@
-//! GQL parser with rich diagnostics.
+#![allow(rustdoc::broken_intra_doc_links, rustdoc::invalid_html_tags)]
+//! Pure-Rust ISO GQL parser with diagnostics, AST traversal, and query analysis APIs.
 //!
-//! This library provides a GQL (Graph Query Language) parser with comprehensive
-//! error reporting built on miette for beautiful diagnostic messages.
-//!
-//! # Example
+//! # Parse
 //!
 //! ```
 //! use gql_parser::parse;
 //!
-//! let source = "MATCH (n:Person) WHERE n.age > 18 RETURN n";
-//! let parse_result = parse(source);
+//! let source = "MATCH (n:Person) WHERE n.age > 18 RETURN n.name";
+//! let result = parse(source);
+//! assert!(result.ast.is_some());
+//! ```
 //!
-//! // Check that we got an AST
-//! assert!(parse_result.ast.is_some());
+//! # Traverse AST
+//!
+//! ```
+//! use gql_parser::ast::{AstVisitor, VariableCollector};
+//! use gql_parser::parse;
+//!
+//! let program = parse("MATCH (n)-[:KNOWS]->(m) RETURN m").ast.unwrap();
+//! let mut collector = VariableCollector::new();
+//! let _ = collector.visit_program(&program);
+//! assert!(collector.definitions().contains("n"));
+//! ```
+//!
+//! # Analyze Query
+//!
+//! ```
+//! use gql_parser::{QueryInfo, VariableDependencyGraph, parse};
+//!
+//! let statement = &parse("MATCH (n) LET x = n.age RETURN x")
+//!     .ast
+//!     .unwrap()
+//!     .statements[0];
+//!
+//! let info = QueryInfo::from_ast(statement);
+//! let deps = VariableDependencyGraph::build(statement);
+//!
+//! assert_eq!(info.clause_sequence.len(), 3);
+//! assert!(!deps.edges.is_empty());
 //! ```
 
 use miette::Report;
 
+pub mod analysis;
 pub mod ast;
 pub mod diag;
 pub mod ir;
@@ -42,6 +68,12 @@ pub use parser::{ParseResult, Parser};
 // Re-export semantic validation types for convenience.
 pub use ir::{IR, ValidationResult};
 pub use semantic::SemanticValidator;
+
+// Re-export analysis types for convenience.
+pub use analysis::{
+    ClauseId, ClauseInfo, ClauseKind, DefineUseEdge, DefinitionPoint, ExpressionInfo, LiteralInfo,
+    PatternInfo, PropertyReference, QueryInfo, QueryShape, UsagePoint, VariableDependencyGraph,
+};
 
 /// Parses GQL source text end-to-end (lexing + parsing).
 ///
