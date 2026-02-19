@@ -151,23 +151,23 @@ let validator = SemanticValidator::new()
 ### Next Steps (Priority Order)
 
 1. **Implement Scope Analysis (Task 2)**
-   - File: `validator.rs`, method: `run_scope_analysis()`
+   - File: `validator/scope_analysis.rs`, function: `run_scope_analysis()`
    - Walk Program AST and extract variable declarations
    - Use `SymbolTable::define()` to track variables
    - See implementation notes in [SPRINT14.md](../../SPRINT14.md)
 
 2. **Implement Variable Validation (Task 3)**
-   - File: `validator.rs`, method: `run_variable_validation()`
+   - File: `validator/variable_validation.rs`, function: `run_variable_validation()`
    - Check all variable references against symbol table
    - Generate `SemanticDiagBuilder::undefined_variable()` diagnostics
 
 3. **Implement Type Inference (Task 5)**
-   - File: `validator.rs`, method: `run_type_inference()`
+   - File: `validator/type_inference.rs`, function: `run_type_inference()`
    - Assign types to expressions
    - Use `TypeTable::set_type()` to track types
 
 4. **Implement Type Checking (Task 6)**
-   - File: `validator.rs`, method: `run_type_checking()`
+   - File: `validator/type_checking.rs`, function: `run_type_checking()`
    - Validate type compatibility
    - Use `Type::is_compatible_with()` for checking
 

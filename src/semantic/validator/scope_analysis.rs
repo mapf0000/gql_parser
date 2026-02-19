@@ -19,8 +19,8 @@ use crate::ast::query::{
     PathPattern, PathPatternExpression, PathPrimary, PathTerm, PrimitiveQueryStatement, Query,
 };
 use crate::diag::Diag;
-use crate::ir::symbol_table::{ScopeId, ScopeKind, SymbolKind};
 use crate::ir::SymbolTable;
+use crate::ir::symbol_table::{ScopeId, ScopeKind, SymbolKind};
 
 use super::ScopeMetadata;
 
@@ -146,11 +146,7 @@ fn analyze_mutation_with_scope(
     statement_id: usize,
     diagnostics: &mut Vec<Diag>,
 ) {
-    // Call the existing analyze_mutation which will push its own scope
-    analyze_mutation(validator, mutation, symbol_table, diagnostics);
-
-    // Track the scope that was just created
-    let statement_scope_id = symbol_table.current_scope();
+    let statement_scope_id = analyze_mutation(validator, mutation, symbol_table, diagnostics);
     if statement_id >= scope_metadata.statement_scopes.len() {
         scope_metadata
             .statement_scopes
@@ -168,7 +164,7 @@ fn analyze_linear_query(
     statement_id: usize,
     diagnostics: &mut Vec<Diag>,
 ) {
-    // Push a NEW scope for this statement (statement isolation)
+    // Push a statement-local scope.
     symbol_table.push_scope(ScopeKind::Query);
     let statement_scope_id = symbol_table.current_scope();
 
@@ -191,8 +187,8 @@ fn analyze_linear_query(
         analyze_primitive_statement(validator, statement, symbol_table, diagnostics);
     }
 
-    // Keep the query scope active (don't pop it)
-    // This preserves variables for later validation passes
+    // Restore parent scope so sibling statements/branches remain isolated.
+    symbol_table.pop_scope();
 }
 
 /// Analyzes a primitive query statement.
@@ -241,7 +237,12 @@ fn analyze_match_statement(
     use crate::ast::query::{GraphPattern, OptionalOperand};
 
     let mut process_pattern = |pattern: &GraphPattern, symbol_table: &mut SymbolTable| {
-        extract_pattern_variables(validator, &pattern.paths.patterns, symbol_table, diagnostics);
+        extract_pattern_variables(
+            validator,
+            &pattern.paths.patterns,
+            symbol_table,
+            diagnostics,
+        );
     };
 
     match match_stmt {
@@ -502,11 +503,11 @@ fn analyze_mutation(
     mutation: &crate::ast::mutation::LinearDataModifyingStatement,
     symbol_table: &mut SymbolTable,
     diagnostics: &mut Vec<Diag>,
-) {
+) -> ScopeId {
     use crate::ast::mutation::LinearDataModifyingStatement;
 
-    // Push a mutation scope
-    symbol_table.push_scope(ScopeKind::Query);
+    // Push a statement-local mutation scope.
+    let statement_scope_id = symbol_table.push_scope(ScopeKind::Query);
 
     match mutation {
         LinearDataModifyingStatement::Focused(focused) => {
@@ -522,6 +523,10 @@ fn analyze_mutation(
             }
         }
     }
+
+    // Restore parent scope so sibling statements remain isolated.
+    symbol_table.pop_scope();
+    statement_scope_id
 }
 
 /// Analyzes a data accessing statement (query or mutation).
@@ -629,15 +634,11 @@ fn analyze_insert_pattern(
                 }
                 InsertElementPattern::Edge(edge_pattern) => {
                     let filler_opt = match edge_pattern {
-                        crate::ast::mutation::InsertEdgePattern::PointingLeft(edge) => {
-                            &edge.filler
-                        }
+                        crate::ast::mutation::InsertEdgePattern::PointingLeft(edge) => &edge.filler,
                         crate::ast::mutation::InsertEdgePattern::PointingRight(edge) => {
                             &edge.filler
                         }
-                        crate::ast::mutation::InsertEdgePattern::Undirected(edge) => {
-                            &edge.filler
-                        }
+                        crate::ast::mutation::InsertEdgePattern::Undirected(edge) => &edge.filler,
                     };
 
                     if let Some(filler) = filler_opt

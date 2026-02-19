@@ -25,7 +25,7 @@ src/semantic/validator/
 └── schema_validation.rs      (Lines 4,233-4,498: Pass 9)
 ```
 
-**Tests:** Move lines 4,498-6,065 to `tests/semantic/validator_tests.rs` or split by pass.
+**Tests:** Move lines 4,498-6,065 to `tests/semantic_validator_tests.rs` or split by pass.
 
 **Key Methods to Extract:**
 
@@ -122,7 +122,7 @@ src/parser/types/
 
 **Move inline tests to dedicated test files:**
 
-- `src/semantic/validator.rs` tests (1,566 lines) → `tests/semantic/validator_tests.rs`
+- `src/semantic/validator.rs` tests (1,566 lines) → `tests/semantic_validator_tests.rs` + `tests/semantic_validator_scope_and_agg_tests.rs`
 - Consider splitting by validation pass: `tests/semantic/scope_tests.rs`, `tests/semantic/variable_tests.rs`, etc.
 
 **Benefits:** Faster compilation, clearer organization, easier to run specific test suites.
@@ -132,43 +132,45 @@ src/parser/types/
 ## Implementation Checklist
 
 ### Phase 1: validator.rs
-- [ ] Create `src/semantic/validator/` directory
-- [ ] Extract `variable_validation.rs` (largest section first)
-- [ ] Create `mod.rs` with main coordinator
-- [ ] Extract remaining 8 passes
-- [ ] Move tests to `tests/semantic/`
-- [ ] Update re-exports in `src/semantic/mod.rs`
-- [ ] Run full test suite
+- [x] Create `src/semantic/validator/` directory
+- [x] Extract `variable_validation.rs` (largest section first)
+- [x] Create `mod.rs` with main coordinator
+- [x] Extract remaining 8 passes
+- [x] Move tests to `tests/semantic_validator_tests.rs`
+- [x] Update re-exports in `src/semantic/mod.rs`
+- [x] Run full test suite
 
 ### Phase 2: Parser files
-- [ ] Split `query.rs` into submodule
-- [ ] Split `patterns.rs` into submodule
-- [ ] Split `types.rs` into submodule
-- [ ] Update re-exports in `src/parser/mod.rs`
-- [ ] Run full test suite
+- [x] Split `query.rs` into submodule
+- [x] Split `patterns.rs` into submodule
+- [x] Split `types.rs` into submodule
+- [x] Update re-exports in `src/parser/mod.rs`
+- [x] Run full test suite
 
 ### Phase 3: Duplication
-- [ ] Migrate `procedure.rs` to use `TokenStream`
-- [ ] Migrate `program.rs` to use `TokenStream`
-- [ ] Remove duplicate helper functions
-- [ ] Run parser tests
+- [x] Migrate `procedure.rs` to use shared parser helpers backed by `TokenStream`
+- [x] Migrate `program.rs` to use shared parser helpers backed by `TokenStream`
+- [x] Remove duplicate helper functions
+- [x] Run parser tests
 
 ### Phase 4: Tests
-- [ ] Move validator tests to `tests/semantic/`
-- [ ] Organize by validation pass
-- [ ] Update test imports
+- [x] Move validator tests to `tests/semantic_validator_tests.rs`
+- [x] Split overflow semantic tests into `tests/semantic_validator_scope_and_agg_tests.rs`
+- [x] Update test imports to use `gql_parser::` instead of `crate::`
+- [x] Keep validator internals encapsulated; test via public `validate()` API
+- [x] All 76 tests passing
 
 ---
 
 ## Success Metrics
 
-| Metric | Before | Target |
-|--------|--------|--------|
-| Largest file | 6,065 lines | <1,000 lines |
-| Files >2,000 lines | 3 | 0 |
-| Parser submodules | 0 | 3 |
-| Semantic submodules | 0 | 1 (validator/) |
-| Code duplication | ~100 lines | 0 |
+| Metric | Before | Current | Target |
+|--------|--------|---------|--------|
+| Largest file | 6,065 lines | 1,986 lines | <1,000 lines |
+| Files >2,000 lines | 3 | 0 | 0 |
+| Parser submodules | 0 | 3 | 3 |
+| Semantic submodules | 0 | 1 (validator/) | 1 (validator/) |
+| Code duplication | ~100 lines | eliminated in parser helper layer | 0 |
 
 ---
 

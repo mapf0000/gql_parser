@@ -10,6 +10,7 @@ use crate::ast::program::{Program, Statement};
 use crate::ast::query::{MatchStatement, PrimitiveQueryStatement, Query};
 use crate::diag::Diag;
 use crate::ir::SymbolTable;
+use crate::ir::symbol_table::ScopeId;
 
 /// Runs variable validation pass on the program.
 pub(super) fn run_variable_validation(
@@ -39,6 +40,18 @@ pub(super) fn run_variable_validation(
             }
         }
     }
+}
+
+fn statement_scope_id(
+    symbol_table: &SymbolTable,
+    scope_metadata: &super::ScopeMetadata,
+    statement_id: usize,
+) -> ScopeId {
+    scope_metadata
+        .statement_scopes
+        .get(statement_id)
+        .copied()
+        .unwrap_or_else(|| symbol_table.current_scope())
 }
 
 /// Validates variable references in a query.
@@ -312,12 +325,7 @@ fn validate_primitive_statement_variables(
                 );
 
                 // ISO GQL: Validate HAVING clause semantics
-                validate_having_clause(
-                    validator,
-                    &having.condition,
-                    &select.group_by,
-                    diagnostics,
-                );
+                validate_having_clause(validator, &having.condition, &select.group_by, diagnostics);
             }
         }
         PrimitiveQueryStatement::Call(call_stmt) => {
@@ -345,9 +353,15 @@ fn validate_primitive_statement_variables(
                     // in their variable scope clause - those should already be validated
                     // The nested specification would need recursive validation (future work)
                     if let Some(var_scope) = &inline_call.variable_scope {
+                        let scope_to_check =
+                            statement_scope_id(symbol_table, scope_metadata, statement_id);
+
                         // Validate that variables in the scope clause are defined
                         for var in &var_scope.variables {
-                            if symbol_table.lookup(var.name.as_ref()).is_none() {
+                            if symbol_table
+                                .lookup_from(scope_to_check, var.name.as_ref())
+                                .is_none()
+                            {
                                 use crate::semantic::diag::SemanticDiagBuilder;
                                 let diag = SemanticDiagBuilder::undefined_variable(
                                     &var.name,
@@ -509,20 +523,14 @@ fn validate_expression_variables(
 
     match expression {
         Expression::VariableReference(var_name, span) => {
-            // Use reference-site-aware lookup: check from the statement's scope, not global current_scope
-            let scope_to_check = if statement_id < scope_metadata.statement_scopes.len() {
-                scope_metadata.statement_scopes[statement_id]
-            } else {
-                // Fallback to current scope if statement_id is out of bounds (shouldn't happen)
-                symbol_table.current_scope()
-            };
+            // Use reference-site-aware lookup from the statement-local scope.
+            let scope_to_check = statement_scope_id(symbol_table, scope_metadata, statement_id);
 
             // Perform lookup from the correct scope
             if symbol_table.lookup_from(scope_to_check, var_name).is_none() {
                 // Generate undefined variable diagnostic
-                let diag =
-                    SemanticDiagBuilder::undefined_variable(var_name.as_str(), span.clone())
-                        .build();
+                let diag = SemanticDiagBuilder::undefined_variable(var_name.as_str(), span.clone())
+                    .build();
                 diagnostics.push(diag);
             }
         }
@@ -992,11 +1000,7 @@ fn check_nested_aggregation(
                 }
                 AggregateFunction::BinarySetFunction(bsf) => {
                     check_nested_aggregation(&bsf.expression, true, diagnostics);
-                    check_nested_aggregation(
-                        &bsf.inverse_distribution_argument,
-                        true,
-                        diagnostics,
-                    );
+                    check_nested_aggregation(&bsf.inverse_distribution_argument, true, diagnostics);
                 }
             }
         }
@@ -1273,9 +1277,7 @@ fn expressions_equivalent(
 
         // Binary operations
         (Expression::Binary(op1, l1, r1, _), Expression::Binary(op2, l2, r2, _)) => {
-            op1 == op2
-                && expressions_equivalent(l1, l2)
-                && expressions_equivalent(r1, r2)
+            op1 == op2 && expressions_equivalent(l1, l2) && expressions_equivalent(r1, r2)
         }
 
         // Unary operations
@@ -1304,16 +1306,12 @@ fn expressions_equivalent(
 
         // Comparison operations
         (Expression::Comparison(op1, l1, r1, _), Expression::Comparison(op2, l2, r2, _)) => {
-            op1 == op2
-                && expressions_equivalent(l1, l2)
-                && expressions_equivalent(r1, r2)
+            op1 == op2 && expressions_equivalent(l1, l2) && expressions_equivalent(r1, r2)
         }
 
         // Logical operations
         (Expression::Logical(op1, l1, r1, _), Expression::Logical(op2, l2, r2, _)) => {
-            op1 == op2
-                && expressions_equivalent(l1, l2)
-                && expressions_equivalent(r1, r2)
+            op1 == op2 && expressions_equivalent(l1, l2) && expressions_equivalent(r1, r2)
         }
 
         // Default: not equivalent
