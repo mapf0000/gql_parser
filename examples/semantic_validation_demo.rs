@@ -157,10 +157,10 @@ fn demo_type_mismatch() {
 fn demo_schema_validation() {
     println!("--- Example 5: Schema Validation ---");
 
-    use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
+    use gql_parser::semantic::metadata_provider::MockMetadataProvider;
 
     // Create metadata provider with schema snapshot
-    let metadata = InMemoryMetadataProvider::example();
+    let metadata = MockMetadataProvider::example();
 
     // Valid label
     let valid_source = "MATCH (n:Person) RETURN n";

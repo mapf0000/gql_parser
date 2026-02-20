@@ -1,29 +1,23 @@
-//! Advanced schema catalog system for Milestone 3.
+//! Schema catalog system for semantic validation.
 //!
-//! This module provides a comprehensive schema catalog system that supports:
-//! - Schema metadata with property types, constraints, and inheritance
-//! - Snapshot-based immutable schema views for query validation
-//! - Graph context resolution for active graph/schema determination
-//! - Variable type context for scope/type inference
-//! - Test doubles and fixture loading for engine-agnostic testing
+//! This module provides core schema metadata types used by the `MetadataProvider`
+//! trait for validation. All catalog operations go through `MetadataProvider`.
 //!
 //! # Architecture
 //!
-//! The schema catalog system follows a multi-trait design:
+//! - **Core Types**: `NodeTypeMeta`, `EdgeTypeMeta`, `PropertyMeta`, etc.
+//! - **Schema Views**: `SchemaSnapshot` - immutable, query-time view
+//! - **Test Implementations**: `InMemorySchemaSnapshot` for testing
+//! - **Session Context**: `SessionContext` - tracks active graph/schema
 //!
-//! - `SchemaCatalog`: Engine-facing entrypoint for obtaining schema snapshots
-//! - `SchemaSnapshot`: Immutable, query-time view of schema metadata
-//! - `GraphContextResolver`: Resolves active graph and schema for a session
-//! - `VariableTypeContextProvider`: Provides initial type bindings for validation
-//! - `SchemaFixtureLoader`: Loads test fixtures for regression testing
+//! # Usage
 //!
-//! All traits are `Send + Sync` and return typed errors instead of panicking.
+//! For validation with schema metadata, use `MockMetadataProvider` from
+//! the `metadata_provider` module, which implements the `MetadataProvider` trait.
 
 use crate::ast::types::ValueType;
-use crate::ast::Program;
 use smol_str::SmolStr;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
 
 // ============================================================================
 // Session Context
@@ -318,35 +312,6 @@ impl CatalogError {
     }
 }
 
-/// Errors that can occur during fixture loading.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FixtureError {
-    /// The fixture was not found
-    NotFound { fixture: SmolStr },
-    /// The fixture has invalid format
-    InvalidFormat { fixture: SmolStr, reason: SmolStr },
-    /// IO error during fixture loading
-    IoError { message: SmolStr },
-}
-
-impl std::fmt::Display for FixtureError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FixtureError::NotFound { fixture } => {
-                write!(f, "Fixture '{}' not found", fixture)
-            }
-            FixtureError::InvalidFormat { fixture, reason } => {
-                write!(f, "Invalid fixture '{}': {}", fixture, reason)
-            }
-            FixtureError::IoError { message } => {
-                write!(f, "Fixture I/O error: {}", message)
-            }
-        }
-    }
-}
-
-impl std::error::Error for FixtureError {}
-
 // ============================================================================
 // Graph References
 // ============================================================================
@@ -365,44 +330,9 @@ pub struct SchemaRef {
     pub name: SmolStr,
 }
 
-/// Request for a schema snapshot.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SchemaSnapshotRequest {
-    /// The graph to get schema for
-    pub graph: GraphRef,
-    /// Optional specific schema name
-    pub schema: Option<SchemaRef>,
-}
-
 // ============================================================================
-// Core Catalog Traits
+// Schema Snapshot Trait
 // ============================================================================
-
-/// Engine-facing entry point for obtaining schema snapshots.
-///
-/// This trait is implemented by database engines or test harnesses to provide
-/// immutable schema views for validation.
-///
-/// # Thread Safety
-///
-/// Implementations must be `Send + Sync` to support multi-threaded validation.
-///
-/// # Error Handling
-///
-/// All methods return typed `Result` types and must never panic.
-pub trait SchemaCatalog: Send + Sync {
-    /// Obtains an immutable schema snapshot for validation.
-    ///
-    /// # Arguments
-    ///
-    /// * `request` - Specifies which graph/schema to snapshot
-    ///
-    /// # Returns
-    ///
-    /// A reference-counted schema snapshot that remains valid for the
-    /// duration of validation, or an error if the snapshot cannot be created.
-    fn snapshot(&self, request: SchemaSnapshotRequest) -> Result<Arc<dyn SchemaSnapshot>, CatalogError>;
-}
 
 /// Immutable, query-time view of schema metadata.
 ///
@@ -454,51 +384,9 @@ pub trait SchemaSnapshot: Send + Sync {
     fn parents(&self, owner: TypeRef) -> &[TypeRef];
 }
 
-/// Resolves active graph and schema for a session.
-///
-/// This trait is used to determine which graph and schema should be used
-/// for validation based on session context (e.g., USE GRAPH statements).
-pub trait GraphContextResolver: Send + Sync {
-    /// Determines the active graph for a session.
-    ///
-    /// # Arguments
-    ///
-    /// * `session` - The session context (may contain USE GRAPH, etc.)
-    ///
-    /// # Returns
-    ///
-    /// The active graph reference, or an error if no graph is active.
-    fn active_graph(&self, session: &SessionContext) -> Result<GraphRef, CatalogError>;
-
-    /// Determines the active schema for a graph.
-    ///
-    /// # Arguments
-    ///
-    /// * `graph` - The graph to get schema for
-    ///
-    /// # Returns
-    ///
-    /// The active schema reference, or an error if no schema is available.
-    fn active_schema(&self, graph: &GraphRef) -> Result<SchemaRef, CatalogError>;
-}
-
-/// Provides variable type context for scope/type inference.
-///
-/// This trait is used during semantic validation to provide initial
-/// type bindings for variables based on catalog metadata.
-pub trait VariableTypeContextProvider: Send + Sync {
-    /// Provides initial variable type bindings for a program.
-    ///
-    /// # Arguments
-    ///
-    /// * `graph` - The active graph
-    /// * `ast` - The program AST to analyze
-    ///
-    /// # Returns
-    ///
-    /// Variable type context with initial bindings, or an error.
-    fn initial_bindings(&self, graph: &GraphRef, ast: &Program) -> Result<VariableTypeContext, CatalogError>;
-}
+// ============================================================================
+// Variable Type Context
+// ============================================================================
 
 /// Variable type context for validation.
 ///
@@ -534,112 +422,9 @@ impl Default for VariableTypeContext {
     }
 }
 
-/// Loads schema fixtures for testing.
-///
-/// This trait allows test suites to load schema definitions from
-/// fixture files without requiring a live database.
-pub trait SchemaFixtureLoader: Send + Sync {
-    /// Loads a schema snapshot from a fixture.
-    ///
-    /// # Arguments
-    ///
-    /// * `fixture` - The fixture identifier (e.g., "social_graph", "financial")
-    ///
-    /// # Returns
-    ///
-    /// A schema snapshot loaded from the fixture, or an error.
-    fn load(&self, fixture: &str) -> Result<Arc<dyn SchemaSnapshot>, FixtureError>;
-}
-
 // ============================================================================
-// In-Memory Test Implementations
+// In-Memory Test Implementation
 // ============================================================================
-
-/// In-memory schema catalog for testing.
-///
-/// This implementation stores schema snapshots in memory and is suitable
-/// for unit tests and integration tests.
-#[derive(Debug, Clone)]
-pub struct InMemorySchemaCatalog {
-    /// Stored snapshots by graph name
-    snapshots: HashMap<SmolStr, Arc<InMemorySchemaSnapshot>>,
-}
-
-impl InMemorySchemaCatalog {
-    /// Creates a new empty in-memory schema catalog.
-    pub fn new() -> Self {
-        Self {
-            snapshots: HashMap::new(),
-        }
-    }
-
-    /// Adds a schema snapshot for a graph.
-    pub fn add_snapshot(&mut self, graph: SmolStr, snapshot: InMemorySchemaSnapshot) {
-        self.snapshots.insert(graph, Arc::new(snapshot));
-    }
-}
-
-impl Default for InMemorySchemaCatalog {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl SchemaCatalog for InMemorySchemaCatalog {
-    fn snapshot(&self, request: SchemaSnapshotRequest) -> Result<Arc<dyn SchemaSnapshot>, CatalogError> {
-        self.snapshots
-            .get(&request.graph.name)
-            .map(|s| s.clone() as Arc<dyn SchemaSnapshot>)
-            .ok_or_else(|| CatalogError::GraphNotFound { graph: request.graph.name.clone() })
-    }
-}
-
-// Backward compatibility: InMemorySchemaCatalog implements MetadataProvider
-impl crate::semantic::metadata_provider::MetadataProvider for InMemorySchemaCatalog {
-    fn get_schema_snapshot(
-        &self,
-        graph: &GraphRef,
-        schema: Option<&SchemaRef>,
-    ) -> Result<Arc<dyn SchemaSnapshot>, CatalogError> {
-        let request = SchemaSnapshotRequest {
-            graph: graph.clone(),
-            schema: schema.cloned(),
-        };
-        self.snapshot(request)
-    }
-
-    fn resolve_active_graph(&self, session: &SessionContext) -> Result<GraphRef, CatalogError> {
-        if let Some(name) = &session.active_graph {
-            Ok(GraphRef { name: name.clone() })
-        } else {
-            // Return first available graph or default
-            self.snapshots.keys().next()
-                .map(|name| GraphRef { name: name.clone() })
-                .ok_or(CatalogError::GraphNotFound { graph: "default".into() })
-        }
-    }
-
-    fn resolve_active_schema(&self, _graph: &GraphRef) -> Result<SchemaRef, CatalogError> {
-        Ok(SchemaRef {
-            name: "public".into(),
-        })
-    }
-
-    fn validate_graph_exists(&self, name: &str) -> Result<(), CatalogError> {
-        if self.snapshots.contains_key(name) {
-            Ok(())
-        } else {
-            Err(CatalogError::GraphNotFound {
-                graph: name.into(),
-            })
-        }
-    }
-
-    fn lookup_callable(&self, _name: &str) -> Option<crate::semantic::callable::CallableSignature> {
-        None
-    }
-}
-
 
 /// In-memory schema snapshot for testing.
 ///
@@ -783,184 +568,6 @@ impl SchemaSnapshot for InMemorySchemaSnapshot {
                     .unwrap_or(&[])
             }
         }
-    }
-}
-
-/// Mock graph context resolver for testing.
-///
-/// This implementation allows tests to control which graph and schema
-/// are considered "active" without requiring a real database.
-#[derive(Debug, Clone)]
-pub struct MockGraphContextResolver {
-    /// The default graph to return
-    pub default_graph: GraphRef,
-    /// The default schema to return
-    pub default_schema: SchemaRef,
-}
-
-impl MockGraphContextResolver {
-    /// Creates a new mock resolver with the specified defaults.
-    pub fn new(graph: impl Into<SmolStr>, schema: impl Into<SmolStr>) -> Self {
-        Self {
-            default_graph: GraphRef { name: graph.into() },
-            default_schema: SchemaRef { name: schema.into() },
-        }
-    }
-}
-
-impl GraphContextResolver for MockGraphContextResolver {
-    fn active_graph(&self, _session: &SessionContext) -> Result<GraphRef, CatalogError> {
-        Ok(self.default_graph.clone())
-    }
-
-    fn active_schema(&self, _graph: &GraphRef) -> Result<SchemaRef, CatalogError> {
-        Ok(self.default_schema.clone())
-    }
-}
-
-/// Mock variable type context provider for testing.
-///
-/// This implementation returns an empty context by default, but can be
-/// configured to provide specific bindings.
-#[derive(Debug, Clone, Default)]
-pub struct MockVariableTypeContextProvider {
-    /// Pre-configured bindings
-    pub bindings: HashMap<SmolStr, ValueType>,
-}
-
-impl MockVariableTypeContextProvider {
-    /// Creates a new mock provider with no initial bindings.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Adds a pre-configured binding.
-    pub fn add_binding(&mut self, variable: impl Into<SmolStr>, value_type: ValueType) {
-        self.bindings.insert(variable.into(), value_type);
-    }
-}
-
-impl VariableTypeContextProvider for MockVariableTypeContextProvider {
-    fn initial_bindings(&self, _graph: &GraphRef, _ast: &Program) -> Result<VariableTypeContext, CatalogError> {
-        Ok(VariableTypeContext {
-            bindings: self.bindings.clone(),
-        })
-    }
-}
-
-// ============================================================================
-// Fixture Loader Implementation
-// ============================================================================
-
-/// In-memory fixture loader for testing.
-///
-/// This implementation provides pre-defined schema fixtures that can be
-/// loaded by name for regression testing.
-#[derive(Debug, Clone, Default)]
-pub struct InMemorySchemaFixtureLoader {
-    /// Registry of fixtures by name
-    fixtures: HashMap<SmolStr, Arc<InMemorySchemaSnapshot>>,
-}
-
-impl InMemorySchemaFixtureLoader {
-    /// Creates a new empty fixture loader.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Registers a fixture with the given name.
-    pub fn register(&mut self, name: impl Into<SmolStr>, snapshot: InMemorySchemaSnapshot) {
-        self.fixtures.insert(name.into(), Arc::new(snapshot));
-    }
-
-    /// Creates a fixture loader with standard test fixtures.
-    pub fn with_standard_fixtures() -> Self {
-        let mut loader = Self::new();
-
-        // Register "social_graph" fixture
-        let mut social = InMemorySchemaSnapshot::new();
-
-        // Person node type
-        let mut person_props = BTreeMap::new();
-        person_props.insert("name".into(), PropertyMeta::string("name", true));
-        person_props.insert("age".into(), PropertyMeta::int("age", false));
-        person_props.insert(
-            "email".into(),
-            PropertyMeta::string("email", false).with_constraint(PropertyConstraint::Unique)
-        );
-
-        social.add_node_type(NodeTypeMeta {
-            name: "Person".into(),
-            properties: person_props,
-            constraints: vec![ConstraintMeta::PrimaryKey {
-                properties: vec!["name".into()],
-            }],
-            parents: vec![],
-            metadata: HashMap::new(),
-        });
-
-        // KNOWS edge type
-        let mut knows_props = BTreeMap::new();
-        knows_props.insert("since".into(), PropertyMeta::date("since", false));
-
-        social.add_edge_type(EdgeTypeMeta {
-            name: "KNOWS".into(),
-            properties: knows_props,
-            constraints: vec![],
-            parents: vec![],
-            metadata: HashMap::new(),
-        });
-
-        loader.register("social_graph", social);
-
-        // Register "financial" fixture
-        let mut financial = InMemorySchemaSnapshot::new();
-
-        // Account node type
-        let mut account_props = BTreeMap::new();
-        account_props.insert(
-            "account_id".into(),
-            PropertyMeta::string("account_id", true).with_constraint(PropertyConstraint::Unique)
-        );
-        account_props.insert("balance".into(), PropertyMeta::decimal("balance", true, 18, 2));
-
-        financial.add_node_type(NodeTypeMeta {
-            name: "Account".into(),
-            properties: account_props,
-            constraints: vec![ConstraintMeta::PrimaryKey {
-                properties: vec!["account_id".into()],
-            }],
-            parents: vec![],
-            metadata: HashMap::new(),
-        });
-
-        // TRANSFER edge type
-        let mut transfer_props = BTreeMap::new();
-        transfer_props.insert("amount".into(), PropertyMeta::decimal("amount", true, 18, 2));
-        transfer_props.insert("timestamp".into(), PropertyMeta::datetime("timestamp", true));
-
-        financial.add_edge_type(EdgeTypeMeta {
-            name: "TRANSFER".into(),
-            properties: transfer_props,
-            constraints: vec![],
-            parents: vec![],
-            metadata: HashMap::new(),
-        });
-
-        loader.register("financial", financial);
-
-        loader
-    }
-}
-
-impl SchemaFixtureLoader for InMemorySchemaFixtureLoader {
-    fn load(&self, fixture: &str) -> Result<Arc<dyn SchemaSnapshot>, FixtureError> {
-        self.fixtures
-            .get(fixture)
-            .map(|s| s.clone() as Arc<dyn SchemaSnapshot>)
-            .ok_or_else(|| FixtureError::NotFound {
-                fixture: fixture.into(),
-            })
     }
 }
 
@@ -1152,118 +759,9 @@ impl EdgeTypeBuilder {
     }
 }
 
-// ============================================================================
-// Extended Fixture Examples
-// ============================================================================
-
-impl InMemorySchemaFixtureLoader {
-    /// Creates a fixture loader with extended fixtures including e-commerce and healthcare.
-    pub fn with_extended_fixtures() -> Self {
-        let mut loader = Self::with_standard_fixtures();
-
-        // E-commerce fixture
-        let ecommerce = SchemaSnapshotBuilder::new()
-            .with_node_type("Product", |builder| {
-                builder
-                    .add_property(PropertyMeta::string("product_id", true).with_constraint(PropertyConstraint::Unique))
-                    .add_property(PropertyMeta::string("name", true))
-                    .add_property(PropertyMeta::string("description", false))
-                    .add_property(PropertyMeta::decimal("price", true, 10, 2))
-                    .add_property(PropertyMeta::int("stock_quantity", true))
-                    .add_constraint(ConstraintMeta::PrimaryKey {
-                        properties: vec!["product_id".into()],
-                    })
-            })
-            .with_node_type("Customer", |builder| {
-                builder
-                    .add_property(PropertyMeta::string("customer_id", true).with_constraint(PropertyConstraint::Unique))
-                    .add_property(PropertyMeta::string("email", true).with_constraint(PropertyConstraint::Unique))
-                    .add_property(PropertyMeta::string("name", true))
-                    .add_property(PropertyMeta::string("phone", false))
-                    .add_constraint(ConstraintMeta::PrimaryKey {
-                        properties: vec!["customer_id".into()],
-                    })
-            })
-            .with_node_type("Order", |builder| {
-                builder
-                    .add_property(PropertyMeta::string("order_id", true).with_constraint(PropertyConstraint::Unique))
-                    .add_property(PropertyMeta::datetime("order_date", true))
-                    .add_property(PropertyMeta::string("status", true))
-                    .add_property(PropertyMeta::decimal("total_amount", true, 12, 2))
-                    .add_constraint(ConstraintMeta::PrimaryKey {
-                        properties: vec!["order_id".into()],
-                    })
-            })
-            .with_edge_type("CONTAINS", |builder| {
-                builder
-                    .add_property(PropertyMeta::int("quantity", true))
-                    .add_property(PropertyMeta::decimal("unit_price", true, 10, 2))
-            })
-            .with_edge_type("PLACED_BY", |builder| {
-                builder.add_property(PropertyMeta::datetime("timestamp", true))
-            })
-            .build();
-
-        loader.register("ecommerce", ecommerce);
-
-        // Healthcare fixture
-        let healthcare = SchemaSnapshotBuilder::new()
-            .with_node_type("Patient", |builder| {
-                builder
-                    .add_property(PropertyMeta::string("patient_id", true).with_constraint(PropertyConstraint::Unique))
-                    .add_property(PropertyMeta::string("name", true))
-                    .add_property(PropertyMeta::date("date_of_birth", true))
-                    .add_property(PropertyMeta::string("blood_type", false))
-                    .add_property(PropertyMeta::string("phone", false))
-                    .add_constraint(ConstraintMeta::PrimaryKey {
-                        properties: vec!["patient_id".into()],
-                    })
-            })
-            .with_node_type("Doctor", |builder| {
-                builder
-                    .add_property(PropertyMeta::string("doctor_id", true).with_constraint(PropertyConstraint::Unique))
-                    .add_property(PropertyMeta::string("name", true))
-                    .add_property(PropertyMeta::string("specialty", true))
-                    .add_property(PropertyMeta::string("license_number", true).with_constraint(PropertyConstraint::Unique))
-                    .add_constraint(ConstraintMeta::PrimaryKey {
-                        properties: vec!["doctor_id".into()],
-                    })
-            })
-            .with_node_type("Appointment", |builder| {
-                builder
-                    .add_property(PropertyMeta::string("appointment_id", true).with_constraint(PropertyConstraint::Unique))
-                    .add_property(PropertyMeta::datetime("scheduled_time", true))
-                    .add_property(PropertyMeta::string("status", true))
-                    .add_property(PropertyMeta::string("notes", false))
-                    .add_constraint(ConstraintMeta::PrimaryKey {
-                        properties: vec!["appointment_id".into()],
-                    })
-            })
-            .with_edge_type("HAS_APPOINTMENT", |builder| {
-                builder.add_property(PropertyMeta::datetime("created_at", true))
-            })
-            .with_edge_type("TREATS", |builder| {
-                builder
-                    .add_property(PropertyMeta::date("treatment_date", true))
-                    .add_property(PropertyMeta::string("diagnosis", false))
-            })
-            .build();
-
-        loader.register("healthcare", healthcare);
-
-        loader
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_in_memory_catalog_creation() {
-        let catalog = InMemorySchemaCatalog::new();
-        assert!(catalog.snapshots.is_empty());
-    }
 
     #[test]
     fn test_in_memory_snapshot_example() {
@@ -1314,50 +812,17 @@ mod tests {
     }
 
     #[test]
-    fn test_catalog_snapshot_retrieval() {
-        let mut catalog = InMemorySchemaCatalog::new();
-        let snapshot = InMemorySchemaSnapshot::example();
-        catalog.add_snapshot("test_graph".into(), snapshot);
+    fn test_session_context_creation() {
+        let ctx = SessionContext::new();
+        assert!(ctx.active_graph.is_none());
+        assert!(ctx.active_schema.is_none());
 
-        let request = SchemaSnapshotRequest {
-            graph: GraphRef { name: "test_graph".into() },
-            schema: None,
+        let ctx2 = SessionContext {
+            active_graph: Some("mygraph".into()),
+            active_schema: Some("myschema".into()),
         };
-
-        let result = catalog.snapshot(request);
-        assert!(result.is_ok());
-
-        let snapshot = result.unwrap();
-        assert!(snapshot.node_type("Person").is_some());
-    }
-
-    #[test]
-    fn test_catalog_missing_graph() {
-        let catalog = InMemorySchemaCatalog::new();
-
-        let request = SchemaSnapshotRequest {
-            graph: GraphRef { name: "nonexistent".into() },
-            schema: None,
-        };
-
-        let result = catalog.snapshot(request);
-        assert!(result.is_err());
-        if let Err(e) = result {
-            assert!(matches!(e, CatalogError::GraphNotFound { .. }));
-        }
-    }
-
-    #[test]
-    fn test_mock_graph_context_resolver() {
-        let resolver = MockGraphContextResolver::new("my_graph", "my_schema");
-
-        let session = SessionContext::new();
-
-        let graph = resolver.active_graph(&session).unwrap();
-        assert_eq!(graph.name, "my_graph");
-
-        let schema = resolver.active_schema(&graph).unwrap();
-        assert_eq!(schema.name, "my_schema");
+        assert_eq!(ctx2.active_graph.unwrap(), "mygraph");
+        assert_eq!(ctx2.active_schema.unwrap(), "myschema");
     }
 
     #[test]
@@ -1379,29 +844,6 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_variable_type_context_provider() {
-        let mut provider = MockVariableTypeContextProvider::new();
-
-        let string_type = ValueType::Predefined(
-            crate::ast::types::PredefinedType::CharacterString(
-                crate::ast::types::CharacterStringType::String
-            ),
-            0..0,
-        );
-
-        provider.add_binding("x", string_type);
-
-        let graph = GraphRef { name: "test".into() };
-        let ast = Program {
-            statements: vec![],
-            span: 0..0,
-        };
-
-        let context = provider.initial_bindings(&graph, &ast).unwrap();
-        assert!(context.get("x").is_some());
-    }
-
-    #[test]
     fn test_type_ref_equality() {
         let node_ref1 = TypeRef::NodeType("Person".into());
         let node_ref2 = TypeRef::NodeType("Person".into());
@@ -1412,80 +854,91 @@ mod tests {
     }
 
     #[test]
-    fn test_fixture_loader_creation() {
-        let loader = InMemorySchemaFixtureLoader::new();
-        assert!(loader.fixtures.is_empty());
+    fn test_property_inheritance() {
+        let mut snapshot = InMemorySchemaSnapshot::new();
+
+        // Create a base Entity type
+        let mut base_props = BTreeMap::new();
+        base_props.insert("id".into(), PropertyMeta::string("id", true));
+        base_props.insert("created_at".into(), PropertyMeta::datetime("created_at", true));
+
+        snapshot.add_node_type(NodeTypeMeta {
+            name: "Entity".into(),
+            properties: base_props,
+            constraints: vec![],
+            parents: vec![],
+            metadata: HashMap::new(),
+        });
+
+        // Create a Person type that inherits from Entity
+        let mut person_props = BTreeMap::new();
+        person_props.insert("name".into(), PropertyMeta::string("name", true));
+
+        snapshot.add_node_type(NodeTypeMeta {
+            name: "Person".into(),
+            properties: person_props,
+            constraints: vec![],
+            parents: vec![TypeRef::NodeType("Entity".into())],
+            metadata: HashMap::new(),
+        });
+
+        // Test direct properties
+        assert!(snapshot.property(TypeRef::NodeType("Person".into()), "name").is_some());
+
+        // Test inherited properties
+        assert!(snapshot.property(TypeRef::NodeType("Person".into()), "id").is_some());
+        assert!(snapshot.property(TypeRef::NodeType("Person".into()), "created_at").is_some());
+
+        // Test non-existent property
+        assert!(snapshot.property(TypeRef::NodeType("Person".into()), "nonexistent").is_none());
     }
 
     #[test]
-    fn test_fixture_loader_register_and_load() {
-        let mut loader = InMemorySchemaFixtureLoader::new();
-        let snapshot = InMemorySchemaSnapshot::example();
-        loader.register("test", snapshot);
+    fn test_schema_snapshot_builder() {
+        let snapshot = SchemaSnapshotBuilder::new()
+            .with_node_type("User", |builder| {
+                builder
+                    .add_property(PropertyMeta::string("username", true))
+                    .add_property(PropertyMeta::string("email", true))
+                    .add_constraint(ConstraintMeta::PrimaryKey {
+                        properties: vec!["username".into()],
+                    })
+            })
+            .with_edge_type("FOLLOWS", |builder| {
+                builder.add_property(PropertyMeta::datetime("since", true))
+            })
+            .build();
 
-        let loaded = loader.load("test");
-        assert!(loaded.is_ok());
+        assert!(snapshot.node_type("User").is_some());
+        assert!(snapshot.edge_type("FOLLOWS").is_some());
 
-        let snapshot = loaded.unwrap();
-        assert!(snapshot.node_type("Person").is_some());
+        let user = snapshot.node_type("User").unwrap();
+        assert_eq!(user.properties.len(), 2);
+        assert_eq!(user.constraints.len(), 1);
     }
 
     #[test]
-    fn test_fixture_loader_missing_fixture() {
-        let loader = InMemorySchemaFixtureLoader::new();
-        let result = loader.load("nonexistent");
-        assert!(result.is_err());
-        if let Err(e) = result {
-            assert!(matches!(e, FixtureError::NotFound { .. }));
-        }
-    }
+    fn test_property_meta_builders() {
+        let string_prop = PropertyMeta::string("name", true);
+        assert!(string_prop.required);
+        assert_eq!(string_prop.name, "name");
+        assert!(string_prop.constraints.is_empty());
 
-    #[test]
-    fn test_fixture_loader_standard_fixtures() {
-        let loader = InMemorySchemaFixtureLoader::with_standard_fixtures();
+        let int_prop = PropertyMeta::int("age", false);
+        assert!(!int_prop.required);
 
-        // Test social_graph fixture
-        let social = loader.load("social_graph").unwrap();
-        assert!(social.node_type("Person").is_some());
-        assert!(social.edge_type("KNOWS").is_some());
+        let decimal_prop = PropertyMeta::decimal("price", true, 10, 2);
+        assert!(decimal_prop.required);
 
-        let person = social.node_type("Person").unwrap();
-        assert!(person.properties.contains_key("name"));
-        assert!(person.properties.contains_key("age"));
-        assert!(person.properties.contains_key("email"));
+        let date_prop = PropertyMeta::date("birth_date", false);
+        assert!(!date_prop.required);
 
-        // Check constraints
-        assert_eq!(person.constraints.len(), 1);
-        assert!(matches!(
-            &person.constraints[0],
-            ConstraintMeta::PrimaryKey { .. }
-        ));
+        let datetime_prop = PropertyMeta::datetime("created_at", true);
+        assert!(datetime_prop.required);
 
-        // Test financial fixture
-        let financial = loader.load("financial").unwrap();
-        assert!(financial.node_type("Account").is_some());
-        assert!(financial.edge_type("TRANSFER").is_some());
-
-        let account = financial.node_type("Account").unwrap();
-        assert!(account.properties.contains_key("account_id"));
-        assert!(account.properties.contains_key("balance"));
-
-        let transfer = financial.edge_type("TRANSFER").unwrap();
-        assert!(transfer.properties.contains_key("amount"));
-        assert!(transfer.properties.contains_key("timestamp"));
-    }
-
-    #[test]
-    fn test_session_context_creation() {
-        let ctx = SessionContext::new();
-        assert!(ctx.active_graph.is_none());
-        assert!(ctx.active_schema.is_none());
-
-        let ctx2 = SessionContext {
-            active_graph: Some("mygraph".into()),
-            active_schema: Some("myschema".into()),
-        };
-        assert_eq!(ctx2.active_graph.unwrap(), "mygraph");
-        assert_eq!(ctx2.active_schema.unwrap(), "myschema");
+        // Test with_constraint
+        let unique_prop = PropertyMeta::string("email", true)
+            .with_constraint(PropertyConstraint::Unique);
+        assert_eq!(unique_prop.constraints.len(), 1);
     }
 }

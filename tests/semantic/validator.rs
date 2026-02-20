@@ -1293,7 +1293,7 @@ fn test_edge_case_mixed_aggregates_and_literals() {
 
 #[test]
 fn test_schema_validation_valid_label() {
-    use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
+    use gql_parser::semantic::metadata_provider::MockMetadataProvider;
 
     // Valid node label in schema
     let source = "MATCH (n:Person) RETURN n";
@@ -1305,7 +1305,7 @@ fn test_schema_validation_valid_label() {
     );
 
     if let Some(program) = parse_result.ast {
-        let metadata = InMemoryMetadataProvider::example();
+        let metadata = MockMetadataProvider::example();
         let validator = SemanticValidator::new().with_metadata_provider(&metadata);
         let result = validator.validate(&program);
 
@@ -1319,7 +1319,7 @@ fn test_schema_validation_valid_label() {
 
 #[test]
 fn test_schema_validation_invalid_label() {
-    use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
+    use gql_parser::semantic::metadata_provider::MockMetadataProvider;
 
     // Invalid node label not in schema
     let source = "MATCH (n:Alien) RETURN n";
@@ -1331,7 +1331,7 @@ fn test_schema_validation_invalid_label() {
     );
 
     if let Some(program) = parse_result.ast {
-        let metadata = InMemoryMetadataProvider::example();
+        let metadata = MockMetadataProvider::example();
         let validator = SemanticValidator::new().with_metadata_provider(&metadata);
         let result = validator.validate(&program);
 
@@ -1345,7 +1345,7 @@ fn test_schema_validation_invalid_label() {
 
 #[test]
 fn test_schema_validation_valid_edge_label() {
-    use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
+    use gql_parser::semantic::metadata_provider::MockMetadataProvider;
 
     // Valid edge label in schema
     let source = "MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a, b";
@@ -1357,7 +1357,7 @@ fn test_schema_validation_valid_edge_label() {
     );
 
     if let Some(program) = parse_result.ast {
-        let metadata = InMemoryMetadataProvider::example();
+        let metadata = MockMetadataProvider::example();
         let validator = SemanticValidator::new().with_metadata_provider(&metadata);
         let result = validator.validate(&program);
 
@@ -1371,7 +1371,7 @@ fn test_schema_validation_valid_edge_label() {
 
 #[test]
 fn test_schema_validation_invalid_edge_label() {
-    use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
+    use gql_parser::semantic::metadata_provider::MockMetadataProvider;
 
     // Invalid edge label not in schema
     let source = "MATCH (a:Person)-[:HATES]->(b:Person) RETURN a, b";
@@ -1383,7 +1383,7 @@ fn test_schema_validation_invalid_edge_label() {
     );
 
     if let Some(program) = parse_result.ast {
-        let metadata = InMemoryMetadataProvider::example();
+        let metadata = MockMetadataProvider::example();
         let validator = SemanticValidator::new().with_metadata_provider(&metadata);
         let result = validator.validate(&program);
 
@@ -1417,7 +1417,7 @@ fn test_schema_validation_without_schema() {
 
 #[test]
 fn test_schema_validation_multiple_labels() {
-    use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
+    use gql_parser::semantic::metadata_provider::MockMetadataProvider;
 
     // Multiple labels - mix of valid and invalid
     let source = "MATCH (a:Person), (b:Alien) RETURN a, b";
@@ -1429,7 +1429,7 @@ fn test_schema_validation_multiple_labels() {
     );
 
     if let Some(program) = parse_result.ast {
-        let metadata = InMemoryMetadataProvider::example();
+        let metadata = MockMetadataProvider::example();
         let validator = SemanticValidator::new().with_metadata_provider(&metadata);
         let result = validator.validate(&program);
 
@@ -1468,10 +1468,10 @@ fn test_catalog_validation_without_catalog() {
 
 #[test]
 fn test_catalog_mock_creation() {
-    use gql_parser::semantic::metadata_provider::{InMemoryMetadataProvider, MetadataProvider};
+    use gql_parser::semantic::metadata_provider::{MockMetadataProvider, MetadataProvider};
 
     // Test metadata provider creation
-    let metadata = InMemoryMetadataProvider::example();
+    let metadata = MockMetadataProvider::example();
 
     // Verify example provider has expected entries (schema snapshot for default graph)
     use gql_parser::semantic::schema_catalog::GraphRef;

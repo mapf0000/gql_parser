@@ -10,7 +10,7 @@ use gql_parser::semantic::callable::{
     CallableSignature, CallableKind,
     ParameterSignature, Volatility, Nullability,
 };
-use gql_parser::semantic::metadata_provider::{MetadataProvider, InMemoryMetadataProvider};
+use gql_parser::semantic::metadata_provider::{MetadataProvider, MockMetadataProvider};
 use smol_str::SmolStr;
 
 fn validate_with_procedures(source: &str, catalog: &impl MetadataProvider)
@@ -50,7 +50,7 @@ fn test_builtin_procedure_validates() {
     let source = "CALL abs(-5) RETURN 1";
 
     // Use metadata provider which has built-ins
-    let catalog = InMemoryMetadataProvider::new();
+    let catalog = MockMetadataProvider::new();
     let outcome = validate_with_procedures(source, &catalog);
 
     assert!(outcome.is_success(), "Diagnostics: {:?}", outcome.diagnostics);
@@ -60,7 +60,7 @@ fn test_builtin_procedure_validates() {
 fn test_unknown_procedure_fails_with_validation_enabled() {
     let source = "CALL nonexistent_procedure() RETURN 1";
 
-    let catalog = InMemoryMetadataProvider::new();
+    let catalog = MockMetadataProvider::new();
     let outcome = validate_with_procedures(source, &catalog);
 
     // Debug output
@@ -79,7 +79,7 @@ fn test_unknown_procedure_fails_with_validation_enabled() {
 
 #[test]
 fn test_procedure_with_correct_arity_validates() {
-    let mut catalog = InMemoryMetadataProvider::new();
+    let mut catalog = MockMetadataProvider::new();
 
     // Register a procedure that takes 2 arguments
     catalog.add_callable("my_proc", CallableSignature {
@@ -112,7 +112,7 @@ fn test_procedure_with_correct_arity_validates() {
 
 #[test]
 fn test_procedure_with_wrong_arity_fails() {
-    let mut catalog = InMemoryMetadataProvider::new();
+    let mut catalog = MockMetadataProvider::new();
 
     catalog.add_callable("my_proc", CallableSignature {
         name: SmolStr::new("my_proc"),
@@ -145,7 +145,7 @@ fn test_optional_call_validates() {
     let source = "OPTIONAL CALL abs(5) RETURN 1";
 
     // Built-ins are always available (checked directly by validator)
-    let catalog = InMemoryMetadataProvider::new();
+    let catalog = MockMetadataProvider::new();
     let outcome = validate_with_procedures(source, &catalog);
 
     assert!(outcome.is_success(), "Diagnostics: {:?}", outcome.diagnostics);
@@ -155,7 +155,7 @@ fn test_optional_call_validates() {
 
 #[test]
 fn test_yield_valid_field_validates() {
-    let mut catalog = InMemoryMetadataProvider::new();
+    let mut catalog = MockMetadataProvider::new();
 
     catalog.add_callable("my_proc", CallableSignature {
         name: SmolStr::new("my_proc"),
@@ -174,7 +174,7 @@ fn test_yield_valid_field_validates() {
 
 #[test]
 fn test_yield_invalid_field_fails() {
-    let mut catalog = InMemoryMetadataProvider::new();
+    let mut catalog = MockMetadataProvider::new();
 
     catalog.add_callable("my_proc", CallableSignature {
         name: SmolStr::new("my_proc"),
@@ -238,7 +238,7 @@ fn test_inline_procedure_out_of_scope_variable_fails() {
 // Test 11: YIELD with renaming (YIELD field AS alias)
 #[test]
 fn test_yield_with_alias_validates() {
-    let mut catalog = InMemoryMetadataProvider::new();
+    let mut catalog = MockMetadataProvider::new();
 
     catalog.add_callable("my_proc", CallableSignature {
         name: SmolStr::new("my_proc"),
@@ -258,7 +258,7 @@ fn test_yield_with_alias_validates() {
 // Test 12: YIELD multiple fields
 #[test]
 fn test_yield_multiple_fields_validates() {
-    let mut catalog = InMemoryMetadataProvider::new();
+    let mut catalog = MockMetadataProvider::new();
 
     // For simplicity, we'll use a single return type representing multiple fields
     // In a real implementation, procedures might return records/tuples
@@ -281,7 +281,7 @@ fn test_yield_multiple_fields_validates() {
 // Note: This depends on parser support for YIELD *
 #[test]
 fn test_yield_star_validates() {
-    let mut catalog = InMemoryMetadataProvider::new();
+    let mut catalog = MockMetadataProvider::new();
 
     catalog.add_callable("my_proc", CallableSignature {
         name: SmolStr::new("my_proc"),
@@ -306,7 +306,7 @@ fn test_yield_star_validates() {
 // Test 14: Named procedure with variadic arguments
 #[test]
 fn test_procedure_with_variadic_arguments() {
-    let mut catalog = InMemoryMetadataProvider::new();
+    let mut catalog = MockMetadataProvider::new();
 
     catalog.add_callable("variadic_proc", CallableSignature {
         name: SmolStr::new("variadic_proc"),
@@ -340,7 +340,7 @@ fn test_procedure_with_variadic_arguments() {
 // Test 15: Procedure with optional parameters
 #[test]
 fn test_procedure_with_optional_parameters() {
-    let mut catalog = InMemoryMetadataProvider::new();
+    let mut catalog = MockMetadataProvider::new();
 
     catalog.add_callable("optional_proc", CallableSignature {
         name: SmolStr::new("optional_proc"),
@@ -403,7 +403,7 @@ fn test_inline_procedure_multiple_imported_variables() {
 // Test 18: Optional CALL with variable scope after call
 #[test]
 fn test_optional_call_variable_scope() {
-    let mut catalog = InMemoryMetadataProvider::new();
+    let mut catalog = MockMetadataProvider::new();
 
     catalog.add_callable("my_proc", CallableSignature {
         name: SmolStr::new("my_proc"),
@@ -423,7 +423,7 @@ fn test_optional_call_variable_scope() {
 // Test 19: Procedure call with expression arguments
 #[test]
 fn test_procedure_call_with_expression_arguments() {
-    let mut catalog = InMemoryMetadataProvider::new();
+    let mut catalog = MockMetadataProvider::new();
 
     catalog.add_callable("math_proc", CallableSignature {
         name: SmolStr::new("math_proc"),
@@ -473,7 +473,7 @@ fn test_nested_inline_procedure_calls() {
 // Test 21: Procedure call followed by other clauses
 #[test]
 fn test_procedure_call_with_chained_clauses() {
-    let mut catalog = InMemoryMetadataProvider::new();
+    let mut catalog = MockMetadataProvider::new();
 
     catalog.add_callable("filter_proc", CallableSignature {
         name: SmolStr::new("filter_proc"),
@@ -493,7 +493,7 @@ fn test_procedure_call_with_chained_clauses() {
 // Test 22: CALL without YIELD should still validate
 #[test]
 fn test_procedure_call_without_yield() {
-    let mut catalog = InMemoryMetadataProvider::new();
+    let mut catalog = MockMetadataProvider::new();
 
     catalog.add_callable("side_effect_proc", CallableSignature {
         name: SmolStr::new("side_effect_proc"),
@@ -513,7 +513,7 @@ fn test_procedure_call_without_yield() {
 // Test 23: Procedure with null handling (NullOnNullInput)
 #[test]
 fn test_procedure_null_handling() {
-    let mut catalog = InMemoryMetadataProvider::new();
+    let mut catalog = MockMetadataProvider::new();
 
     catalog.add_callable("null_aware_proc", CallableSignature {
         name: SmolStr::new("null_aware_proc"),
@@ -544,7 +544,7 @@ fn test_procedure_null_handling() {
 // Test 24: Verify too few arguments fails
 #[test]
 fn test_procedure_with_too_few_arguments_fails() {
-    let mut catalog = InMemoryMetadataProvider::new();
+    let mut catalog = MockMetadataProvider::new();
 
     catalog.add_callable("two_arg_proc", CallableSignature {
         name: SmolStr::new("two_arg_proc"),
@@ -594,7 +594,7 @@ fn test_inline_procedure_outer_scope_expression() {
 // Test 26: Optional procedure failure handling - calling non-existent procedure with OPTIONAL
 #[test]
 fn test_optional_procedure_failure_handling() {
-    let catalog = InMemoryMetadataProvider::new();
+    let catalog = MockMetadataProvider::new();
 
     // Call a non-existent procedure with OPTIONAL modifier
     // This should validate (OPTIONAL means the failure is acceptable)

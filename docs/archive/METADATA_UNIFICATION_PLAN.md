@@ -38,7 +38,7 @@ pub trait MetadataProvider: Send + Sync {
 
 ### 2. Test Implementation ✅
 
-Created `InMemoryMetadataProvider` with:
+Created `MockMetadataProvider` with:
 - Schema snapshot management
 - Callable signature storage
 - Property type metadata
@@ -94,7 +94,7 @@ validator
 Tests should use only:
 ```rust
 // ✅ NEW - unified API
-let metadata = InMemoryMetadataProvider::example();
+let metadata = MockMetadataProvider::example();
 let validator = SemanticValidator::new()
     .with_metadata_provider(&metadata);
 ```
@@ -111,7 +111,7 @@ The following test files need updates:
 
 2. **tests/semantic/schema_integration.rs**
    - Replace: `with_schema_catalog()` → `with_metadata_provider()`
-   - Use: `InMemoryMetadataProvider` instead of `InMemorySchemaCatalog`
+   - Use: `MockMetadataProvider` instead of `InMemorySchemaCatalog`
 
 3. **tests/semantic/mutation_validation.rs**
    - Update: `ValidationConfig { metadata_validation: true, ... }`
@@ -124,7 +124,7 @@ The following test files need updates:
 
 5. **tests/semantic/type_inference.rs**
    - Replace: `with_type_metadata()` → `with_metadata_provider()`
-   - Use: `InMemoryMetadataProvider` for property type tests
+   - Use: `MockMetadataProvider` for property type tests
 
 6. **tests/semantic/procedure_validation.rs**
    - Already uses `with_metadata_provider(&catalog)` ✅
@@ -184,7 +184,7 @@ let config = ValidationConfig {
 **DO:**
 ```rust
 // Create unified metadata provider
-let mut metadata = InMemoryMetadataProvider::new();
+let mut metadata = MockMetadataProvider::new();
 
 // Add schema
 let snapshot = InMemorySchemaSnapshot::example();
@@ -288,7 +288,7 @@ Expected result: **All commands should produce no output** (except `cargo test` 
 1. **Simplicity**: One trait, one injection point
 2. **Consistency**: Single metadata snapshot across all validation
 3. **Thread-safe**: `Send + Sync` bounds
-4. **Testability**: `InMemoryMetadataProvider` for unit tests
+4. **Testability**: `MockMetadataProvider` for unit tests
 5. **Flexibility**: Default implementations for optional features
 6. **Performance**: Arc-based sharing of immutable snapshots
 7. **Clean API**: No backward compatibility hacks in production code

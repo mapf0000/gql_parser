@@ -277,9 +277,9 @@ fn main() {
     println!("\n\nPart 9: Integration with SemanticValidator");
     println!("------------------------------------------");
 
-    // Use InMemoryMetadataProvider or custom MetadataProvider implementation
-    use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
-    let metadata = InMemoryMetadataProvider::example();
+    // Use MockMetadataProvider or custom MetadataProvider implementation
+    use gql_parser::semantic::metadata_provider::MockMetadataProvider;
+    let metadata = MockMetadataProvider::example();
 
     let _validator = SemanticValidator::new()
         .with_metadata_provider(&metadata);

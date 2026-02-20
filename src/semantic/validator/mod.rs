@@ -110,9 +110,9 @@ impl<'m> SemanticValidator<'m> {
     /// # Example
     ///
     /// ```ignore
-    /// use gql_parser::semantic::{SemanticValidator, metadata_provider::InMemoryMetadataProvider};
+    /// use gql_parser::semantic::{SemanticValidator, metadata_provider::MockMetadataProvider};
     ///
-    /// let metadata = InMemoryMetadataProvider::example();
+    /// let metadata = MockMetadataProvider::example();
     /// let validator = SemanticValidator::new()
     ///     .with_metadata_provider(&metadata);
     /// ```

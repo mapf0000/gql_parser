@@ -1,51 +1,47 @@
-//! Example demonstrating Milestone 3: Advanced Schema Catalog System
+//! Example demonstrating the Schema Catalog System with MetadataProvider.
 //!
-//! This example shows how to use the new schema catalog system for
-//! schema-aware validation with property types, constraints, and inheritance.
+//! This example shows how to use the metadata provider for schema-aware
+//! validation with property types, constraints, and inheritance.
 
 use gql_parser::{
     parse,
     semantic::{
         schema_catalog::{
-            InMemorySchemaCatalog, InMemorySchemaSnapshot, MockGraphContextResolver,
-            MockVariableTypeContextProvider, SchemaSnapshotRequest, GraphRef,
-            InMemorySchemaFixtureLoader, SchemaFixtureLoader, SchemaCatalog,
+            InMemorySchemaSnapshot, GraphRef,
         },
+        metadata_provider::{MockMetadataProvider, MetadataProvider},
         SemanticValidator,
     },
 };
 
 fn main() {
-    println!("=== Milestone 3: Advanced Schema Catalog Example ===\n");
+    println!("=== Schema Catalog with MetadataProvider Example ===\n");
 
-    // Example 1: Using InMemorySchemaCatalog with example schema
-    example_1_basic_catalog();
+    // Example 1: Using MockMetadataProvider with example schema
+    example_1_basic_metadata_provider();
 
-    // Example 2: Using SchemaFixtureLoader with standard fixtures
-    example_2_fixture_loader();
+    // Example 2: Using standard fixtures
+    example_2_standard_fixtures();
 
     // Example 3: Integrating with SemanticValidator
     example_3_validator_integration();
 }
 
-fn example_1_basic_catalog() {
-    println!("Example 1: Basic Schema Catalog");
-    println!("--------------------------------");
+fn example_1_basic_metadata_provider() {
+    println!("Example 1: Basic Metadata Provider");
+    println!("-----------------------------------");
 
-    // Create an in-memory catalog
-    let mut catalog = InMemorySchemaCatalog::new();
+    // Create a metadata provider
+    let mut provider = MockMetadataProvider::new();
 
     // Add a schema snapshot for a graph
     let snapshot = InMemorySchemaSnapshot::example();
-    catalog.add_snapshot("social_graph".into(), snapshot);
+    provider.add_schema_snapshot("social_graph", snapshot);
 
     // Retrieve the snapshot
-    let request = SchemaSnapshotRequest {
-        graph: GraphRef { name: "social_graph".into() },
-        schema: None,
-    };
+    let graph = GraphRef { name: "social_graph".into() };
 
-    match catalog.snapshot(request) {
+    match provider.get_schema_snapshot(&graph, None) {
         Ok(snapshot) => {
             println!("✓ Successfully retrieved schema snapshot for 'social_graph'");
 
@@ -69,15 +65,16 @@ fn example_1_basic_catalog() {
     println!();
 }
 
-fn example_2_fixture_loader() {
-    println!("Example 2: Schema Fixture Loader");
-    println!("--------------------------------");
+fn example_2_standard_fixtures() {
+    println!("Example 2: Standard Fixtures");
+    println!("----------------------------");
 
-    // Create fixture loader with standard fixtures
-    let loader = InMemorySchemaFixtureLoader::with_standard_fixtures();
+    // Create provider with standard fixtures
+    let provider = MockMetadataProvider::with_standard_fixtures();
 
-    // Load social_graph fixture
-    match loader.load("social_graph") {
+    // Access social_graph fixture
+    let graph = GraphRef { name: "social_graph".into() };
+    match provider.get_schema_snapshot(&graph, None) {
         Ok(snapshot) => {
             println!("✓ Loaded 'social_graph' fixture");
 
@@ -96,8 +93,9 @@ fn example_2_fixture_loader() {
         }
     }
 
-    // Load financial fixture
-    match loader.load("financial") {
+    // Access financial fixture
+    let graph = GraphRef { name: "financial".into() };
+    match provider.get_schema_snapshot(&graph, None) {
         Ok(snapshot) => {
             println!("✓ Loaded 'financial' fixture");
 
@@ -129,20 +127,14 @@ fn example_3_validator_integration() {
     println!("Example 3: Validator Integration");
     println!("--------------------------------");
 
-    // Create schema catalog
-    let mut catalog = InMemorySchemaCatalog::new();
+    // Create metadata provider
+    let mut provider = MockMetadataProvider::new();
     let snapshot = InMemorySchemaSnapshot::example();
-    catalog.add_snapshot("social_graph".into(), snapshot);
-
-    // Create graph context resolver
-    let resolver = MockGraphContextResolver::new("social_graph", "default_schema");
-
-    // Create variable type context provider
-    let type_provider = MockVariableTypeContextProvider::new();
+    provider.add_schema_snapshot("social_graph", snapshot);
 
     // Create validator with metadata provider
     let validator = SemanticValidator::new()
-        .with_metadata_provider(&catalog);
+        .with_metadata_provider(&provider);
 
     // Parse and validate a query
     let query = "MATCH (p:Person) RETURN p.name, p.age";

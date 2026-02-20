@@ -1,17 +1,20 @@
-//! Example demonstrating advanced Milestone 3 features:
+//! Example demonstrating advanced schema features:
 //! - SchemaSnapshotBuilder for easy schema creation
 //! - Extended fixtures (e-commerce, healthcare)
 //! - Property inheritance
 
-use gql_parser::semantic::schema_catalog::{
-    InMemorySchemaFixtureLoader, SchemaFixtureLoader, SchemaSnapshotBuilder, SchemaSnapshot,
-    PropertyMeta, ConstraintMeta, TypeRef, PropertyConstraint,
-    InMemorySchemaSnapshot, NodeTypeMeta,
+use gql_parser::semantic::{
+    schema_catalog::{
+        SchemaSnapshotBuilder, SchemaSnapshot,
+        PropertyMeta, ConstraintMeta, TypeRef, PropertyConstraint,
+        InMemorySchemaSnapshot, NodeTypeMeta, GraphRef,
+    },
+    metadata_provider::{MockMetadataProvider, MetadataProvider},
 };
 use std::collections::{BTreeMap, HashMap};
 
 fn main() {
-    println!("=== Milestone 3: Advanced Features Example ===\n");
+    println!("=== Advanced Schema Features Example ===\n");
 
     // Example 1: Using SchemaSnapshotBuilder
     example_1_schema_builder();
@@ -76,11 +79,12 @@ fn example_2_extended_fixtures() {
     println!("Example 2: Extended Fixtures");
     println!("----------------------------");
 
-    let loader = InMemorySchemaFixtureLoader::with_extended_fixtures();
+    let provider = MockMetadataProvider::with_extended_fixtures();
 
     // E-commerce fixture
     println!("E-commerce Schema:");
-    match loader.load("ecommerce") {
+    let ecommerce_graph = GraphRef { name: "ecommerce".into() };
+    match provider.get_schema_snapshot(&ecommerce_graph, None) {
         Ok(snapshot) => {
             println!("✓ Loaded e-commerce fixture");
 
@@ -107,7 +111,8 @@ fn example_2_extended_fixtures() {
 
     // Healthcare fixture
     println!("Healthcare Schema:");
-    match loader.load("healthcare") {
+    let healthcare_graph = GraphRef { name: "healthcare".into() };
+    match provider.get_schema_snapshot(&healthcare_graph, None) {
         Ok(snapshot) => {
             println!("✓ Loaded healthcare fixture");
 

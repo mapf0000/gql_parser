@@ -6,7 +6,7 @@
 //!
 //! Key features demonstrated:
 //! - Built-in function lookup with standard GQL functions (zero-cost direct lookup)
-//! - Custom function registration with InMemoryMetadataProvider
+//! - Custom function registration with MockMetadataProvider
 //! - Arity validation for function calls
 //! - Integration with SemanticValidator
 //!
@@ -17,7 +17,7 @@ use gql_parser::semantic::callable::{
     CallableSignature, CallableValidator, DefaultCallableValidator,
     Nullability, ParameterSignature, Volatility,
 };
-use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
+use gql_parser::semantic::metadata_provider::MockMetadataProvider;
 use gql_parser::semantic::SemanticValidator;
 
 fn main() {
@@ -111,7 +111,7 @@ fn main() {
     println!("\n\nPart 3: Custom Function Registration");
     println!("------------------------------------");
 
-    let mut metadata_provider = InMemoryMetadataProvider::new();
+    let mut metadata_provider = MockMetadataProvider::new();
 
     // Register a custom function: DISTANCE(lat1, lon1, lat2, lon2) -> FLOAT
     metadata_provider.add_callable(

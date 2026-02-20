@@ -1,40 +1,19 @@
-//! Integration tests for Milestone 3: Advanced Schema Catalog System
+//! Integration tests for schema catalog system and MetadataProvider.
 
 use gql_parser::{
     parse,
     semantic::{
         schema_catalog::{
-            InMemorySchemaCatalog, InMemorySchemaSnapshot, MockGraphContextResolver,
-            MockVariableTypeContextProvider, SchemaSnapshotRequest, GraphRef,
+            InMemorySchemaSnapshot, GraphRef, SchemaRef,
             NodeTypeMeta, PropertyMeta, TypeRef, ConstraintMeta, PropertyConstraint,
-            InMemorySchemaFixtureLoader, SchemaFixtureLoader, SessionContext,
-            SchemaCatalog, SchemaSnapshot, GraphContextResolver, VariableTypeContextProvider,
-            SchemaSnapshotBuilder,
+            SessionContext, SchemaSnapshot, SchemaSnapshotBuilder,
         },
+        metadata_provider::{MockMetadataProvider, MetadataProvider},
         SemanticValidator,
     },
     ast::types::{ValueType, PredefinedType, CharacterStringType},
 };
 use std::collections::{BTreeMap, HashMap};
-
-#[test]
-fn test_basic_schema_catalog() {
-    let mut catalog = InMemorySchemaCatalog::new();
-    let snapshot = InMemorySchemaSnapshot::example();
-    catalog.add_snapshot("test_graph".into(), snapshot);
-
-    let request = SchemaSnapshotRequest {
-        graph: GraphRef { name: "test_graph".into() },
-        schema: None,
-    };
-
-    let result = catalog.snapshot(request);
-    assert!(result.is_ok());
-
-    let snapshot = result.unwrap();
-    assert!(snapshot.node_type("Person").is_some());
-    assert!(snapshot.edge_type("KNOWS").is_some());
-}
 
 #[test]
 fn test_schema_snapshot_node_types() {
@@ -92,11 +71,12 @@ fn test_schema_snapshot_property_lookup() {
 }
 
 #[test]
-fn test_fixture_loader_standard_fixtures() {
-    let loader = InMemorySchemaFixtureLoader::with_standard_fixtures();
+fn test_metadata_provider_with_standard_fixtures() {
+    let provider = MockMetadataProvider::with_standard_fixtures();
 
     // Test social_graph fixture
-    let social = loader.load("social_graph").unwrap();
+    let social_graph = GraphRef { name: "social_graph".into() };
+    let social = provider.get_schema_snapshot(&social_graph, None).unwrap();
     assert!(social.node_type("Person").is_some());
     assert!(social.edge_type("KNOWS").is_some());
 
@@ -117,10 +97,11 @@ fn test_fixture_loader_standard_fixtures() {
 }
 
 #[test]
-fn test_fixture_loader_financial_fixture() {
-    let loader = InMemorySchemaFixtureLoader::with_standard_fixtures();
+fn test_metadata_provider_financial_fixture() {
+    let provider = MockMetadataProvider::with_standard_fixtures();
 
-    let financial = loader.load("financial").unwrap();
+    let financial_graph = GraphRef { name: "financial".into() };
+    let financial = provider.get_schema_snapshot(&financial_graph, None).unwrap();
     assert!(financial.node_type("Account").is_some());
     assert!(financial.edge_type("TRANSFER").is_some());
 
@@ -142,52 +123,46 @@ fn test_fixture_loader_financial_fixture() {
 }
 
 #[test]
-fn test_graph_context_resolver() {
-    let resolver = MockGraphContextResolver::new("my_graph", "my_schema");
-    let session = SessionContext::new();
-
-    let graph = resolver.active_graph(&session).unwrap();
-    assert_eq!(graph.name, "my_graph");
-
-    let schema = resolver.active_schema(&graph).unwrap();
-    assert_eq!(schema.name, "my_schema");
-}
-
-#[test]
-fn test_variable_type_context_provider() {
-    let mut provider = MockVariableTypeContextProvider::new();
-
-    let string_type = ValueType::Predefined(
-        PredefinedType::CharacterString(CharacterStringType::String),
-        0..0,
-    );
-
-    provider.add_binding("x", string_type.clone());
-
-    let graph = GraphRef { name: "test".into() };
-    let ast = gql_parser::ast::Program {
-        statements: vec![],
-        span: 0..0,
-    };
-
-    let context = provider.initial_bindings(&graph, &ast).unwrap();
-    assert!(context.get("x").is_some());
-}
-
-#[test]
-fn test_validator_with_schema_catalog() {
-    // Create schema catalog
-    let mut catalog = InMemorySchemaCatalog::new();
+fn test_metadata_provider_graph_validation() {
+    let mut provider = MockMetadataProvider::new();
     let snapshot = InMemorySchemaSnapshot::example();
-    catalog.add_snapshot("test_graph".into(), snapshot);
+    provider.add_schema_snapshot("test_graph", snapshot);
 
-    // Create resolver and provider
-    let resolver = MockGraphContextResolver::new("test_graph", "default_schema");
-    let provider = MockVariableTypeContextProvider::new();
+    // Existing graph
+    assert!(provider.validate_graph_exists("test_graph").is_ok());
+
+    // Non-existent graph
+    assert!(provider.validate_graph_exists("nonexistent").is_err());
+}
+
+#[test]
+fn test_metadata_provider_resolve_active_graph() {
+    let mut provider = MockMetadataProvider::new();
+    let snapshot = InMemorySchemaSnapshot::example();
+    provider.add_schema_snapshot("default", snapshot);
+
+    // Empty session uses default
+    let session = SessionContext::new();
+    let graph = provider.resolve_active_graph(&session).unwrap();
+    assert_eq!(graph.name, "default");
+
+    // Session with active graph
+    let mut session = SessionContext::new();
+    session.active_graph = Some("custom".into());
+    let graph = provider.resolve_active_graph(&session).unwrap();
+    assert_eq!(graph.name, "custom");
+}
+
+#[test]
+fn test_validator_with_metadata_provider() {
+    // Create metadata provider
+    let mut provider = MockMetadataProvider::new();
+    let snapshot = InMemorySchemaSnapshot::example();
+    provider.add_schema_snapshot("test_graph", snapshot);
 
     // Create validator with metadata provider
     let validator = SemanticValidator::new()
-        .with_metadata_provider(&catalog);
+        .with_metadata_provider(&provider);
 
     // Parse a simple query
     let query = "MATCH (p:Person) RETURN p.name";
@@ -197,7 +172,7 @@ fn test_validator_with_schema_catalog() {
     let program = parse_result.ast.unwrap();
     let outcome = validator.validate(&program);
 
-    // Should succeed (advanced validation doesn't error without implementation yet)
+    // Should succeed
     assert!(outcome.is_success());
 }
 
@@ -289,25 +264,6 @@ fn test_type_ref_equality_and_hashing() {
 }
 
 #[test]
-fn test_fixture_error_handling() {
-    let loader = InMemorySchemaFixtureLoader::new();
-    let result = loader.load("nonexistent_fixture");
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_catalog_missing_graph_error() {
-    let catalog = InMemorySchemaCatalog::new();
-    let request = SchemaSnapshotRequest {
-        graph: GraphRef { name: "nonexistent".into() },
-        schema: None,
-    };
-
-    let result = catalog.snapshot(request);
-    assert!(result.is_err());
-}
-
-#[test]
 fn test_schema_snapshot_builder() {
     let snapshot = SchemaSnapshotBuilder::new()
         .with_node_type("User", |builder| {
@@ -333,10 +289,11 @@ fn test_schema_snapshot_builder() {
 
 #[test]
 fn test_extended_fixtures() {
-    let loader = InMemorySchemaFixtureLoader::with_extended_fixtures();
+    let provider = MockMetadataProvider::with_extended_fixtures();
 
     // Test e-commerce fixture
-    let ecommerce = loader.load("ecommerce").unwrap();
+    let ecommerce_graph = GraphRef { name: "ecommerce".into() };
+    let ecommerce = provider.get_schema_snapshot(&ecommerce_graph, None).unwrap();
     assert!(ecommerce.node_type("Product").is_some());
     assert!(ecommerce.node_type("Customer").is_some());
     assert!(ecommerce.node_type("Order").is_some());
@@ -348,7 +305,8 @@ fn test_extended_fixtures() {
     assert!(product.properties.contains_key("stock_quantity"));
 
     // Test healthcare fixture
-    let healthcare = loader.load("healthcare").unwrap();
+    let healthcare_graph = GraphRef { name: "healthcare".into() };
+    let healthcare = provider.get_schema_snapshot(&healthcare_graph, None).unwrap();
     assert!(healthcare.node_type("Patient").is_some());
     assert!(healthcare.node_type("Doctor").is_some());
     assert!(healthcare.node_type("Appointment").is_some());
@@ -435,4 +393,3 @@ fn test_deterministic_property_ordering() {
     // BTreeMap ensures sorted order
     assert_eq!(keys, vec!["age", "name"]);
 }
-

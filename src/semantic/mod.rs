@@ -60,5 +60,5 @@ pub mod schema_catalog;
 pub mod type_metadata;
 pub mod validator;
 
-pub use metadata_provider::{MetadataProvider, InMemoryMetadataProvider};
+pub use metadata_provider::{MetadataProvider, MockMetadataProvider};
 pub use validator::{SemanticValidator, ValidationConfig};

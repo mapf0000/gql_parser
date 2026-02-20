@@ -320,9 +320,9 @@ fn test_mock_type_check_context_provider() {
 
 #[test]
 fn test_semantic_validator_with_type_metadata() {
-    use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
+    use gql_parser::semantic::metadata_provider::MockMetadataProvider;
 
-    let metadata = InMemoryMetadataProvider::example();
+    let metadata = MockMetadataProvider::example();
 
     let _validator = SemanticValidator::new()
         .with_metadata_provider(&metadata);
