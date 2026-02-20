@@ -10,6 +10,7 @@
 //! Expressions form the computational backbone of GQL queries.
 
 use crate::ast::Span;
+use crate::ast::procedure::NestedQuerySpecification;
 use crate::ast::query::SetQuantifier;
 use crate::ast::types::{TypeAnnotation, ValueType};
 use smol_str::SmolStr;
@@ -88,7 +89,7 @@ pub enum Expression {
     BindingTableExpression(Box<Expression>, Span),
 
     /// VALUE <nested_query> subquery expression
-    SubqueryExpression(Box<Expression>, Span),
+    SubqueryExpression(Box<NestedQuerySpecification>, Span),
 }
 
 impl Expression {

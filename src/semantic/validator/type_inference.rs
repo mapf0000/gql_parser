@@ -290,7 +290,7 @@ fn infer_expression_type(
             infer_expression_type(validator, operand, type_table);
             match op {
                 UnaryOperator::Plus | UnaryOperator::Minus => Type::Float, // Could be Int or Float, use Float as general numeric
-                UnaryOperator::Not => Type::Boolean, // NOT produces boolean
+                UnaryOperator::Not => Type::Boolean,                       // NOT produces boolean
             }
         }
 
@@ -430,10 +430,7 @@ fn infer_expression_type(
         }
 
         // Subquery expressions
-        crate::ast::expression::Expression::SubqueryExpression(inner, _) => {
-            infer_expression_type(validator, inner, type_table);
-            Type::Any
-        }
+        crate::ast::expression::Expression::SubqueryExpression(_, _) => Type::Any,
     };
 
     // Persist the inferred type to the type table using span-based lookup

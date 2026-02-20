@@ -432,42 +432,52 @@ impl<'a> GraphTypeParser<'a> {
         // Parse endpoint pair
         let endpoint_pair_phrase = self.parse_endpoint_pair_phrase()?;
         let end_span = endpoint_pair_phrase.span.clone();
+        let left_endpoint = endpoint_pair_phrase.endpoint_pair.source.node_type.clone();
+        let right_endpoint = endpoint_pair_phrase
+            .endpoint_pair
+            .destination
+            .node_type
+            .clone();
+        let pattern_span = merge_spans(&start_span, &end_span);
+        let pattern_kind = edge_kind.clone();
 
         let phrase = EdgeTypePhrase {
             edge_kind,
             filler_content,
             endpoint_pair_phrase,
-            span: merge_spans(&start_span, &end_span),
+            span: pattern_span.clone(),
         };
 
         let filler = EdgeTypeFiller {
             span: phrase.span.clone(),
             phrase,
         };
-
-        // Create a simple directed pattern (this is a simplification)
-        // In a full implementation, we'd need to construct proper endpoint patterns
-        let left_endpoint = NodeTypePattern {
-            phrase: NodeTypePhrase {
-                filler: None,
-                alias: None,
-                span: start_span.clone(),
-            },
-            span: start_span.clone(),
-        };
-        let right_endpoint = left_endpoint.clone();
-
-        let arc = DirectedArcType::PointingRight(ArcTypePointingRight {
-            filler: Some(filler),
-            span: start_span.clone(),
-        });
-
-        Ok(EdgeTypePattern::Directed(EdgeTypePatternDirected {
-            left_endpoint,
-            arc,
-            right_endpoint,
-            span: merge_spans(&start_span, &end_span),
-        }))
+        match pattern_kind {
+            EdgeKind::Undirected => {
+                let arc = ArcTypeUndirected {
+                    filler: Some(filler),
+                    span: pattern_span.clone(),
+                };
+                Ok(EdgeTypePattern::Undirected(EdgeTypePatternUndirected {
+                    left_endpoint,
+                    arc,
+                    right_endpoint,
+                    span: pattern_span,
+                }))
+            }
+            EdgeKind::Directed | EdgeKind::Inferred => {
+                let arc = DirectedArcType::PointingRight(ArcTypePointingRight {
+                    filler: Some(filler),
+                    span: pattern_span.clone(),
+                });
+                Ok(EdgeTypePattern::Directed(EdgeTypePatternDirected {
+                    left_endpoint,
+                    arc,
+                    right_endpoint,
+                    span: pattern_span,
+                }))
+            }
+        }
     }
 
     /// Parses visual edge type pattern: `(node)-[edge]->(node)` or `(node)~[edge]~(node)`

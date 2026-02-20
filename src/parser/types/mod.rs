@@ -28,7 +28,7 @@ use crate::ast::{
     BindingTableReferenceValueType, BooleanType, ByteStringType, CharacterStringType,
     EdgeReferenceValueType, GraphReferenceValueType, ImmaterialValueType, ListSyntaxForm,
     ListValueType, NodeReferenceValueType, NumericType, PathValueType, PredefinedType, RecordType,
-    ReferenceValueType, Span, TemporalType, ValueType,
+    ReferenceValueType, TemporalType, ValueType,
 };
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
@@ -201,7 +201,10 @@ impl<'a> TypeParser<'a> {
                 ))
             }
 
-            TokenKind::Edge | TokenKind::Relationship => {
+            TokenKind::Edge
+            | TokenKind::Relationship
+            | TokenKind::Directed
+            | TokenKind::Undirected => {
                 let ref_type = self.parse_edge_reference_value_type()?;
                 Ok(self.wrap_predefined(
                     PredefinedType::ReferenceValue(ReferenceValueType::Edge(ref_type)),
@@ -263,74 +266,6 @@ impl<'a> TypeParser<'a> {
     // ========================================================================
     // Helper Functions
     // ========================================================================
-
-    /// Parses a placeholder specification span for Sprint 12-delayed type specs.
-    ///
-    /// This consumes at least one token and supports balanced delimiters when
-    /// the placeholder starts with `{` or `(`.
-    fn parse_placeholder_spec_span(&mut self, expected: &str) -> ParseResult<Span> {
-        let start = self.stream.current().span.start;
-
-        if matches!(
-            self.stream.current().kind,
-            TokenKind::Not
-                | TokenKind::Comma
-                | TokenKind::RParen
-                | TokenKind::RBrace
-                | TokenKind::Gt
-                | TokenKind::Eof
-        ) {
-            return Err(self.error_here(format!("expected {expected}")));
-        }
-
-        if self.stream.check(&TokenKind::LBrace) {
-            self.stream.advance();
-            let mut depth = 1usize;
-            let mut end = self.stream.tokens()[self.stream.position().saturating_sub(1)]
-                .span
-                .end;
-            while depth > 0 {
-                if self.stream.check(&TokenKind::Eof) {
-                    return Err(self
-                        .error_here(format!("unterminated placeholder while parsing {expected}")));
-                }
-                match self.stream.current().kind {
-                    TokenKind::LBrace => depth += 1,
-                    TokenKind::RBrace => depth = depth.saturating_sub(1),
-                    _ => {}
-                }
-                end = self.stream.current().span.end;
-                self.stream.advance();
-            }
-            return Ok(start..end);
-        }
-
-        if self.stream.check(&TokenKind::LParen) {
-            self.stream.advance();
-            let mut depth = 1usize;
-            let mut end = self.stream.tokens()[self.stream.position().saturating_sub(1)]
-                .span
-                .end;
-            while depth > 0 {
-                if self.stream.check(&TokenKind::Eof) {
-                    return Err(self
-                        .error_here(format!("unterminated placeholder while parsing {expected}")));
-                }
-                match self.stream.current().kind {
-                    TokenKind::LParen => depth += 1,
-                    TokenKind::RParen => depth = depth.saturating_sub(1),
-                    _ => {}
-                }
-                end = self.stream.current().span.end;
-                self.stream.advance();
-            }
-            return Ok(start..end);
-        }
-
-        let end = self.stream.current().span.end;
-        self.stream.advance();
-        Ok(start..end)
-    }
 
     /// Parses an optional length parameter: ( n )
     fn parse_optional_length_param(&mut self) -> ParseResult<Option<u32>> {
@@ -620,8 +555,7 @@ mod tests {
         let tokens = vec![make_token(TokenKind::Uint, 0, 4)];
         let result = parse_numeric_type(&tokens);
         assert!(result.is_ok());
-        if let NumericType::Exact(ExactNumericType::UnsignedBinary(unsigned_type)) =
-            result.unwrap()
+        if let NumericType::Exact(ExactNumericType::UnsignedBinary(unsigned_type)) = result.unwrap()
         {
             assert_eq!(unsigned_type, UnsignedBinaryExactNumericType::UInt);
         } else {
@@ -631,8 +565,7 @@ mod tests {
         let tokens = vec![make_token(TokenKind::Uint64, 0, 6)];
         let result = parse_numeric_type(&tokens);
         assert!(result.is_ok());
-        if let NumericType::Exact(ExactNumericType::UnsignedBinary(unsigned_type)) =
-            result.unwrap()
+        if let NumericType::Exact(ExactNumericType::UnsignedBinary(unsigned_type)) = result.unwrap()
         {
             assert_eq!(unsigned_type, UnsignedBinaryExactNumericType::UInt64);
         } else {

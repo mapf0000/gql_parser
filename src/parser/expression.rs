@@ -16,6 +16,7 @@ use crate::ast::{
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
 use crate::parser::base::{ParseResult, TokenStream};
+use crate::parser::procedure::parse_nested_query_specification;
 use crate::parser::types::parse_value_type_prefix;
 use smol_str::SmolStr;
 
@@ -454,7 +455,7 @@ impl<'a> ExpressionParser<'a> {
             TokenKind::Property
                 if self.stream.peek().map(|t| &t.kind) == Some(&TokenKind::Graph) =>
             {
-                self.parse_property_graph_expression()
+                self.parse_graph_expression(true)
             }
 
             TokenKind::Binding
@@ -722,10 +723,26 @@ impl<'a> ExpressionParser<'a> {
         Ok(Expression::PathConstructor(elements, start..end))
     }
 
-    fn parse_property_graph_expression(&mut self) -> ParseResult<Expression> {
-        let start = self.stream.expect(TokenKind::Property)?.start;
-        self.stream.expect(TokenKind::Graph)?;
-        let graph_expr = self.parse_unary_expression()?;
+    fn parse_graph_expression(&mut self, has_property_keyword: bool) -> ParseResult<Expression> {
+        let start = if has_property_keyword {
+            let start = self.stream.expect(TokenKind::Property)?.start;
+            self.stream.expect(TokenKind::Graph)?;
+            start
+        } else {
+            self.stream.expect(TokenKind::Graph)?.start
+        };
+
+        let graph_expr = if self.stream.check(&TokenKind::Current)
+            && self.stream.peek().map(|t| &t.kind) == Some(&TokenKind::Graph)
+        {
+            let current_start = self.stream.current().span.start;
+            self.stream.advance();
+            let graph_end = self.stream.expect(TokenKind::Graph)?.end;
+            Expression::VariableReference("CURRENT_GRAPH".into(), current_start..graph_end)
+        } else {
+            self.parse_unary_expression()?
+        };
+
         let span = start..graph_expr.span().end;
         Ok(Expression::GraphExpression(Box::new(graph_expr), span))
     }
@@ -733,7 +750,14 @@ impl<'a> ExpressionParser<'a> {
     fn parse_binding_table_expression(&mut self) -> ParseResult<Expression> {
         let start = self.stream.expect(TokenKind::Binding)?.start;
         self.stream.expect(TokenKind::Table)?;
-        let table_expr = self.parse_unary_expression()?;
+        let table_expr = if self.stream.check(&TokenKind::LBrace) {
+            let (spec, subquery_span) = self.parse_nested_query_specification_expression(
+                "expected nested query specification after BINDING TABLE",
+            )?;
+            Expression::SubqueryExpression(Box::new(spec), subquery_span)
+        } else {
+            self.parse_unary_expression()?
+        };
         let span = start..table_expr.span().end;
         Ok(Expression::BindingTableExpression(
             Box::new(table_expr),
@@ -743,17 +767,34 @@ impl<'a> ExpressionParser<'a> {
 
     fn parse_value_subquery_expression(&mut self) -> ParseResult<Expression> {
         let start = self.stream.expect(TokenKind::Value)?.start;
-        let inner = if self.stream.check(&TokenKind::LParen) {
-            self.stream.advance();
-            let nested = self.parse_expression()?;
-            self.stream.expect(TokenKind::RParen)?;
-            nested
-        } else {
-            self.parse_primary_expression()?
-        };
+        let (spec, spec_span) =
+            self.parse_nested_query_specification_expression("expected nested query after VALUE")?;
 
-        let span = start..inner.span().end;
-        Ok(Expression::SubqueryExpression(Box::new(inner), span))
+        Ok(Expression::SubqueryExpression(
+            Box::new(spec),
+            start..spec_span.end,
+        ))
+    }
+
+    fn parse_nested_query_specification_expression(
+        &mut self,
+        expected_message: &str,
+    ) -> ParseResult<(crate::ast::NestedQuerySpecification, Span)> {
+        if !self.stream.check(&TokenKind::LBrace) {
+            return Err(self.stream.error_here(expected_message));
+        }
+
+        let mut pos = self.stream.position();
+        let (spec_opt, diags) = parse_nested_query_specification(self.stream.tokens(), &mut pos);
+        if let Some(spec) = spec_opt {
+            let span = spec.span.clone();
+            self.stream.set_position(pos);
+            Ok((spec, span))
+        } else if let Some(diag) = diags.into_iter().next() {
+            Err(Box::new(diag))
+        } else {
+            Err(self.stream.error_here(expected_message))
+        }
     }
 
     fn parse_function_call(&mut self) -> ParseResult<FunctionCall> {
@@ -1596,8 +1637,48 @@ mod tests {
             Expression::BindingTableExpression(_, _)
         ));
         assert!(matches!(
-            parse_expr("VALUE (x)").unwrap(),
+            parse_expr("VALUE { RETURN 1 }").unwrap(),
             Expression::SubqueryExpression(_, _)
+        ));
+    }
+
+    #[test]
+    fn parses_value_nested_query_specification() {
+        assert!(matches!(
+            parse_expr("VALUE { RETURN 1 }").unwrap(),
+            Expression::SubqueryExpression(_, _)
+        ));
+    }
+
+    #[test]
+    fn rejects_legacy_parenthesized_value_payload() {
+        let err = parse_expr("VALUE (x)").unwrap_err();
+        assert!(
+            err.message.contains("nested query")
+                || err.message.contains("Expected")
+                || err.message.contains("expected"),
+            "unexpected diagnostic: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn parses_graph_keyword_expression_forms() {
+        assert!(matches!(
+            parse_expr("PROPERTY GRAPH CURRENT GRAPH").unwrap(),
+            Expression::GraphExpression(_, _)
+        ));
+        assert!(matches!(
+            parse_expr("PROPERTY GRAPH x").unwrap(),
+            Expression::GraphExpression(_, _)
+        ));
+    }
+
+    #[test]
+    fn parses_binding_table_nested_query_form() {
+        assert!(matches!(
+            parse_expr("BINDING TABLE { RETURN 1 }").unwrap(),
+            Expression::BindingTableExpression(_, _)
         ));
     }
 }

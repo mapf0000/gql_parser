@@ -5,18 +5,17 @@
 
 use std::ops::ControlFlow;
 
+use crate::ast::Expression;
 use crate::ast::expression::{CaseExpression, ExistsVariant, Literal, Predicate};
 use crate::ast::procedure::{CallProcedureStatement, ProcedureCall};
 use crate::ast::program::{Program, QueryStatement, Statement};
 use crate::ast::query::{
     EdgePattern, ElementPattern, FilterStatement, ForStatement, GraphPattern, GroupingElement,
-    LabelExpression, LetStatement, LetVariableDefinition, LinearQuery, MatchStatement,
-    NodePattern, PathFactor, PathPattern, PathPatternExpression, PathPrimary,
-    PrimitiveQueryStatement, PrimitiveResultStatement, Query, ReturnItem, ReturnItemList,
-    ReturnStatement, SelectFromClause, SelectItemList, SelectStatement,
-    SimplifiedPathPatternExpression,
+    LabelExpression, LetStatement, LetVariableDefinition, LinearQuery, MatchStatement, NodePattern,
+    PathFactor, PathPattern, PathPatternExpression, PathPrimary, PrimitiveQueryStatement,
+    PrimitiveResultStatement, Query, ReturnItem, ReturnItemList, ReturnStatement, SelectFromClause,
+    SelectItemList, SelectStatement, SimplifiedPathPatternExpression,
 };
-use crate::ast::Expression;
 
 macro_rules! try_visit {
     ($expr:expr) => {
@@ -108,10 +107,7 @@ pub trait AstVisitor {
         walk_edge_pattern(self, pattern)
     }
 
-    fn visit_label_expression(
-        &mut self,
-        expression: &LabelExpression,
-    ) -> VisitResult<Self::Break> {
+    fn visit_label_expression(&mut self, expression: &LabelExpression) -> VisitResult<Self::Break> {
         walk_label_expression(self, expression)
     }
 
@@ -197,10 +193,7 @@ pub trait AstVisitorMut {
         walk_match_statement_mut(self, statement)
     }
 
-    fn visit_graph_pattern_mut(
-        &mut self,
-        pattern: &mut GraphPattern,
-    ) -> VisitResult<Self::Break> {
+    fn visit_graph_pattern_mut(&mut self, pattern: &mut GraphPattern) -> VisitResult<Self::Break> {
         walk_graph_pattern_mut(self, pattern)
     }
 
@@ -266,7 +259,10 @@ pub trait AstVisitorMut {
         walk_let_binding_mut(self, binding)
     }
 
-    fn visit_for_statement_mut(&mut self, statement: &mut ForStatement) -> VisitResult<Self::Break> {
+    fn visit_for_statement_mut(
+        &mut self,
+        statement: &mut ForStatement,
+    ) -> VisitResult<Self::Break> {
         walk_for_statement_mut(self, statement)
     }
 
@@ -370,7 +366,9 @@ pub fn walk_primitive_query_statement<V: AstVisitor + ?Sized>(
     statement: &PrimitiveQueryStatement,
 ) -> VisitResult<V::Break> {
     match statement {
-        PrimitiveQueryStatement::Match(match_statement) => visitor.visit_match_statement(match_statement),
+        PrimitiveQueryStatement::Match(match_statement) => {
+            visitor.visit_match_statement(match_statement)
+        }
         PrimitiveQueryStatement::Call(call) => walk_call_procedure_statement(visitor, call),
         PrimitiveQueryStatement::Filter(filter) => visitor.visit_filter_statement(filter),
         PrimitiveQueryStatement::Let(let_statement) => visitor.visit_let_statement(let_statement),
@@ -414,7 +412,9 @@ pub fn walk_match_statement<V: AstVisitor + ?Sized>(
     match statement {
         MatchStatement::Simple(simple) => visitor.visit_graph_pattern(&simple.pattern),
         MatchStatement::Optional(optional) => match &optional.operand {
-            crate::ast::query::OptionalOperand::Match { pattern } => visitor.visit_graph_pattern(pattern),
+            crate::ast::query::OptionalOperand::Match { pattern } => {
+                visitor.visit_graph_pattern(pattern)
+            }
             crate::ast::query::OptionalOperand::Block { statements }
             | crate::ast::query::OptionalOperand::ParenthesizedBlock { statements } => {
                 for statement in statements {
@@ -724,8 +724,8 @@ pub fn walk_expression<V: AstVisitor + ?Sized>(
         Expression::Unary(_, inner, _)
         | Expression::Parenthesized(inner, _)
         | Expression::GraphExpression(inner, _)
-        | Expression::BindingTableExpression(inner, _)
-        | Expression::SubqueryExpression(inner, _) => visitor.visit_expression(inner),
+        | Expression::BindingTableExpression(inner, _) => visitor.visit_expression(inner),
+        Expression::SubqueryExpression(_, _) => ControlFlow::Continue(()),
         Expression::Binary(_, left, right, _)
         | Expression::Comparison(_, left, right, _)
         | Expression::Logical(_, left, right, _) => {
@@ -767,7 +767,9 @@ pub fn walk_expression<V: AstVisitor + ?Sized>(
         },
         Expression::Cast(cast) => visitor.visit_expression(&cast.operand),
         Expression::AggregateFunction(aggregate_function) => match aggregate_function.as_ref() {
-            crate::ast::expression::AggregateFunction::CountStar { .. } => ControlFlow::Continue(()),
+            crate::ast::expression::AggregateFunction::CountStar { .. } => {
+                ControlFlow::Continue(())
+            }
             crate::ast::expression::AggregateFunction::GeneralSetFunction(function) => {
                 visitor.visit_expression(&function.expression)
             }
@@ -777,7 +779,8 @@ pub fn walk_expression<V: AstVisitor + ?Sized>(
             }
         },
         Expression::TypeAnnotation(inner, _, _) => visitor.visit_expression(inner),
-        Expression::ListConstructor(expressions, _) | Expression::PathConstructor(expressions, _) => {
+        Expression::ListConstructor(expressions, _)
+        | Expression::PathConstructor(expressions, _) => {
             for item in expressions {
                 try_visit!(visitor.visit_expression(item));
             }
@@ -809,7 +812,8 @@ fn walk_predicate<V: AstVisitor + ?Sized>(
         | Predicate::IsTruthValue(expression, _, _, _)
         | Predicate::PropertyExists(expression, _, _) => visitor.visit_expression(expression),
         Predicate::IsLabeled(expression, _, _, _) => visitor.visit_expression(expression),
-        Predicate::IsSource(source, target, _, _) | Predicate::IsDestination(source, target, _, _) => {
+        Predicate::IsSource(source, target, _, _)
+        | Predicate::IsDestination(source, target, _, _) => {
             try_visit!(visitor.visit_expression(source));
             visitor.visit_expression(target)
         }
@@ -826,7 +830,10 @@ fn walk_predicate<V: AstVisitor + ?Sized>(
     }
 }
 
-fn walk_literal<V: AstVisitor + ?Sized>(visitor: &mut V, literal: &Literal) -> VisitResult<V::Break> {
+fn walk_literal<V: AstVisitor + ?Sized>(
+    visitor: &mut V,
+    literal: &Literal,
+) -> VisitResult<V::Break> {
     match literal {
         Literal::List(expressions) => {
             for expression in expressions {
@@ -993,8 +1000,12 @@ pub fn walk_primitive_query_statement_mut<V: AstVisitorMut + ?Sized>(
         }
         PrimitiveQueryStatement::Call(call) => walk_call_procedure_statement_mut(visitor, call),
         PrimitiveQueryStatement::Filter(filter) => visitor.visit_filter_statement_mut(filter),
-        PrimitiveQueryStatement::Let(let_statement) => visitor.visit_let_statement_mut(let_statement),
-        PrimitiveQueryStatement::For(for_statement) => visitor.visit_for_statement_mut(for_statement),
+        PrimitiveQueryStatement::Let(let_statement) => {
+            visitor.visit_let_statement_mut(let_statement)
+        }
+        PrimitiveQueryStatement::For(for_statement) => {
+            visitor.visit_for_statement_mut(for_statement)
+        }
         PrimitiveQueryStatement::OrderByAndPage(order_by_and_page) => {
             if let Some(order_by) = &mut order_by_and_page.order_by {
                 for sort in &mut order_by.sort_specifications {
@@ -1346,8 +1357,8 @@ pub fn walk_expression_mut<V: AstVisitorMut + ?Sized>(
         Expression::Unary(_, inner, _)
         | Expression::Parenthesized(inner, _)
         | Expression::GraphExpression(inner, _)
-        | Expression::BindingTableExpression(inner, _)
-        | Expression::SubqueryExpression(inner, _) => visitor.visit_expression_mut(inner),
+        | Expression::BindingTableExpression(inner, _) => visitor.visit_expression_mut(inner),
+        Expression::SubqueryExpression(_, _) => ControlFlow::Continue(()),
         Expression::Binary(_, left, right, _)
         | Expression::Comparison(_, left, right, _)
         | Expression::Logical(_, left, right, _) => {
@@ -1389,19 +1400,22 @@ pub fn walk_expression_mut<V: AstVisitorMut + ?Sized>(
         },
         Expression::Cast(cast) => visitor.visit_expression_mut(&mut cast.operand),
         Expression::AggregateFunction(aggregate_function) => match aggregate_function.as_mut() {
-            crate::ast::expression::AggregateFunction::CountStar { .. } => ControlFlow::Continue(()),
+            crate::ast::expression::AggregateFunction::CountStar { .. } => {
+                ControlFlow::Continue(())
+            }
             crate::ast::expression::AggregateFunction::GeneralSetFunction(function) => {
                 visitor.visit_expression_mut(&mut function.expression)
             }
             crate::ast::expression::AggregateFunction::BinarySetFunction(function) => {
-                try_visit!(visitor.visit_expression_mut(
-                    &mut function.inverse_distribution_argument,
-                ));
+                try_visit!(
+                    visitor.visit_expression_mut(&mut function.inverse_distribution_argument,)
+                );
                 visitor.visit_expression_mut(&mut function.expression)
             }
         },
         Expression::TypeAnnotation(inner, _, _) => visitor.visit_expression_mut(inner),
-        Expression::ListConstructor(expressions, _) | Expression::PathConstructor(expressions, _) => {
+        Expression::ListConstructor(expressions, _)
+        | Expression::PathConstructor(expressions, _) => {
             for item in expressions {
                 try_visit!(visitor.visit_expression_mut(item));
             }
@@ -1433,7 +1447,8 @@ fn walk_predicate_mut<V: AstVisitorMut + ?Sized>(
         | Predicate::IsTruthValue(expression, _, _, _)
         | Predicate::PropertyExists(expression, _, _) => visitor.visit_expression_mut(expression),
         Predicate::IsLabeled(expression, _, _, _) => visitor.visit_expression_mut(expression),
-        Predicate::IsSource(source, target, _, _) | Predicate::IsDestination(source, target, _, _) => {
+        Predicate::IsSource(source, target, _, _)
+        | Predicate::IsDestination(source, target, _, _) => {
             try_visit!(visitor.visit_expression_mut(source));
             visitor.visit_expression_mut(target)
         }
@@ -1511,7 +1526,10 @@ fn walk_simplified_expression_mut<V: AstVisitorMut + ?Sized>(
             ControlFlow::Continue(())
         }
         SimplifiedPathPatternExpression::Conjunction(conjunction) => {
-            try_visit!(walk_simplified_expression_mut(visitor, &mut conjunction.left));
+            try_visit!(walk_simplified_expression_mut(
+                visitor,
+                &mut conjunction.left
+            ));
             walk_simplified_expression_mut(visitor, &mut conjunction.right)
         }
         SimplifiedPathPatternExpression::Concatenation(concatenation) => {
@@ -1570,7 +1588,10 @@ mod tests {
         let flow = visitor.visit_program(&program);
 
         assert!(matches!(flow, ControlFlow::Continue(())));
-        assert!(visitor.count >= 6, "expected multiple expressions to be visited");
+        assert!(
+            visitor.count >= 6,
+            "expected multiple expressions to be visited"
+        );
     }
 
     #[derive(Default)]

@@ -91,3 +91,61 @@ fn test_label_set_specification_multiple_labels() {
     let label_set = result.unwrap();
     assert_eq!(label_set.labels.len(), 2);
 }
+
+#[test]
+fn test_edge_phrase_pattern_preserves_endpoint_aliases() {
+    use gql_parser::ast::graph_type::{ElementTypeSpecification, LocalNodeTypeAlias};
+    use gql_parser::lexer::token::{Token, TokenKind};
+    use gql_parser::parser::graph_type::GraphTypeParser;
+    use smol_str::SmolStr;
+
+    let tokens = vec![
+        Token::new(TokenKind::LBrace, 0..1),
+        Token::new(TokenKind::Directed, 2..10),
+        Token::new(TokenKind::Edge, 11..15),
+        Token::new(TokenKind::Type, 16..20),
+        Token::new(TokenKind::Identifier(SmolStr::new("KNOWS")), 21..26),
+        Token::new(TokenKind::Connecting, 27..37),
+        Token::new(TokenKind::LParen, 38..39),
+        Token::new(TokenKind::Identifier(SmolStr::new("Person")), 39..45),
+        Token::new(TokenKind::To, 46..48),
+        Token::new(TokenKind::Identifier(SmolStr::new("Company")), 49..56),
+        Token::new(TokenKind::RParen, 56..57),
+        Token::new(TokenKind::RBrace, 58..59),
+        Token::new(TokenKind::Eof, 59..59),
+    ];
+
+    let mut parser = GraphTypeParser::new(&tokens);
+    let result = parser.parse_nested_graph_type_specification();
+    assert!(result.is_ok(), "failed to parse graph type: {result:?}");
+    let spec = result.unwrap();
+
+    let first = spec
+        .body
+        .element_types
+        .types
+        .first()
+        .expect("expected edge type");
+    let ElementTypeSpecification::Edge(edge_spec) = first else {
+        panic!("expected edge element type");
+    };
+    let gql_parser::ast::graph_type::EdgeTypePattern::Directed(pattern) = &edge_spec.pattern else {
+        panic!("expected directed edge pattern");
+    };
+
+    let Some(LocalNodeTypeAlias {
+        name: left_name, ..
+    }) = pattern.left_endpoint.phrase.alias.as_ref()
+    else {
+        panic!("expected left endpoint alias");
+    };
+    let Some(LocalNodeTypeAlias {
+        name: right_name, ..
+    }) = pattern.right_endpoint.phrase.alias.as_ref()
+    else {
+        panic!("expected right endpoint alias");
+    };
+
+    assert_eq!(left_name, "Person");
+    assert_eq!(right_name, "Company");
+}

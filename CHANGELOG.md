@@ -25,7 +25,11 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 ### Changed
 - Improved visitor traversal coverage for simplified path-pattern forms.
 - Updated README with parse, traversal, and analysis usage.
+- Parser now treats `VALUE` payloads as nested query specifications (`VALUE { ... }`) instead of expression payloads.
+- Reference value type parsing now uses full graph-type parsers for typed graph/node/edge specs.
 
 ### Fixed
 - Resolved visitor/AST field mismatches in simplified path expression walking.
 - Addressed strict clippy violations required for release gates.
+- Preserved endpoint aliases when parsing edge phrase patterns with `CONNECTING (source TO destination)`.
+- Added parser conformance tests for nested expressions and typed reference specifications.

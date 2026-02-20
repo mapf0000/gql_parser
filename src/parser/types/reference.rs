@@ -7,12 +7,12 @@
 //! - Edge reference types (EDGE, RELATIONSHIP)
 
 use crate::ast::{
-    BindingTableReferenceValueType, EdgeReferenceValueType, EdgeTypeSpecification,
-    GraphReferenceValueType, NestedGraphTypeSpecification, NodeReferenceValueType,
-    NodeTypeSpecification,
+    BindingTableReferenceValueType, EdgeReferenceValueType, GraphReferenceValueType,
+    NodeReferenceValueType,
 };
 use crate::lexer::token::TokenKind;
 use crate::parser::base::ParseResult;
+use crate::parser::graph_type::GraphTypeParser;
 
 use super::TypeParser;
 
@@ -59,20 +59,16 @@ impl<'a> TypeParser<'a> {
             self.stream.consume(&TokenKind::Property);
             self.stream.expect(TokenKind::Graph)?;
 
-            let spec_span = self.parse_placeholder_spec_span("nested graph type specification")?;
-
-            // Create a minimal placeholder nested graph type spec
-            let body = crate::ast::graph_type::GraphTypeSpecificationBody {
-                element_types: crate::ast::graph_type::ElementTypeList {
-                    types: Vec::new(),
-                    span: spec_span.clone(),
-                },
-                span: spec_span.clone(),
-            };
-            let spec = Box::new(NestedGraphTypeSpecification {
-                body,
-                span: spec_span,
-            });
+            let start = self.stream.position();
+            let mut graph_type_parser = GraphTypeParser::new(&self.stream.tokens()[start..]);
+            let spec = Box::new(graph_type_parser.parse_nested_graph_type_specification()?);
+            let consumed = graph_type_parser.current_position();
+            if consumed == 0 {
+                return Err(self.error_here("expected nested graph type specification"));
+            }
+            for _ in 0..consumed {
+                self.stream.advance();
+            }
 
             let not_null = self.check_not_null();
             let end = self
@@ -148,8 +144,12 @@ impl<'a> TypeParser<'a> {
     ) -> ParseResult<NodeReferenceValueType> {
         let start = self.stream.current().span.start;
         let had_any = self.stream.consume(&TokenKind::Any);
+        let starts_with_node_keyword =
+            self.stream.check(&TokenKind::Vertex) || self.stream.check(&TokenKind::Node);
+        let parse_keyword_as_any = starts_with_node_keyword
+            && (had_any || !self.looks_like_typed_node_spec_after_keyword());
 
-        if self.stream.check(&TokenKind::Vertex) || self.stream.check(&TokenKind::Node) {
+        if parse_keyword_as_any {
             let use_vertex = if self.stream.check(&TokenKind::Vertex) {
                 self.stream.advance();
                 true
@@ -174,21 +174,16 @@ impl<'a> TypeParser<'a> {
         } else if had_any {
             Err(self.error_here("expected NODE or VERTEX after ANY"))
         } else {
-            let spec_span = self.parse_placeholder_spec_span("node type specification")?;
-
-            // Create a minimal placeholder node type spec
-            let pattern = crate::ast::graph_type::NodeTypePattern {
-                phrase: crate::ast::graph_type::NodeTypePhrase {
-                    filler: None,
-                    alias: None,
-                    span: spec_span.clone(),
-                },
-                span: spec_span.clone(),
-            };
-            let spec = Box::new(NodeTypeSpecification {
-                pattern,
-                span: spec_span,
-            });
+            let start = self.stream.position();
+            let mut graph_type_parser = GraphTypeParser::new(&self.stream.tokens()[start..]);
+            let spec = Box::new(graph_type_parser.parse_node_type_specification()?);
+            let consumed = graph_type_parser.current_position();
+            if consumed == 0 {
+                return Err(self.error_here("expected node type specification"));
+            }
+            for _ in 0..consumed {
+                self.stream.advance();
+            }
 
             let not_null = self.check_not_null();
             let end = self
@@ -220,8 +215,12 @@ impl<'a> TypeParser<'a> {
     ) -> ParseResult<EdgeReferenceValueType> {
         let start = self.stream.current().span.start;
         let had_any = self.stream.consume(&TokenKind::Any);
+        let starts_with_edge_keyword =
+            self.stream.check(&TokenKind::Relationship) || self.stream.check(&TokenKind::Edge);
+        let parse_keyword_as_any = starts_with_edge_keyword
+            && (had_any || !self.looks_like_typed_edge_spec_after_keyword());
 
-        if self.stream.check(&TokenKind::Relationship) || self.stream.check(&TokenKind::Edge) {
+        if parse_keyword_as_any {
             let use_relationship = if self.stream.check(&TokenKind::Relationship) {
                 self.stream.advance();
                 true
@@ -246,36 +245,16 @@ impl<'a> TypeParser<'a> {
         } else if had_any {
             Err(self.error_here("expected EDGE or RELATIONSHIP after ANY"))
         } else {
-            let spec_span = self.parse_placeholder_spec_span("edge type specification")?;
-
-            // Create a minimal placeholder edge type spec
-            let left_endpoint = crate::ast::graph_type::NodeTypePattern {
-                phrase: crate::ast::graph_type::NodeTypePhrase {
-                    filler: None,
-                    alias: None,
-                    span: spec_span.clone(),
-                },
-                span: spec_span.clone(),
-            };
-            let right_endpoint = left_endpoint.clone();
-            let arc = crate::ast::graph_type::DirectedArcType::PointingRight(
-                crate::ast::graph_type::ArcTypePointingRight {
-                    filler: None,
-                    span: spec_span.clone(),
-                },
-            );
-            let pattern = crate::ast::graph_type::EdgeTypePattern::Directed(
-                crate::ast::graph_type::EdgeTypePatternDirected {
-                    left_endpoint,
-                    arc,
-                    right_endpoint,
-                    span: spec_span.clone(),
-                },
-            );
-            let spec = Box::new(EdgeTypeSpecification {
-                pattern,
-                span: spec_span,
-            });
+            let start = self.stream.position();
+            let mut graph_type_parser = GraphTypeParser::new(&self.stream.tokens()[start..]);
+            let spec = Box::new(graph_type_parser.parse_edge_type_specification()?);
+            let consumed = graph_type_parser.current_position();
+            if consumed == 0 {
+                return Err(self.error_here("expected edge type specification"));
+            }
+            for _ in 0..consumed {
+                self.stream.advance();
+            }
 
             let not_null = self.check_not_null();
             let end = self
@@ -290,5 +269,45 @@ impl<'a> TypeParser<'a> {
                 span: start..end,
             })
         }
+    }
+
+    fn looks_like_typed_node_spec_after_keyword(&self) -> bool {
+        let Some(next) = self.stream.peek() else {
+            return false;
+        };
+        matches!(
+            next.kind,
+            TokenKind::Type
+                | TokenKind::LParen
+                | TokenKind::Label
+                | TokenKind::Labels
+                | TokenKind::Is
+                | TokenKind::Colon
+                | TokenKind::LBrace
+                | TokenKind::Key
+                | TokenKind::As
+                | TokenKind::Identifier(_)
+        ) || next.kind.is_non_reserved_identifier_keyword()
+    }
+
+    fn looks_like_typed_edge_spec_after_keyword(&self) -> bool {
+        let Some(next) = self.stream.peek() else {
+            return false;
+        };
+        matches!(
+            next.kind,
+            TokenKind::Type
+                | TokenKind::LParen
+                | TokenKind::LBracket
+                | TokenKind::Label
+                | TokenKind::Labels
+                | TokenKind::Is
+                | TokenKind::Colon
+                | TokenKind::LBrace
+                | TokenKind::Connecting
+                | TokenKind::Directed
+                | TokenKind::Undirected
+                | TokenKind::Identifier(_)
+        ) || next.kind.is_non_reserved_identifier_keyword()
     }
 }

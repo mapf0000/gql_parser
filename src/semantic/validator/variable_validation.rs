@@ -931,15 +931,8 @@ fn validate_expression_variables(
                 diagnostics,
             );
         }
-        Expression::SubqueryExpression(inner, _) => {
-            // Validate subquery expression
-            validate_expression_variables(
-                inner,
-                symbol_table,
-                scope_metadata,
-                statement_id,
-                diagnostics,
-            );
+        Expression::SubqueryExpression(_, _) => {
+            // Nested query specifications are validated through statement-level scope analysis.
         }
         Expression::Literal(_, _) | Expression::ParameterReference(_, _) => {
             // Literals and parameters don't reference variables

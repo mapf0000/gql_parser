@@ -175,9 +175,7 @@ fn validate_expression_semantics(
         Expression::BindingTableExpression(expr, _) => {
             validate_expression_semantics(validator, expr, diagnostics);
         }
-        Expression::SubqueryExpression(expr, _) => {
-            validate_expression_semantics(validator, expr, diagnostics);
-        }
+        Expression::SubqueryExpression(_, _) => {}
         // Literals and simple references don't need semantic validation
         Expression::Literal(_, _)
         | Expression::VariableReference(_, _)
@@ -298,9 +296,9 @@ fn validate_mutation_expressions(
                     _ => {}
                 }
             }
-            SimpleDataAccessingStatement::Modifying(
-                SimpleDataModifyingStatement::Primitive(primitive),
-            ) => {
+            SimpleDataAccessingStatement::Modifying(SimpleDataModifyingStatement::Primitive(
+                primitive,
+            )) => {
                 match primitive {
                     PrimitiveDataModifyingStatement::Insert(insert) => {
                         // Validate expressions in INSERT property specifications
@@ -464,13 +462,10 @@ fn validate_boolean_expression(
         Expression::Literal(lit, span) if !matches!(lit, Literal::Null) => {
             // Non-boolean, non-null literal in boolean context
             use crate::semantic::diag::SemanticDiagBuilder;
-            let diag = SemanticDiagBuilder::type_mismatch(
-                "Boolean",
-                &format!("{:?}", lit),
-                span.clone(),
-            )
-            .with_note("Condition expressions should evaluate to boolean")
-            .build();
+            let diag =
+                SemanticDiagBuilder::type_mismatch("Boolean", &format!("{:?}", lit), span.clone())
+                    .with_note("Condition expressions should evaluate to boolean")
+                    .build();
             diagnostics.push(diag);
         }
         Expression::Comparison(..)

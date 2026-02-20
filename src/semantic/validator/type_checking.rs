@@ -95,10 +95,7 @@ fn check_linear_query_types(linear_query: &LinearQuery, diagnostics: &mut Vec<Di
 }
 
 /// Checks type compatibility in an expression.
-fn check_expression_types(
-    expr: &crate::ast::expression::Expression,
-    diagnostics: &mut Vec<Diag>,
-) {
+fn check_expression_types(expr: &crate::ast::expression::Expression, diagnostics: &mut Vec<Diag>) {
     use crate::ast::expression::{BinaryOperator, Expression};
     use crate::semantic::diag::SemanticDiagBuilder;
 
@@ -118,35 +115,29 @@ fn check_expression_types(
                 | BinaryOperator::Modulo => {
                     // F3: Check for NULL in arithmetic (ISO GQL null propagation)
                     use crate::ast::expression::Literal;
-                    let left_is_null = matches!(left.as_ref(), Expression::Literal(Literal::Null, _));
-                    let right_is_null = matches!(right.as_ref(), Expression::Literal(Literal::Null, _));
+                    let left_is_null =
+                        matches!(left.as_ref(), Expression::Literal(Literal::Null, _));
+                    let right_is_null =
+                        matches!(right.as_ref(), Expression::Literal(Literal::Null, _));
 
                     if left_is_null || right_is_null {
                         diagnostics.push(
                             Diag::warning("Arithmetic operation with NULL will always return NULL")
-                                .with_primary_label(_span.clone(), "NULL propagation")
+                                .with_primary_label(_span.clone(), "NULL propagation"),
                         );
                     }
 
                     // Simple literal type checking
                     if is_definitely_string(left) {
                         diagnostics.push(
-                            SemanticDiagBuilder::type_mismatch(
-                                "numeric",
-                                "string",
-                                left.span(),
-                            )
-                            .build(),
+                            SemanticDiagBuilder::type_mismatch("numeric", "string", left.span())
+                                .build(),
                         );
                     }
                     if is_definitely_string(right) {
                         diagnostics.push(
-                            SemanticDiagBuilder::type_mismatch(
-                                "numeric",
-                                "string",
-                                right.span(),
-                            )
-                            .build(),
+                            SemanticDiagBuilder::type_mismatch("numeric", "string", right.span())
+                                .build(),
                         );
                     }
                 }
@@ -178,12 +169,8 @@ fn check_expression_types(
                     // Unary +/- require numeric type
                     if is_definitely_string(operand) {
                         diagnostics.push(
-                            SemanticDiagBuilder::type_mismatch(
-                                "numeric",
-                                "string",
-                                operand.span(),
-                            )
-                            .build(),
+                            SemanticDiagBuilder::type_mismatch("numeric", "string", operand.span())
+                                .build(),
                         );
                     }
                 }
@@ -245,10 +232,7 @@ fn check_expression_types(
                 }
                 AggregateFunction::BinarySetFunction(bsf) => {
                     check_expression_types(&bsf.expression, diagnostics);
-                    check_expression_types(
-                        &bsf.inverse_distribution_argument,
-                        diagnostics,
-                    );
+                    check_expression_types(&bsf.inverse_distribution_argument, diagnostics);
                 }
                 AggregateFunction::CountStar { .. } => {}
             }
@@ -323,10 +307,11 @@ fn check_expression_types(
         }
 
         // Graph/binding table/subquery expressions
-        Expression::GraphExpression(inner, _)
-        | Expression::BindingTableExpression(inner, _)
-        | Expression::SubqueryExpression(inner, _) => {
+        Expression::GraphExpression(inner, _) | Expression::BindingTableExpression(inner, _) => {
             check_expression_types(inner, diagnostics);
+        }
+        Expression::SubqueryExpression(_, _) => {
+            // Nested query specifications are parsed structurally and type-checked separately.
         }
 
         // Parenthesized
@@ -364,15 +349,13 @@ fn is_definitely_non_boolean(expr: &crate::ast::expression::Expression) -> bool 
     )
 }
 
-
 /// Checks types in a mutation statement.
 fn check_mutation_types(
     mutation: &crate::ast::mutation::LinearDataModifyingStatement,
     diagnostics: &mut Vec<Diag>,
 ) {
     use crate::ast::mutation::{
-        LinearDataModifyingStatement, SimpleDataAccessingStatement,
-        SimpleDataModifyingStatement,
+        LinearDataModifyingStatement, SimpleDataAccessingStatement, SimpleDataModifyingStatement,
     };
 
     let statements = match mutation {
@@ -415,9 +398,9 @@ fn check_mutation_types(
                     _ => {}
                 }
             }
-            SimpleDataAccessingStatement::Modifying(
-                SimpleDataModifyingStatement::Primitive(primitive),
-            ) => {
+            SimpleDataAccessingStatement::Modifying(SimpleDataModifyingStatement::Primitive(
+                primitive,
+            )) => {
                 use crate::ast::mutation::PrimitiveDataModifyingStatement;
                 match primitive {
                     PrimitiveDataModifyingStatement::Insert(insert) => {
@@ -505,10 +488,7 @@ fn check_property_specification_types(
 }
 
 /// Checks types in SELECT statement.
-fn check_select_types(
-    select: &crate::ast::query::SelectStatement,
-    diagnostics: &mut Vec<Diag>,
-) {
+fn check_select_types(select: &crate::ast::query::SelectStatement, diagnostics: &mut Vec<Diag>) {
     use crate::ast::query::SelectItemList;
     match &select.select_items {
         SelectItemList::Star => {}
