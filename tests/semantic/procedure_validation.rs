@@ -17,10 +17,27 @@ use smol_str::SmolStr;
 fn validate_with_procedures(source: &str, catalog: &impl MetadataProvider)
     -> ValidationOutcome
 {
+    use gql_parser::ast::program::Statement;
+
     let parse_result = parse(source);
+    eprintln!("Parse result AST is_some: {}", parse_result.ast.is_some());
+    if let Some(ref program) = parse_result.ast {
+        eprintln!("Program statements count: {}", program.statements.len());
+        for (i, stmt) in program.statements.iter().enumerate() {
+            eprintln!("Statement {}: {:?}", i, match stmt {
+                Statement::Query(_) => "Query",
+                Statement::Mutation(_) => "Mutation",
+                Statement::Session(_) => "Session",
+                Statement::Transaction(_) => "Transaction",
+                Statement::Catalog(_) => "Catalog",
+                Statement::Empty(_) => "Empty",
+            });
+        }
+    }
     assert!(parse_result.ast.is_some(), "Failed to parse: {}", source);
 
     let config = ValidationConfig {
+        metadata_validation: true, // Enable metadata validation for callable checks
         ..Default::default()
     };
     let validator = SemanticValidator::with_config(config).with_metadata_provider(catalog);
@@ -46,6 +63,14 @@ fn test_unknown_procedure_fails_with_validation_enabled() {
 
     let catalog = InMemoryCallableCatalog::new();
     let outcome = validate_with_procedures(source, &catalog);
+
+    // Debug output
+    eprintln!("=== Test: unknown procedure ===");
+    eprintln!("Is success: {}", outcome.is_success());
+    eprintln!("Diagnostics count: {}", outcome.diagnostics.len());
+    for diag in &outcome.diagnostics {
+        eprintln!("  - {:?}: {}", diag.severity, diag.message);
+    }
 
     // Should fail - procedure doesn't exist
     assert!(!outcome.is_success() ||

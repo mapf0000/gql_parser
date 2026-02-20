@@ -5,9 +5,9 @@
 
 use crate::ast::expression::{AggregateFunction, Expression, FunctionCall, FunctionName, GeneralSetFunctionType};
 use crate::ast::program::Program;
-use crate::ast::procedure::{CallProcedureStatement, ProcedureCall, NamedProcedureCall};
+use crate::ast::procedure::{ProcedureCall, NamedProcedureCall};
 use crate::ast::query::PrimitiveQueryStatement;
-use crate::ast::visitor::{walk_expression, walk_program, walk_primitive_query_statement, AstVisitor, VisitResult};
+use crate::ast::visitor::{walk_expression, walk_program, walk_primitive_query_statement, walk_linear_query, AstVisitor, VisitResult};
 use crate::diag::Diag;
 
 use super::SemanticValidator;
@@ -23,12 +23,16 @@ pub(super) fn run_callable_validation(
     program: &Program,
     diagnostics: &mut Vec<Diag>,
 ) {
+    eprintln!("DEBUG: run_callable_validation called");
+    eprintln!("DEBUG: metadata_provider is_some: {}", validator.metadata_provider.is_some());
+
     let mut visitor = CallableValidationVisitor {
         validator,
         diagnostics,
     };
 
     let _ = walk_program(&mut visitor, program);
+    eprintln!("DEBUG: walk_program completed");
 }
 
 /// Visitor for callable validation.
@@ -40,10 +44,15 @@ struct CallableValidationVisitor<'v, 'm> {
 impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
     /// Validates a procedure call against the metadata provider.
     fn validate_procedure_call(&mut self, call: &NamedProcedureCall) {
+        eprintln!("DEBUG: validate_procedure_call called");
+
         // Only validate if we have a metadata provider
         let Some(metadata) = self.validator.metadata_provider else {
+            eprintln!("DEBUG: No metadata provider");
             return; // No metadata provider configured, skip validation
         };
+
+        eprintln!("DEBUG: Metadata provider found");
 
         // Get procedure name - extract from ProcedureReference
         use crate::ast::references::ProcedureReference;
@@ -52,8 +61,11 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
             ProcedureReference::ReferenceParameter { name, .. } => name,
         };
 
+        eprintln!("DEBUG: Looking up callable: {}", name);
+
         // Lookup callable signature (procedures are callables with kind=Procedure)
         let Some(signature) = metadata.lookup_callable(name) else {
+            eprintln!("DEBUG: Callable not found, reporting error");
             // Unknown procedure - report error
             self.diagnostics.push(
                 crate::diag::Diag::new(
@@ -67,6 +79,8 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
             );
             return;
         };
+
+        eprintln!("DEBUG: Callable found: {:?}", signature.name);
 
         // Validate arity if arguments provided
         if let Some(arguments) = &call.arguments {
@@ -86,10 +100,40 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
         }
 
         // Validate YIELD clause if present
-        if let Some(_yield_clause) = &call.yield_clause {
-            // YIELD validation would check that yielded fields match procedure output
-            // For now, we skip this as it requires more complex signature metadata
-            // The MetadataProvider trait can be extended to include output field metadata
+        if let Some(yield_clause) = &call.yield_clause {
+            // YIELD validation: check that yielded fields match procedure output
+            // The return_type in CallableSignature represents the output field name(s)
+            if let Some(return_type) = &signature.return_type {
+                // Check each yielded field
+                for yield_item in &yield_clause.items.items {
+                    // Extract the field name from the expression
+                    // In typical cases, it should be a variable reference
+                    use crate::ast::expression::Expression;
+                    let field_name = match &yield_item.expression {
+                        Expression::VariableReference(name, _span) => name,
+                        _ => continue, // Skip validation for non-variable expressions
+                    };
+
+                    // Simple validation: check if field name matches return type
+                    // In a more sophisticated implementation, return_type could be
+                    // a comma-separated list or a structured type
+                    if field_name.as_str() != return_type.as_str() {
+                        self.diagnostics.push(
+                            crate::diag::Diag::new(
+                                crate::diag::DiagSeverity::Error,
+                                format!(
+                                    "YIELD field '{}' does not exist in procedure output. Expected '{}'",
+                                    field_name, return_type
+                                ),
+                            )
+                            .with_label(crate::diag::DiagLabel::primary(
+                                yield_item.span.clone(),
+                                "invalid field",
+                            )),
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -202,18 +246,37 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
 impl<'v, 'm> AstVisitor for CallableValidationVisitor<'v, 'm> {
     type Break = ();
 
+    fn visit_linear_query(&mut self, query: &crate::ast::query::LinearQuery) -> VisitResult<()> {
+        use crate::ast::query::LinearQuery;
+        eprintln!("DEBUG: visit_linear_query called");
+        match query {
+            LinearQuery::Focused(focused) => {
+                eprintln!("DEBUG: Focused query, primitive_statements count: {}", focused.primitive_statements.len());
+            }
+            LinearQuery::Ambient(ambient) => {
+                eprintln!("DEBUG: Ambient query, primitive_statements count: {}", ambient.primitive_statements.len());
+            }
+        }
+        walk_linear_query(self, query)
+    }
+
     fn visit_primitive_query_statement(
         &mut self,
         statement: &PrimitiveQueryStatement,
     ) -> VisitResult<()> {
+        eprintln!("DEBUG: visit_primitive_query_statement called");
+
         // Check if this is a CALL statement
         if let PrimitiveQueryStatement::Call(call_stmt) = statement {
+            eprintln!("DEBUG: Found CALL statement");
             // Validate procedure call
             if let ProcedureCall::Named(named_call) = &call_stmt.call {
+                eprintln!("DEBUG: Named procedure call");
                 self.validate_procedure_call(named_call);
             }
         }
-        // Continue walking the statement
+
+        // Continue walking the statement to visit expressions
         walk_primitive_query_statement(self, statement)
     }
 

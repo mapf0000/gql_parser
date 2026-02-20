@@ -126,6 +126,7 @@ fn classify(kind: &TokenKind) -> SyntaxToken {
         | TokenKind::Return
         | TokenKind::Finish
         | TokenKind::Select
+        | TokenKind::Call
         | TokenKind::From => SyntaxToken::QueryStart,
         TokenKind::Insert
         | TokenKind::Delete
@@ -135,7 +136,7 @@ fn classify(kind: &TokenKind) -> SyntaxToken {
         | TokenKind::Nodetach => SyntaxToken::MutationStart,
         TokenKind::Session => SyntaxToken::SessionStart,
         TokenKind::Start | TokenKind::Commit | TokenKind::Rollback => SyntaxToken::TransactionStart,
-        TokenKind::Create | TokenKind::Drop | TokenKind::Call => SyntaxToken::CatalogStart,
+        TokenKind::Create | TokenKind::Drop => SyntaxToken::CatalogStart,
         TokenKind::Semicolon | TokenKind::Next => SyntaxToken::Semicolon,
         TokenKind::Eof => SyntaxToken::Eof,
         _ => SyntaxToken::Other,

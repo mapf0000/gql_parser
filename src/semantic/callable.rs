@@ -887,12 +887,12 @@ impl BuiltinCallableCatalog {
 
     /// Registers aggregate functions.
     fn register_aggregate_functions(&mut self) {
-        // COUNT(*) or COUNT(expr)
+        // COUNT(*) or COUNT(expr) - expr is optional to support COUNT(*)
         self.register(
             CallableSignature::new(
                 "count",
                 CallableKind::AggregateFunction,
-                vec![ParameterSignature::required("expr", "ANY")],
+                vec![ParameterSignature::optional("expr", "ANY")],
                 Some("INT"),
             )
             .with_nullability(Nullability::CalledOnNullInput),
