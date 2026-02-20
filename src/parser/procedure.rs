@@ -19,7 +19,7 @@ use crate::ast::{Expression, ProcedureStatement, Span};
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
 use crate::parser::base::{check_token, consume_if, expect_token};
-use crate::parser::LegacyParseResult;
+use crate::parser::InternalParseResult;
 use crate::parser::expression::parse_expression;
 use crate::parser::mutation::parse_linear_data_modifying_statement;
 use crate::parser::program::parse_catalog_statement_kind;
@@ -31,7 +31,7 @@ use crate::parser::types::{
 use smol_str::SmolStr;
 
 /// Parse result with optional value and diagnostics.
-pub(crate) type ParseResult<T> = LegacyParseResult<T>;
+pub(crate) type ParseResult<T> = InternalParseResult<T>;
 
 // ============================================================================
 // Helper Functions

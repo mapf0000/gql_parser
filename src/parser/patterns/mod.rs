@@ -4,7 +4,7 @@ use crate::ast::expression::Expression;
 use crate::ast::query::*;
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
-use crate::parser::LegacyParseResult;
+use crate::parser::InternalParseResult;
 use crate::parser::expression::parse_expression;
 use smol_str::SmolStr;
 
@@ -13,13 +13,13 @@ mod label;
 mod path;
 
 /// Parse result with optional value and diagnostics.
-type ParseResult<T> = LegacyParseResult<T>;
+type ParseResult<T> = InternalParseResult<T>;
 
 #[derive(Clone, Copy)]
 pub(super) enum PatternSyncContext {
-    StatementBoundary,
-    WhereOrStatementBoundary,
-    PathPatternBoundary,
+    Statement,
+    WhereOrStatement,
+    PathPattern,
 }
 
 /// Parses a graph pattern starting at the given position.
@@ -488,11 +488,11 @@ impl<'a> PatternParser<'a> {
     }
 
     fn skip_to_where_or_statement_boundary(&mut self) {
-        self.skip_to_sync(PatternSyncContext::WhereOrStatementBoundary);
+        self.skip_to_sync(PatternSyncContext::WhereOrStatement);
     }
 
     fn skip_to_statement_boundary(&mut self) {
-        self.skip_to_sync(PatternSyncContext::StatementBoundary);
+        self.skip_to_sync(PatternSyncContext::Statement);
     }
 
     pub(super) fn skip_to_sync(&mut self, context: PatternSyncContext) {
@@ -598,11 +598,11 @@ pub(super) fn is_path_pattern_delimiter(kind: &TokenKind) -> bool {
 
 fn is_sync_token(kind: &TokenKind, context: PatternSyncContext) -> bool {
     match context {
-        PatternSyncContext::StatementBoundary => is_query_boundary(kind),
-        PatternSyncContext::WhereOrStatementBoundary => {
+        PatternSyncContext::Statement => is_query_boundary(kind),
+        PatternSyncContext::WhereOrStatement => {
             matches!(kind, TokenKind::Where) || is_query_boundary(kind)
         }
-        PatternSyncContext::PathPatternBoundary => is_path_pattern_delimiter(kind),
+        PatternSyncContext::PathPattern => is_path_pattern_delimiter(kind),
     }
 }
 

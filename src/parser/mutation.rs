@@ -8,7 +8,7 @@ use crate::ast::query::{
 };
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
-use crate::parser::LegacyParseResult;
+use crate::parser::InternalParseResult;
 use crate::parser::procedure::parse_call_procedure_statement;
 use crate::parser::query::{
     parse_expression_with_diags, parse_primitive_query_statement, parse_return_statement,
@@ -17,7 +17,7 @@ use crate::parser::query::{
 use smol_str::SmolStr;
 
 /// Parse result with optional value and diagnostics.
-type ParseResult<T> = LegacyParseResult<T>;
+type ParseResult<T> = InternalParseResult<T>;
 
 /// Parses a linear data modifying statement starting at the given position.
 pub fn parse_linear_data_modifying_statement(

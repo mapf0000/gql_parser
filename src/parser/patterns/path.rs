@@ -1004,7 +1004,7 @@ impl<'a> PatternParser<'a> {
     }
 
     fn skip_to_path_pattern_boundary(&mut self) {
-        self.skip_to_sync(PatternSyncContext::PathPatternBoundary);
+        self.skip_to_sync(PatternSyncContext::PathPattern);
     }
 }
 

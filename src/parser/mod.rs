@@ -19,9 +19,9 @@ use crate::diag::{Diag, DiagSeverity, SourceFile, convert_diagnostics_to_reports
 use crate::lexer::token::{Token, TokenKind};
 use miette::Report;
 
-/// Legacy parsing result used by query/procedure/mutation/patterns parsers.
-/// Returns optional value and collected diagnostics for incremental parsing.
-pub(crate) type LegacyParseResult<T> = (Option<T>, Vec<Diag>);
+/// Internal parsing result used by query/procedure/mutation/patterns parsers.
+/// Returns optional value and collected diagnostics for error recovery.
+pub(crate) type InternalParseResult<T> = (Option<T>, Vec<Diag>);
 
 /// Result of parsing a GQL program.
 #[derive(Debug)]

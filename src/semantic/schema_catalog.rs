@@ -247,6 +247,9 @@ pub enum ConstraintMeta {
 // ============================================================================
 
 /// Errors that can occur during catalog operations.
+///
+/// These errors are returned by catalog trait methods. For diagnostic reporting,
+/// convert to `Diag` using `.to_diag(span)`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CatalogError {
     /// The requested schema snapshot is not available
@@ -284,6 +287,36 @@ impl std::fmt::Display for CatalogError {
 }
 
 impl std::error::Error for CatalogError {}
+
+impl CatalogError {
+    /// Converts this catalog error to a diagnostic at the given span.
+    pub fn to_diag(&self, span: crate::ast::Span) -> crate::diag::Diag {
+        use crate::diag::{Diag, DiagLabel};
+
+        match self {
+            CatalogError::SnapshotUnavailable { reason } => {
+                Diag::error(format!("Schema snapshot unavailable: {}", reason))
+                    .with_label(DiagLabel::primary(span, "snapshot unavailable"))
+            }
+            CatalogError::GraphNotFound { graph } => {
+                Diag::error(format!("Graph '{}' not found", graph))
+                    .with_label(DiagLabel::primary(span, "undefined graph"))
+            }
+            CatalogError::SchemaNotFound { schema } => {
+                Diag::error(format!("Schema '{}' not found", schema))
+                    .with_label(DiagLabel::primary(span, "undefined schema"))
+            }
+            CatalogError::InvalidRequest { reason } => {
+                Diag::error(format!("Invalid catalog request: {}", reason))
+                    .with_label(DiagLabel::primary(span, reason.as_str()))
+            }
+            CatalogError::General { message } => {
+                Diag::error(format!("Catalog error: {}", message))
+                    .with_label(DiagLabel::primary(span, "catalog error"))
+            }
+        }
+    }
+}
 
 /// Errors that can occur during fixture loading.
 #[derive(Debug, Clone, PartialEq, Eq)]

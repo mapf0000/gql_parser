@@ -200,20 +200,18 @@ fn main() {
     println!("  - Including custom: distance, join_strings");
 
     // Verify both built-in and custom are accessible
-    if composite
+    if !composite
         .resolve("abs", CallableKind::Function, &ctx)
         .unwrap()
-        .len()
-        > 0
+        .is_empty()
     {
         println!("\n✓ Built-in function 'abs' is accessible");
     }
 
-    if composite
+    if !composite
         .resolve("distance", CallableKind::Function, &ctx)
         .unwrap()
-        .len()
-        > 0
+        .is_empty()
     {
         println!("✓ Custom function 'distance' is accessible");
     }
@@ -231,7 +229,6 @@ fn main() {
         println!("\nValidating ABS function calls:");
         println!("  ABS signature: min_arity={}, max_arity={:?}", sigs[0].min_arity(), sigs[0].max_arity());
 
-        use gql_parser::ast::Span;
         use gql_parser::semantic::callable::CallSite;
 
         // Valid call: ABS(42)
@@ -278,7 +275,6 @@ fn main() {
         println!("\nValidating SUBSTRING function calls:");
         println!("  SUBSTRING signature: min_arity={}, max_arity={:?}", sigs[0].min_arity(), sigs[0].max_arity());
 
-        use gql_parser::ast::Span;
         use gql_parser::semantic::callable::CallSite;
 
         // Valid: SUBSTRING('hello', 1)
@@ -327,7 +323,7 @@ fn main() {
     let catalog_instance = BuiltinCallableCatalog::new();
     let validator_instance = DefaultCallableValidator::new();
 
-    let semantic_validator = SemanticValidator::new()
+    let _semantic_validator = SemanticValidator::new()
         .with_callable_catalog(&catalog_instance)
         .with_callable_validator(&validator_instance);
 

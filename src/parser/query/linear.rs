@@ -6,14 +6,14 @@
 use crate::ast::query::*;
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
-use crate::parser::LegacyParseResult;
+use crate::parser::InternalParseResult;
 
 use super::primitive::parse_primitive_query_statement;
 use super::result::parse_return_statement;
 use super::primitive::parse_use_graph_clause;
 
 /// Parse result with optional value and diagnostics.
-pub(super) type ParseResult<T> = LegacyParseResult<T>;
+pub(super) type ParseResult<T> = InternalParseResult<T>;
 
 /// Parses a linear query and wraps it in Query enum.
 pub(super) fn parse_linear_query_as_query(tokens: &[Token], pos: &mut usize) -> ParseResult<Query> {

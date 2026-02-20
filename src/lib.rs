@@ -1,4 +1,3 @@
-#![allow(rustdoc::broken_intra_doc_links, rustdoc::invalid_html_tags)]
 //! Pure-Rust ISO GQL parser with diagnostics, AST traversal, and query analysis APIs.
 //!
 //! # Parse
@@ -66,7 +65,7 @@ pub use lexer::{Lexer, LexerResult, tokenize};
 pub use parser::{ParseResult, Parser};
 
 // Re-export semantic validation types for convenience.
-pub use ir::{IR, ValidationResult};
+pub use ir::IR;
 pub use semantic::SemanticValidator;
 
 // Re-export analysis types for convenience.

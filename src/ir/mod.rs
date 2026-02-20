@@ -13,7 +13,7 @@ pub mod symbol_table;
 pub mod type_table;
 
 use crate::ast::Program;
-use crate::diag::Diag;
+use crate::diag::{Diag, DiagSeverity};
 pub use symbol_table::SymbolTable;
 pub use type_table::TypeTable;
 
@@ -55,9 +55,6 @@ impl IR {
         &self.type_table
     }
 }
-
-/// Result type for semantic validation operations.
-pub type ValidationResult = Result<IR, Vec<Diag>>;
 
 /// Outcome of semantic validation, always carrying diagnostics.
 ///
@@ -102,5 +99,48 @@ impl ValidationOutcome {
     /// Returns true if there are any diagnostics (errors, warnings, or notes).
     pub fn has_diagnostics(&self) -> bool {
         !self.diagnostics.is_empty()
+    }
+
+    /// Returns true if any diagnostics are errors (not just warnings).
+    pub fn has_errors(&self) -> bool {
+        self.diagnostics
+            .iter()
+            .any(|d| d.severity == DiagSeverity::Error)
+    }
+
+    /// Returns true if any diagnostics are warnings.
+    pub fn has_warnings(&self) -> bool {
+        self.diagnostics
+            .iter()
+            .any(|d| d.severity == DiagSeverity::Warning)
+    }
+
+    /// Converts to Result for contexts that don't care about warnings.
+    ///
+    /// Returns `Ok(IR)` if validation succeeded, or `Err(diagnostics)` if failed.
+    /// Note that this discards warnings if validation succeeded.
+    pub fn into_result(self) -> Result<IR, Vec<Diag>> {
+        match self.ir {
+            Some(ir) => Ok(ir),
+            None => Err(self.diagnostics),
+        }
+    }
+
+    /// Unwraps the IR, panicking if validation failed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if validation failed (no IR available).
+    pub fn unwrap(self) -> IR {
+        self.ir.expect("called `ValidationOutcome::unwrap()` on a failed validation")
+    }
+
+    /// Unwraps the IR with a custom panic message.
+    ///
+    /// # Panics
+    ///
+    /// Panics if validation failed (no IR available).
+    pub fn expect(self, msg: &str) -> IR {
+        self.ir.expect(msg)
     }
 }

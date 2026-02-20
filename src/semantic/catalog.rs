@@ -4,10 +4,13 @@
 //! to validate references against an optional catalog of graphs, schemas,
 //! procedures, and types.
 
-/// Result type for catalog lookups that may fail.
-pub type CatalogResult<T> = Result<T, CatalogError>;
+use crate::ast::Span;
+use crate::diag::{Diag, DiagLabel};
 
 /// Error type for catalog validation failures.
+///
+/// These errors are returned by catalog trait methods. For diagnostic reporting,
+/// convert to `Diag` using `.to_diag(span)`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CatalogError {
     /// A graph was not found in the catalog.
@@ -49,6 +52,35 @@ impl std::fmt::Display for CatalogError {
 }
 
 impl std::error::Error for CatalogError {}
+
+impl CatalogError {
+    /// Converts this catalog error to a diagnostic at the given span.
+    pub fn to_diag(&self, span: Span) -> Diag {
+        match self {
+            CatalogError::GraphNotFound { graph } => {
+                Diag::error(format!("Graph '{}' not found in catalog", graph))
+                    .with_label(DiagLabel::primary(span, "undefined graph"))
+            }
+            CatalogError::SchemaNotFound { schema } => {
+                Diag::error(format!("Schema '{}' not found in catalog", schema))
+                    .with_label(DiagLabel::primary(span, "undefined schema"))
+            }
+            CatalogError::ProcedureNotFound { procedure } => {
+                Diag::error(format!("Procedure '{}' not found in catalog", procedure))
+                    .with_label(DiagLabel::primary(span, "undefined procedure"))
+            }
+            CatalogError::TypeNotFound { type_name } => {
+                Diag::error(format!("Type '{}' not found in catalog", type_name))
+                    .with_label(DiagLabel::primary(span, "undefined type"))
+            }
+            CatalogError::CatalogUnavailable => {
+                Diag::error("Catalog is not available")
+                    .with_label(DiagLabel::primary(span, "catalog unavailable"))
+                    .with_help("Configure a catalog to enable reference validation")
+            }
+        }
+    }
+}
 
 /// Represents a graph definition in the catalog.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,7 +175,7 @@ pub trait Catalog {
     /// Validates that a graph exists in the catalog.
     ///
     /// Returns `Ok(())` if the graph exists, or an error if not.
-    fn validate_graph(&self, name: &str) -> CatalogResult<()> {
+    fn validate_graph(&self, name: &str) -> Result<(), CatalogError> {
         if self.get_graph(name).is_some() {
             Ok(())
         } else {
@@ -156,7 +188,7 @@ pub trait Catalog {
     /// Validates that a schema exists in the catalog.
     ///
     /// Returns `Ok(())` if the schema exists, or an error if not.
-    fn validate_schema(&self, name: &str) -> CatalogResult<()> {
+    fn validate_schema(&self, name: &str) -> Result<(), CatalogError> {
         if self.get_schema(name).is_some() {
             Ok(())
         } else {
@@ -169,7 +201,7 @@ pub trait Catalog {
     /// Validates that a procedure exists in the catalog.
     ///
     /// Returns `Ok(())` if the procedure exists, or an error if not.
-    fn validate_procedure(&self, name: &str) -> CatalogResult<()> {
+    fn validate_procedure(&self, name: &str) -> Result<(), CatalogError> {
         if self.get_procedure(name).is_some() {
             Ok(())
         } else {

@@ -53,7 +53,7 @@
 //! ```
 
 use crate::ast::Span;
-use crate::diag::{Diag, DiagSeverity};
+use crate::diag::{Diag, DiagLabel, DiagSeverity};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -62,10 +62,10 @@ use std::sync::Arc;
 // Core Types
 // ============================================================================
 
-/// Result type for catalog operations.
-pub type CatalogResult<T> = Result<T, CatalogError>;
-
 /// Errors that can occur during catalog operations.
+///
+/// These errors are returned by catalog trait methods. For diagnostic reporting,
+/// convert to `Diag` using `.to_diag(span)`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CatalogError {
     /// Callable not found in catalog.
@@ -119,6 +119,48 @@ impl std::fmt::Display for CatalogError {
 }
 
 impl std::error::Error for CatalogError {}
+
+impl CatalogError {
+    /// Converts this catalog error to a diagnostic at the given span.
+    ///
+    /// Since catalog errors don't carry their own location information,
+    /// callers must provide the relevant source span (e.g., the function call site).
+    pub fn to_diag(&self, span: Span) -> Diag {
+        match self {
+            CatalogError::CallableNotFound { name, kind } => {
+                Diag::error(format!("{:?} '{}' not found in catalog", kind, name))
+                    .with_label(DiagLabel::primary(span, "undefined callable"))
+                    .with_help(format!(
+                        "Check if '{}' is defined and available in your catalog",
+                        name
+                    ))
+            }
+            CatalogError::AmbiguousCallable { name, candidates } => {
+                let mut diag = Diag::error(format!("Ambiguous reference to '{}'", name))
+                    .with_label(DiagLabel::primary(span, "ambiguous callable"));
+
+                for candidate in candidates {
+                    diag = diag.with_note(format!("Candidate: {}", candidate));
+                }
+
+                diag.with_help("Qualify the callable name to resolve the ambiguity")
+            }
+            CatalogError::InvalidSignature { name, reason } => {
+                Diag::error(format!("Invalid signature for '{}'", name))
+                    .with_label(DiagLabel::primary(span, reason.clone()))
+            }
+            CatalogError::CatalogUnavailable => {
+                Diag::error("Callable catalog is not available")
+                    .with_label(DiagLabel::primary(span, "cannot validate callable"))
+                    .with_help("Configure a callable catalog to enable validation")
+            }
+            CatalogError::Other(msg) => {
+                Diag::error(format!("Catalog error: {}", msg))
+                    .with_label(DiagLabel::primary(span, "catalog error"))
+            }
+        }
+    }
+}
 
 /// Kind of callable (function, procedure, aggregate).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -347,7 +389,7 @@ pub trait CallableCatalog: Send + Sync {
         name: &str,
         kind: CallableKind,
         ctx: &CallableLookupContext,
-    ) -> CatalogResult<Vec<CallableSignature>>;
+    ) -> Result<Vec<CallableSignature>, CatalogError>;
 
     /// Checks if a callable exists.
     fn exists(&self, name: &str, kind: CallableKind, ctx: &CallableLookupContext) -> bool {
@@ -970,7 +1012,7 @@ impl CallableCatalog for BuiltinCallableCatalog {
         name: &str,
         kind: CallableKind,
         _ctx: &CallableLookupContext,
-    ) -> CatalogResult<Vec<CallableSignature>> {
+    ) -> Result<Vec<CallableSignature>, CatalogError> {
         let name_lower = SmolStr::new(name.to_lowercase());
         let key = (name_lower, kind);
         Ok(self.signatures.get(&key).cloned().unwrap_or_default())
@@ -1042,7 +1084,7 @@ where
         name: &str,
         kind: CallableKind,
         ctx: &CallableLookupContext,
-    ) -> CatalogResult<Vec<CallableSignature>> {
+    ) -> Result<Vec<CallableSignature>, CatalogError> {
         let mut sigs = Vec::new();
 
         // Try external catalog first (allows overriding built-ins)
@@ -1128,7 +1170,7 @@ impl CallableCatalog for InMemoryCallableCatalog {
         name: &str,
         kind: CallableKind,
         _ctx: &CallableLookupContext,
-    ) -> CatalogResult<Vec<CallableSignature>> {
+    ) -> Result<Vec<CallableSignature>, CatalogError> {
         let name_lower = SmolStr::new(name.to_lowercase());
         let key = (name_lower, kind);
         Ok(self.signatures.get(&key).cloned().unwrap_or_default())
@@ -1257,7 +1299,7 @@ impl CallableCatalog for Arc<dyn CallableCatalog> {
         name: &str,
         kind: CallableKind,
         ctx: &CallableLookupContext,
-    ) -> CatalogResult<Vec<CallableSignature>> {
+    ) -> Result<Vec<CallableSignature>, CatalogError> {
         (**self).resolve(name, kind, ctx)
     }
 

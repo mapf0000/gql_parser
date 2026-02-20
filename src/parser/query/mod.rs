@@ -11,11 +11,11 @@ use crate::ast::query::*;
 use crate::ast::*;
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
-use crate::parser::LegacyParseResult;
+use crate::parser::InternalParseResult;
 use crate::parser::expression::parse_expression;
 
 /// Parse result with optional value and diagnostics.
-pub(crate) type ParseResult<T> = LegacyParseResult<T>;
+pub(crate) type ParseResult<T> = InternalParseResult<T>;
 
 // Submodules
 mod linear;
