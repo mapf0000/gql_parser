@@ -13,3 +13,12 @@ mod graph_types;
 mod graph_types_comprehensive;
 mod type_references;
 mod case_insensitivity;
+
+// Advanced test modules
+mod expressions;
+mod path_patterns_advanced;
+mod modifications_advanced;
+mod composite_queries;
+mod schema_advanced;
+mod session_transaction;
+mod procedures_advanced;
