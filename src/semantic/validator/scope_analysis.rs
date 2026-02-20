@@ -44,21 +44,25 @@ pub(super) fn run_scope_analysis(
     };
 
     // Walk all statements in the program, tracking statement boundaries
-    let mut statement_id = 0;
+    let mut next_statement_id = 0usize;
     for statement in &program.statements {
         match statement {
             crate::ast::program::Statement::Query(query_stmt) => {
+                let statement_id = next_statement_id;
+                next_statement_id += 1;
                 analyze_query(
                     validator,
                     &query_stmt.query,
                     &mut symbol_table,
                     &mut scope_metadata,
                     statement_id,
+                    &mut next_statement_id,
                     diagnostics,
                 );
-                statement_id += 1;
             }
             crate::ast::program::Statement::Mutation(mutation_stmt) => {
+                let statement_id = next_statement_id;
+                next_statement_id += 1;
                 analyze_mutation_with_scope(
                     validator,
                     &mutation_stmt.statement,
@@ -67,7 +71,6 @@ pub(super) fn run_scope_analysis(
                     statement_id,
                     diagnostics,
                 );
-                statement_id += 1;
             }
             crate::ast::program::Statement::Session(_)
             | crate::ast::program::Statement::Transaction(_)
@@ -88,6 +91,7 @@ fn analyze_query(
     symbol_table: &mut SymbolTable,
     scope_metadata: &mut ScopeMetadata,
     statement_id: usize,
+    next_statement_id: &mut usize,
     diagnostics: &mut Vec<Diag>,
 ) {
     match query {
@@ -110,17 +114,20 @@ fn analyze_query(
                 symbol_table,
                 scope_metadata,
                 statement_id,
+                next_statement_id,
                 diagnostics,
             );
 
-            // Right query gets a new statement_id for isolation
-            let right_statement_id = statement_id + 1000; // Use high offset to avoid collision
+            // Right query gets a deterministic fresh statement-id for isolation.
+            let right_statement_id = *next_statement_id;
+            *next_statement_id += 1;
             analyze_query(
                 validator,
                 &composite_query.right,
                 symbol_table,
                 scope_metadata,
                 right_statement_id,
+                next_statement_id,
                 diagnostics,
             );
         }
@@ -131,6 +138,7 @@ fn analyze_query(
                 symbol_table,
                 scope_metadata,
                 statement_id,
+                next_statement_id,
                 diagnostics,
             );
         }

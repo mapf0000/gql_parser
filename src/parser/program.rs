@@ -2,11 +2,12 @@
 
 use crate::ast::{
     CallCatalogModifyingProcedureStatement, CatalogStatement, CatalogStatementKind, CommitCommand,
-    CreateGraphStatement, CreateGraphTypeStatement, CreateSchemaStatement, DropGraphStatement,
-    DropGraphTypeStatement, DropSchemaStatement, Expression, GraphReference, GraphTypeReference,
-    GraphTypeSource, GraphTypeSpec, MutationStatement, Program, QueryStatement, RollbackCommand,
-    SchemaReference, SessionCloseCommand, SessionCommand, SessionResetCommand, SessionResetTarget,
-    SessionSetCommand, SessionSetGraphClause, SessionSetParameterClause, SessionSetSchemaClause,
+    CreateGraphStatement, CreateGraphTypeStatement, CreateProcedureStatement,
+    CreateSchemaStatement, DropGraphStatement, DropGraphTypeStatement, DropProcedureStatement,
+    DropSchemaStatement, Expression, GraphReference, GraphTypeReference, GraphTypeSource,
+    GraphTypeSpec, MutationStatement, Program, QueryStatement, RollbackCommand, SchemaReference,
+    SessionCloseCommand, SessionCommand, SessionResetCommand, SessionResetTarget, SessionSetCommand,
+    SessionSetGraphClause, SessionSetParameterClause, SessionSetSchemaClause,
     SessionSetTimeZoneClause, SessionStatement, Span, StartTransactionCommand, Statement,
     TransactionAccessMode, TransactionCharacteristics, TransactionCommand, TransactionMode,
     TransactionStatement,
@@ -15,7 +16,7 @@ use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
 use crate::parser::base::TokenStream;
 use crate::parser::mutation::parse_linear_data_modifying_statement;
-use crate::parser::procedure::parse_call_procedure_statement;
+use crate::parser::procedure::{parse_call_procedure_statement, parse_nested_procedure_specification};
 use crate::parser::query::parse_query;
 use crate::parser::references as reference_parser;
 use smol_str::SmolStr;
@@ -115,6 +116,7 @@ fn classify(kind: &TokenKind) -> SyntaxToken {
         | TokenKind::Filter
         | TokenKind::Let
         | TokenKind::For
+        | TokenKind::With
         | TokenKind::Order
         | TokenKind::Limit
         | TokenKind::Offset
@@ -971,7 +973,7 @@ fn parse_create_catalog_statement(tokens: &[Token]) -> ParseOutcome<CatalogState
         return Err(expected_token_diag(
             tokens,
             cursor,
-            "SCHEMA or GRAPH",
+            "SCHEMA, GRAPH, or PROCEDURE",
             "CREATE statement",
         ));
     }
@@ -992,6 +994,11 @@ fn parse_create_catalog_statement(tokens: &[Token]) -> ParseOutcome<CatalogState
         }));
     }
 
+    if is_identifier_word(&tokens[cursor].kind, "PROCEDURE") {
+        cursor += 1;
+        return parse_create_procedure_catalog_statement(tokens, cursor, or_replace);
+    }
+
     let property = if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::Property) {
         cursor += 1;
         true
@@ -1003,7 +1010,7 @@ fn parse_create_catalog_statement(tokens: &[Token]) -> ParseOutcome<CatalogState
         return Err(expected_token_diag(
             tokens,
             cursor,
-            "GRAPH",
+            "GRAPH or PROCEDURE",
             "CREATE statement",
         ));
     }
@@ -1315,7 +1322,7 @@ fn parse_drop_catalog_statement(tokens: &[Token]) -> ParseOutcome<CatalogStateme
         return Err(expected_token_diag(
             tokens,
             cursor,
-            "SCHEMA or GRAPH",
+            "SCHEMA, GRAPH, or PROCEDURE",
             "DROP statement",
         ));
     }
@@ -1331,6 +1338,23 @@ fn parse_drop_catalog_statement(tokens: &[Token]) -> ParseOutcome<CatalogStateme
         return Ok(CatalogStatementKind::DropSchema(DropSchemaStatement {
             if_exists,
             schema,
+            span: slice_span(tokens),
+        }));
+    }
+
+    if is_identifier_word(&tokens[cursor].kind, "PROCEDURE") {
+        cursor += 1;
+        let if_exists = consume_if_exists(tokens, &mut cursor);
+        let (procedure, next_cursor) =
+            parse_procedure_reference_until(tokens, cursor, |_| false, "procedure reference")?;
+
+        if next_cursor < tokens.len() {
+            return Err(unexpected_token_diag(tokens, next_cursor, "DROP PROCEDURE"));
+        }
+
+        return Ok(CatalogStatementKind::DropProcedure(DropProcedureStatement {
+            if_exists,
+            procedure,
             span: slice_span(tokens),
         }));
     }
@@ -1415,6 +1439,101 @@ fn parse_call_catalog_statement(tokens: &[Token]) -> ParseOutcome<CatalogStateme
     ))
 }
 
+fn parse_create_procedure_catalog_statement(
+    tokens: &[Token],
+    mut cursor: usize,
+    or_replace: bool,
+) -> ParseOutcome<CatalogStatementKind> {
+    let if_not_exists = consume_if_not_exists(tokens, &mut cursor);
+    let (procedure, next_cursor) = parse_procedure_reference_until(
+        tokens,
+        cursor,
+        is_create_procedure_suffix_start,
+        "procedure reference",
+    )?;
+    cursor = next_cursor;
+
+    // Optional parameter/signature clause: PROCEDURE name (...)
+    if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::LParen) {
+        cursor = consume_balanced_group(
+            tokens,
+            cursor,
+            TokenKind::LParen,
+            TokenKind::RParen,
+            "CREATE PROCEDURE signature",
+        )?;
+    }
+
+    if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::As) {
+        cursor += 1;
+    }
+
+    let mut spec_cursor = cursor;
+    let (spec_opt, mut spec_diags) = parse_nested_procedure_specification(tokens, &mut spec_cursor);
+    if let Some(diag) = spec_diags.drain(..).next() {
+        return Err(Box::new(diag));
+    }
+    let Some(specification) = spec_opt else {
+        return Err(expected_token_diag(
+            tokens,
+            spec_cursor,
+            "{",
+            "CREATE PROCEDURE statement",
+        ));
+    };
+
+    if spec_cursor < tokens.len() {
+        return Err(unexpected_token_diag(
+            tokens,
+            spec_cursor,
+            "CREATE PROCEDURE",
+        ));
+    }
+
+    Ok(CatalogStatementKind::CreateProcedure(
+        CreateProcedureStatement {
+            or_replace,
+            if_not_exists,
+            procedure,
+            specification,
+            span: slice_span(tokens),
+        },
+    ))
+}
+
+fn is_create_procedure_suffix_start(kind: &TokenKind) -> bool {
+    matches!(kind, TokenKind::As | TokenKind::LParen | TokenKind::LBrace)
+}
+
+fn consume_balanced_group(
+    tokens: &[Token],
+    start: usize,
+    open: TokenKind,
+    close: TokenKind,
+    context: &str,
+) -> ParseOutcome<usize> {
+    if start >= tokens.len() || tokens[start].kind != open {
+        return Err(expected_token_diag(tokens, start, &open.to_string(), context));
+    }
+
+    let mut cursor = start + 1;
+    let mut depth = 1usize;
+
+    while cursor < tokens.len() {
+        if tokens[cursor].kind == open {
+            depth += 1;
+        } else if tokens[cursor].kind == close {
+            depth -= 1;
+            if depth == 0 {
+                return Ok(cursor + 1);
+            }
+        }
+        cursor += 1;
+    }
+
+    Err(expected_token_diag(tokens, cursor, &close.to_string(), context))
+}
+
 fn parse_schema_reference_until<F>(
     tokens: &[Token],
     start: usize,
@@ -1466,6 +1585,24 @@ where
         stop,
         context,
         reference_parser::parse_graph_type_reference,
+    )
+}
+
+fn parse_procedure_reference_until<F>(
+    tokens: &[Token],
+    start: usize,
+    stop: F,
+    context: &str,
+) -> ParseOutcome<(crate::ast::ProcedureReference, usize)>
+where
+    F: Fn(&TokenKind) -> bool,
+{
+    parse_reference_until(
+        tokens,
+        start,
+        stop,
+        context,
+        reference_parser::parse_procedure_reference,
     )
 }
 
@@ -1585,7 +1722,14 @@ fn consume_if_exists(tokens: &[Token], cursor: &mut usize) -> bool {
 }
 
 fn is_identifier_word(kind: &TokenKind, word: &str) -> bool {
-    matches!(kind, TokenKind::Identifier(name) if name.eq_ignore_ascii_case(word))
+    match kind {
+        TokenKind::Identifier(name)
+        | TokenKind::DelimitedIdentifier(name)
+        | TokenKind::ReservedKeyword(name)
+        | TokenKind::PreReservedKeyword(name)
+        | TokenKind::NonReservedKeyword(name) => name.eq_ignore_ascii_case(word),
+        _ => false,
+    }
 }
 
 fn expected_token_diag(
@@ -1982,5 +2126,62 @@ mod tests {
             panic!("expected parsed procedure reference");
         };
         assert_eq!(name.name, "doMaintenance");
+    }
+
+    #[test]
+    fn parse_create_procedure_statement() {
+        let source = "CREATE PROCEDURE my_proc AS { RETURN 1 }";
+        let (program, diagnostics) = parse_source(source);
+        assert!(diagnostics.is_empty(), "unexpected diagnostics: {diagnostics:?}");
+        assert_eq!(program.statements.len(), 1);
+
+        let Statement::Catalog(stmt) = &program.statements[0] else {
+            panic!("expected catalog statement");
+        };
+        let CatalogStatementKind::CreateProcedure(create_proc) = &stmt.kind else {
+            panic!("expected CREATE PROCEDURE");
+        };
+        assert!(!create_proc.or_replace);
+        assert!(!create_proc.if_not_exists);
+        let ProcedureReference::CatalogQualified { name, .. } = &create_proc.procedure else {
+            panic!("expected parsed procedure reference");
+        };
+        assert_eq!(name.name, "my_proc");
+    }
+
+    #[test]
+    fn parse_create_or_replace_procedure_with_signature() {
+        let source = "CREATE OR REPLACE PROCEDURE my_proc(a, b) { RETURN 1 }";
+        let (program, diagnostics) = parse_source(source);
+        assert!(diagnostics.is_empty(), "unexpected diagnostics: {diagnostics:?}");
+        assert_eq!(program.statements.len(), 1);
+
+        let Statement::Catalog(stmt) = &program.statements[0] else {
+            panic!("expected catalog statement");
+        };
+        let CatalogStatementKind::CreateProcedure(create_proc) = &stmt.kind else {
+            panic!("expected CREATE PROCEDURE");
+        };
+        assert!(create_proc.or_replace);
+    }
+
+    #[test]
+    fn parse_drop_procedure_statement() {
+        let source = "DROP PROCEDURE IF EXISTS my_proc";
+        let (program, diagnostics) = parse_source(source);
+        assert!(diagnostics.is_empty(), "unexpected diagnostics: {diagnostics:?}");
+        assert_eq!(program.statements.len(), 1);
+
+        let Statement::Catalog(stmt) = &program.statements[0] else {
+            panic!("expected catalog statement");
+        };
+        let CatalogStatementKind::DropProcedure(drop_proc) = &stmt.kind else {
+            panic!("expected DROP PROCEDURE");
+        };
+        assert!(drop_proc.if_exists);
+        let ProcedureReference::CatalogQualified { name, .. } = &drop_proc.procedure else {
+            panic!("expected parsed procedure reference");
+        };
+        assert_eq!(name.name, "my_proc");
     }
 }

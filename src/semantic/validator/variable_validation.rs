@@ -21,19 +21,21 @@ pub(super) fn run_variable_validation(
     diagnostics: &mut Vec<Diag>,
 ) {
     // Walk all statements and check variable references with statement-level scope tracking
-    let mut statement_id = 0;
+    let mut next_statement_id = 0usize;
     for statement in &program.statements {
         match statement {
             Statement::Query(query_stmt) => {
+                let statement_id = next_statement_id;
+                next_statement_id += 1;
                 validate_query_variables(
                     validator,
                     &query_stmt.query,
                     symbol_table,
                     scope_metadata,
                     statement_id,
+                    &mut next_statement_id,
                     diagnostics,
                 );
-                statement_id += 1;
             }
             _ => {
                 // Other statements don't need variable validation at this level
@@ -61,6 +63,7 @@ fn validate_query_variables(
     symbol_table: &SymbolTable,
     scope_metadata: &super::ScopeMetadata,
     statement_id: usize,
+    next_statement_id: &mut usize,
     diagnostics: &mut Vec<Diag>,
 ) {
     match query {
@@ -71,6 +74,7 @@ fn validate_query_variables(
                 symbol_table,
                 scope_metadata,
                 statement_id,
+                next_statement_id,
                 diagnostics,
             );
         }
@@ -81,14 +85,19 @@ fn validate_query_variables(
                 symbol_table,
                 scope_metadata,
                 statement_id,
+                next_statement_id,
                 diagnostics,
             );
+
+            let right_statement_id = *next_statement_id;
+            *next_statement_id += 1;
             validate_query_variables(
                 validator,
                 &composite.right,
                 symbol_table,
                 scope_metadata,
-                statement_id + 1000,
+                right_statement_id,
+                next_statement_id,
                 diagnostics,
             );
         }
@@ -99,6 +108,7 @@ fn validate_query_variables(
                 symbol_table,
                 scope_metadata,
                 statement_id,
+                next_statement_id,
                 diagnostics,
             );
         }
@@ -112,6 +122,7 @@ fn validate_linear_query_variables(
     symbol_table: &SymbolTable,
     scope_metadata: &super::ScopeMetadata,
     statement_id: usize,
+    next_statement_id: &mut usize,
     diagnostics: &mut Vec<Diag>,
 ) {
     use crate::ast::query::{AmbientLinearQuery, FocusedLinearQuery};
@@ -137,6 +148,7 @@ fn validate_linear_query_variables(
             symbol_table,
             scope_metadata,
             statement_id,
+            next_statement_id,
             diagnostics,
         );
     }
@@ -161,6 +173,7 @@ fn validate_primitive_statement_variables(
     symbol_table: &SymbolTable,
     scope_metadata: &super::ScopeMetadata,
     statement_id: usize,
+    next_statement_id: &mut usize,
     diagnostics: &mut Vec<Diag>,
 ) {
     match statement {
@@ -283,6 +296,20 @@ fn validate_primitive_statement_variables(
             }
         }
         PrimitiveQueryStatement::Select(select) => {
+            if let Some(with_clause) = &select.with_clause {
+                for cte in &with_clause.items {
+                    validate_query_variables(
+                        validator,
+                        &cte.query,
+                        symbol_table,
+                        scope_metadata,
+                        statement_id,
+                        next_statement_id,
+                        diagnostics,
+                    );
+                }
+            }
+
             // Validate SELECT expressions
             match &select.select_items {
                 crate::ast::query::SelectItemList::Star => {
@@ -300,6 +327,104 @@ fn validate_primitive_statement_variables(
                     }
                 }
             }
+
+            if let Some(from_clause) = &select.from_clause {
+                match from_clause {
+                    crate::ast::query::SelectFromClause::GraphMatchList { matches } => {
+                        for pattern in matches {
+                            if let Some(where_clause) = &pattern.where_clause {
+                                validate_expression_variables(
+                                    &where_clause.condition,
+                                    symbol_table,
+                                    scope_metadata,
+                                    statement_id,
+                                    diagnostics,
+                                );
+                            }
+                        }
+                    }
+                    crate::ast::query::SelectFromClause::QuerySpecification { query, .. } => {
+                        validate_query_variables(
+                            validator,
+                            query,
+                            symbol_table,
+                            scope_metadata,
+                            statement_id,
+                            next_statement_id,
+                            diagnostics,
+                        );
+                    }
+                    crate::ast::query::SelectFromClause::GraphAndQuerySpecification {
+                        graph, query, ..
+                    } => {
+                        validate_expression_variables(
+                            graph,
+                            symbol_table,
+                            scope_metadata,
+                            statement_id,
+                            diagnostics,
+                        );
+                        validate_query_variables(
+                            validator,
+                            query,
+                            symbol_table,
+                            scope_metadata,
+                            statement_id,
+                            next_statement_id,
+                            diagnostics,
+                        );
+                    }
+                    crate::ast::query::SelectFromClause::SourceList { sources } => {
+                        for source in sources {
+                            match source {
+                                crate::ast::query::SelectSourceItem::Query { query, .. } => {
+                                    validate_query_variables(
+                                        validator,
+                                        query,
+                                        symbol_table,
+                                        scope_metadata,
+                                        statement_id,
+                                        next_statement_id,
+                                        diagnostics,
+                                    );
+                                }
+                                crate::ast::query::SelectSourceItem::GraphAndQuery {
+                                    graph, query, ..
+                                } => {
+                                    validate_expression_variables(
+                                        graph,
+                                        symbol_table,
+                                        scope_metadata,
+                                        statement_id,
+                                        diagnostics,
+                                    );
+                                    validate_query_variables(
+                                        validator,
+                                        query,
+                                        symbol_table,
+                                        scope_metadata,
+                                        statement_id,
+                                        next_statement_id,
+                                        diagnostics,
+                                    );
+                                }
+                                crate::ast::query::SelectSourceItem::Expression {
+                                    expression, ..
+                                } => {
+                                    validate_expression_variables(
+                                        expression,
+                                        symbol_table,
+                                        scope_metadata,
+                                        statement_id,
+                                        diagnostics,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Validate GROUP BY if present
             if let Some(group_by) = &select.group_by {
                 for elem in &group_by.elements {

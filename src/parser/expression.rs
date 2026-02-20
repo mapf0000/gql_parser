@@ -815,12 +815,64 @@ impl<'a> ExpressionParser<'a> {
             }
         }
 
-        let end = self.stream.expect(TokenKind::RParen)?.end;
+        let mut end = self.stream.expect(TokenKind::RParen)?.end;
+        end = self.parse_optional_over_clause(end)?;
         Ok(FunctionCall {
             name,
             arguments,
             span: start..end,
         })
+    }
+
+    fn parse_optional_over_clause(&mut self, default_end: usize) -> ParseResult<usize> {
+        if !self.check_word_token("OVER") {
+            return Ok(default_end);
+        }
+
+        self.stream.advance(); // OVER
+        if self.stream.check(&TokenKind::LParen) {
+            self.stream.advance(); // (
+            let mut depth = 1usize;
+            let mut end = default_end;
+
+            while depth > 0 {
+                if self.stream.check(&TokenKind::Eof) {
+                    return Err(self.stream.error_here(
+                        "expected ')' to close window specification after OVER",
+                    ));
+                }
+
+                match &self.stream.current().kind {
+                    TokenKind::LParen => {
+                        depth += 1;
+                        end = self.stream.current().span.end;
+                        self.stream.advance();
+                    }
+                    TokenKind::RParen => {
+                        depth -= 1;
+                        end = self.stream.current().span.end;
+                        self.stream.advance();
+                    }
+                    _ => {
+                        end = self.stream.current().span.end;
+                        self.stream.advance();
+                    }
+                }
+            }
+
+            return Ok(end);
+        }
+
+        // Named window reference: OVER window_name
+        if self.token_name_for_function().is_some() {
+            let end = self.stream.current().span.end;
+            self.stream.advance();
+            return Ok(end);
+        }
+
+        Err(self.stream.error_here(
+            "expected window specification or window name after OVER",
+        ))
     }
 
     fn parse_function_name(&mut self) -> ParseResult<FunctionName> {
@@ -894,6 +946,17 @@ impl<'a> ExpressionParser<'a> {
                 Some(SmolStr::new(kind.to_string()))
             }
             _ => None,
+        }
+    }
+
+    fn check_word_token(&self, word: &str) -> bool {
+        match &self.stream.current().kind {
+            TokenKind::Identifier(name)
+            | TokenKind::DelimitedIdentifier(name)
+            | TokenKind::ReservedKeyword(name)
+            | TokenKind::PreReservedKeyword(name)
+            | TokenKind::NonReservedKeyword(name) => name.eq_ignore_ascii_case(word),
+            _ => false,
         }
     }
 
@@ -1234,7 +1297,7 @@ impl<'a> ExpressionParser<'a> {
     ///     | binarySetFunction
     /// ```
     fn parse_aggregate_function(&mut self) -> ParseResult<AggregateFunction> {
-        match &self.stream.current().kind {
+        let mut aggregate = match &self.stream.current().kind {
             TokenKind::Count => {
                 let start = self.stream.current().span.start;
                 let count_pos = self.stream.position();
@@ -1245,19 +1308,30 @@ impl<'a> ExpressionParser<'a> {
                 if self.stream.check(&TokenKind::Star) {
                     self.stream.advance();
                     let end = self.stream.expect(TokenKind::RParen)?.end;
-                    return Ok(AggregateFunction::CountStar { span: start..end });
+                    AggregateFunction::CountStar { span: start..end }
+                } else {
+                    // Otherwise, it's COUNT(expr) which is a general set function
+                    // Restore parser position and parse as a general set function.
+                    self.stream.set_position(count_pos);
+                    self.parse_general_set_function()?
                 }
-
-                // Otherwise, it's COUNT(expr) which is a general set function
-                // Restore parser position and parse as a general set function.
-                self.stream.set_position(count_pos);
-                self.parse_general_set_function()
             }
             TokenKind::PercentileCont | TokenKind::PercentileDisc => {
-                self.parse_binary_set_function()
+                self.parse_binary_set_function()?
             }
-            _ => self.parse_general_set_function(),
+            _ => self.parse_general_set_function()?,
+        };
+
+        let extended_end = self.parse_optional_over_clause(aggregate.span().end)?;
+        if extended_end > aggregate.span().end {
+            match &mut aggregate {
+                AggregateFunction::CountStar { span } => span.end = extended_end,
+                AggregateFunction::GeneralSetFunction(function) => function.span.end = extended_end,
+                AggregateFunction::BinarySetFunction(function) => function.span.end = extended_end,
+            }
         }
+
+        Ok(aggregate)
     }
 
     /// Parses a general set function (AVG, COUNT, MAX, MIN, SUM, etc.).
@@ -1546,6 +1620,30 @@ mod tests {
         let err =
             parse_expr("PERCENTILE_CONT(0.5, n.age) WITHIN GROUP (ORDER BY n.age)").unwrap_err();
         assert!(err.message.contains("unexpected trailing tokens"));
+    }
+
+    #[test]
+    fn parses_function_over_parenthesized_window_specification() {
+        let source = "SUM(n.age) OVER (PARTITION BY n.city ORDER BY n.age)";
+        let expr = parse_expr(source).unwrap();
+        match expr {
+            Expression::AggregateFunction(aggregate) => {
+                assert_eq!(aggregate.span(), 0..source.len());
+            }
+            _ => panic!("expected aggregate function"),
+        }
+    }
+
+    #[test]
+    fn parses_function_over_named_window() {
+        let source = "SUM(n.age) OVER win";
+        let expr = parse_expr(source).unwrap();
+        match expr {
+            Expression::AggregateFunction(aggregate) => {
+                assert_eq!(aggregate.span(), 0..source.len());
+            }
+            _ => panic!("expected aggregate function"),
+        }
     }
 
     #[test]

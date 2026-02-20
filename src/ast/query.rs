@@ -1287,6 +1287,8 @@ pub enum ForOrdinalityOrOffset {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectStatement {
+    /// Optional WITH clause (CTE definitions).
+    pub with_clause: Option<WithClause>,
     /// Set quantifier (DISTINCT or ALL).
     pub quantifier: Option<SetQuantifier>,
     /// What to select.
@@ -1305,6 +1307,30 @@ pub struct SelectStatement {
     pub offset: Option<OffsetClause>,
     /// Optional LIMIT clause.
     pub limit: Option<LimitClause>,
+    /// Source span.
+    pub span: Span,
+}
+
+/// WITH clause for SELECT statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WithClause {
+    /// Whether RECURSIVE was specified.
+    pub recursive: bool,
+    /// Common table expression items.
+    pub items: Vec<CommonTableExpression>,
+    /// Source span.
+    pub span: Span,
+}
+
+/// Common table expression item.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommonTableExpression {
+    /// CTE identifier.
+    pub name: SmolStr,
+    /// Optional projected column names.
+    pub columns: Vec<SmolStr>,
+    /// CTE query payload.
+    pub query: Box<Query>,
     /// Source span.
     pub span: Span,
 }
@@ -1335,11 +1361,41 @@ pub enum SelectFromClause {
     /// FROM graph match list.
     GraphMatchList { matches: Vec<GraphPattern> },
     /// FROM nested query.
-    QuerySpecification { query: Box<Query> },
+    QuerySpecification {
+        query: Box<Query>,
+        alias: Option<SmolStr>,
+    },
     /// FROM graph and query.
     GraphAndQuerySpecification {
         graph: Expression,
         query: Box<Query>,
+        alias: Option<SmolStr>,
+    },
+    /// FROM list of table/query sources.
+    SourceList { sources: Vec<SelectSourceItem> },
+}
+
+/// Source item inside FROM source list.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SelectSourceItem {
+    /// Parenthesized or direct query specification source.
+    Query {
+        query: Box<Query>,
+        alias: Option<SmolStr>,
+        span: Span,
+    },
+    /// Graph expression followed by query specification.
+    GraphAndQuery {
+        graph: Expression,
+        query: Box<Query>,
+        alias: Option<SmolStr>,
+        span: Span,
+    },
+    /// Table expression source.
+    Expression {
+        expression: Expression,
+        alias: Option<SmolStr>,
+        span: Span,
     },
 }
 

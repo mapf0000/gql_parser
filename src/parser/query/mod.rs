@@ -155,6 +155,7 @@ pub(super) fn is_query_clause_boundary(kind: &TokenKind) -> bool {
             | TokenKind::Filter
             | TokenKind::Let
             | TokenKind::For
+            | TokenKind::With
             | TokenKind::Order
             | TokenKind::Limit
             | TokenKind::Offset
@@ -197,6 +198,7 @@ pub(super) fn is_query_spec_start(kind: &TokenKind) -> bool {
             | TokenKind::Filter
             | TokenKind::Let
             | TokenKind::For
+            | TokenKind::With
             | TokenKind::Order
             | TokenKind::Limit
             | TokenKind::Offset

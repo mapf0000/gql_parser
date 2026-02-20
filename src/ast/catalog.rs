@@ -4,11 +4,13 @@
 //! - CREATE/DROP SCHEMA statements
 //! - CREATE/DROP GRAPH statements
 //! - CREATE/DROP GRAPH TYPE statements
+//! - CREATE/DROP PROCEDURE statements
 //! - CALL catalog-modifying procedure statements
 
 use crate::ast::Span;
-use crate::ast::procedure::CallProcedureStatement;
+use crate::ast::procedure::{CallProcedureStatement, NestedProcedureSpecification};
 use crate::ast::references::{GraphReference, GraphTypeReference, SchemaReference};
+use crate::ast::references::ProcedureReference;
 
 // ============================================================================
 // Schema Statements
@@ -134,6 +136,30 @@ pub struct DropGraphTypeStatement {
 // Catalog Procedure Call
 // ============================================================================
 
+/// CREATE PROCEDURE statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateProcedureStatement {
+    /// Whether OR REPLACE was specified.
+    pub or_replace: bool,
+    /// Whether IF NOT EXISTS was specified.
+    pub if_not_exists: bool,
+    /// Procedure reference.
+    pub procedure: ProcedureReference,
+    /// Procedure body specification.
+    pub specification: NestedProcedureSpecification,
+    pub span: Span,
+}
+
+/// DROP PROCEDURE statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DropProcedureStatement {
+    /// Whether IF EXISTS was specified.
+    pub if_exists: bool,
+    /// Procedure reference.
+    pub procedure: ProcedureReference,
+    pub span: Span,
+}
+
 /// CALL catalog-modifying procedure statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CallCatalogModifyingProcedureStatement {
@@ -155,6 +181,8 @@ pub enum CatalogStatementKind {
     DropGraph(DropGraphStatement),
     CreateGraphType(CreateGraphTypeStatement),
     DropGraphType(DropGraphTypeStatement),
+    CreateProcedure(CreateProcedureStatement),
+    DropProcedure(DropProcedureStatement),
     CallCatalogModifyingProcedure(CallCatalogModifyingProcedureStatement),
 }
 
@@ -168,6 +196,8 @@ impl CatalogStatementKind {
             CatalogStatementKind::DropGraph(stmt) => &stmt.span,
             CatalogStatementKind::CreateGraphType(stmt) => &stmt.span,
             CatalogStatementKind::DropGraphType(stmt) => &stmt.span,
+            CatalogStatementKind::CreateProcedure(stmt) => &stmt.span,
+            CatalogStatementKind::DropProcedure(stmt) => &stmt.span,
             CatalogStatementKind::CallCatalogModifyingProcedure(stmt) => &stmt.span,
         }
     }

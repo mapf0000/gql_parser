@@ -9,7 +9,8 @@ use crate::analysis::pattern_info::collect_pattern_expression_roots;
 use crate::ast::procedure::{CallProcedureStatement, ProcedureCall};
 use crate::ast::query::{
     GroupingElement, LinearQuery, MatchStatement, PrimitiveQueryStatement,
-    PrimitiveResultStatement, Query, SelectFromClause, SelectItemList, SetOperator,
+    PrimitiveResultStatement, Query, SelectFromClause, SelectItemList, SelectSourceItem,
+    SetOperator,
 };
 use crate::ast::visitor::AstVisitor;
 use crate::ast::{Expression, Span, Statement, VariableCollector};
@@ -561,6 +562,19 @@ fn collect_select_expression_roots<'a>(
             SelectFromClause::QuerySpecification { .. } => {}
             SelectFromClause::GraphAndQuerySpecification { graph, .. } => {
                 roots.push(graph);
+            }
+            SelectFromClause::SourceList { sources } => {
+                for source in sources {
+                    match source {
+                        SelectSourceItem::Query { .. } => {}
+                        SelectSourceItem::GraphAndQuery { graph, .. } => {
+                            roots.push(graph);
+                        }
+                        SelectSourceItem::Expression { expression, .. } => {
+                            roots.push(expression);
+                        }
+                    }
+                }
             }
         }
     }

@@ -40,8 +40,9 @@ pub use transaction::{
 // Re-export catalog types
 pub use catalog::{
     CallCatalogModifyingProcedureStatement, CatalogStatementKind, CreateGraphStatement,
-    CreateGraphTypeStatement, CreateSchemaStatement, DropGraphStatement, DropGraphTypeStatement,
-    DropSchemaStatement, GraphTypeSource, GraphTypeSpec,
+    CreateGraphTypeStatement, CreateProcedureStatement, CreateSchemaStatement,
+    DropGraphStatement, DropGraphTypeStatement, DropProcedureStatement, DropSchemaStatement,
+    GraphTypeSource, GraphTypeSpec,
 };
 
 // Re-export expression types
@@ -74,14 +75,14 @@ pub use references::{
 
 // Re-export query types
 pub use query::{
-    AmbientLinearQuery, CompositeQuery, FilterStatement, FocusedLinearQuery, ForItem,
-    ForOrdinalityOrOffset, ForStatement, GraphPattern, GroupByClause, GroupingElement,
-    HavingClause, LetStatement, LetVariableDefinition, LimitClause, LinearQuery, MatchStatement,
-    NullOrdering, OffsetClause, OptionalMatchStatement, OptionalOperand, OrderByAndPageStatement,
-    OrderByClause, OrderingSpecification, PrimitiveQueryStatement, PrimitiveResultStatement, Query,
-    ReturnItem, ReturnItemList, ReturnStatement, SelectFromClause, SelectItem, SelectItemList,
-    SelectStatement, SetOperator, SetQuantifier, SimpleMatchStatement, SortSpecification,
-    UseGraphClause, WhereClause,
+    AmbientLinearQuery, CommonTableExpression, CompositeQuery, FilterStatement,
+    FocusedLinearQuery, ForItem, ForOrdinalityOrOffset, ForStatement, GraphPattern, GroupByClause,
+    GroupingElement, HavingClause, LetStatement, LetVariableDefinition, LimitClause, LinearQuery,
+    MatchStatement, NullOrdering, OffsetClause, OptionalMatchStatement, OptionalOperand,
+    OrderByAndPageStatement, OrderByClause, OrderingSpecification, PrimitiveQueryStatement,
+    PrimitiveResultStatement, Query, ReturnItem, ReturnItemList, ReturnStatement, SelectFromClause,
+    SelectItem, SelectItemList, SelectSourceItem, SelectStatement, SetOperator, SetQuantifier,
+    SimpleMatchStatement, SortSpecification, UseGraphClause, WhereClause, WithClause,
 };
 
 // Re-export visitor infrastructure and concrete visitors.

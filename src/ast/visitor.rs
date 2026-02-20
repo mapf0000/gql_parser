@@ -14,7 +14,7 @@ use crate::ast::query::{
     LabelExpression, LetStatement, LetVariableDefinition, LinearQuery, MatchStatement, NodePattern,
     PathFactor, PathPattern, PathPatternExpression, PathPrimary, PrimitiveQueryStatement,
     PrimitiveResultStatement, Query, ReturnItem, ReturnItemList, ReturnStatement, SelectFromClause,
-    SelectItemList, SelectStatement, SimplifiedPathPatternExpression,
+    SelectItemList, SelectSourceItem, SelectStatement, SimplifiedPathPatternExpression,
 };
 
 macro_rules! try_visit {
@@ -622,6 +622,12 @@ pub fn walk_select_statement<V: AstVisitor + ?Sized>(
     visitor: &mut V,
     statement: &SelectStatement,
 ) -> VisitResult<V::Break> {
+    if let Some(with_clause) = &statement.with_clause {
+        for cte in &with_clause.items {
+            try_visit!(visitor.visit_query(&cte.query));
+        }
+    }
+
     match &statement.select_items {
         SelectItemList::Star => {}
         SelectItemList::Items { items } => {
@@ -638,12 +644,28 @@ pub fn walk_select_statement<V: AstVisitor + ?Sized>(
                     try_visit!(visitor.visit_graph_pattern(graph_pattern));
                 }
             }
-            SelectFromClause::QuerySpecification { query } => {
+            SelectFromClause::QuerySpecification { query, .. } => {
                 try_visit!(visitor.visit_query(query));
             }
-            SelectFromClause::GraphAndQuerySpecification { graph, query } => {
+            SelectFromClause::GraphAndQuerySpecification { graph, query, .. } => {
                 try_visit!(visitor.visit_expression(graph));
                 try_visit!(visitor.visit_query(query));
+            }
+            SelectFromClause::SourceList { sources } => {
+                for source in sources {
+                    match source {
+                        SelectSourceItem::Query { query, .. } => {
+                            try_visit!(visitor.visit_query(query));
+                        }
+                        SelectSourceItem::GraphAndQuery { graph, query, .. } => {
+                            try_visit!(visitor.visit_expression(graph));
+                            try_visit!(visitor.visit_query(query));
+                        }
+                        SelectSourceItem::Expression { expression, .. } => {
+                            try_visit!(visitor.visit_expression(expression));
+                        }
+                    }
+                }
             }
         }
     }
@@ -1255,6 +1277,12 @@ pub fn walk_select_statement_mut<V: AstVisitorMut + ?Sized>(
     visitor: &mut V,
     statement: &mut SelectStatement,
 ) -> VisitResult<V::Break> {
+    if let Some(with_clause) = &mut statement.with_clause {
+        for cte in &mut with_clause.items {
+            try_visit!(visitor.visit_query_mut(&mut cte.query));
+        }
+    }
+
     match &mut statement.select_items {
         SelectItemList::Star => {}
         SelectItemList::Items { items } => {
@@ -1271,12 +1299,28 @@ pub fn walk_select_statement_mut<V: AstVisitorMut + ?Sized>(
                     try_visit!(visitor.visit_graph_pattern_mut(graph_pattern));
                 }
             }
-            SelectFromClause::QuerySpecification { query } => {
+            SelectFromClause::QuerySpecification { query, .. } => {
                 try_visit!(visitor.visit_query_mut(query));
             }
-            SelectFromClause::GraphAndQuerySpecification { graph, query } => {
+            SelectFromClause::GraphAndQuerySpecification { graph, query, .. } => {
                 try_visit!(visitor.visit_expression_mut(graph));
                 try_visit!(visitor.visit_query_mut(query));
+            }
+            SelectFromClause::SourceList { sources } => {
+                for source in sources {
+                    match source {
+                        SelectSourceItem::Query { query, .. } => {
+                            try_visit!(visitor.visit_query_mut(query));
+                        }
+                        SelectSourceItem::GraphAndQuery { graph, query, .. } => {
+                            try_visit!(visitor.visit_expression_mut(graph));
+                            try_visit!(visitor.visit_query_mut(query));
+                        }
+                        SelectSourceItem::Expression { expression, .. } => {
+                            try_visit!(visitor.visit_expression_mut(expression));
+                        }
+                    }
+                }
             }
         }
     }

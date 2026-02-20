@@ -94,3 +94,25 @@ fn query_pipeline_accepts_call_statement() {
 fn optional_call_is_not_treated_as_optional_match() {
     parse_ok("OPTIONAL CALL my_proc()");
 }
+
+#[test]
+fn select_with_cte_parses() {
+    parse_ok("WITH recent AS (MATCH (n) RETURN n) SELECT * FROM recent");
+}
+
+#[test]
+fn select_with_multiple_ctes_parses() {
+    parse_ok(
+        "WITH a AS (MATCH (n) RETURN n), b AS (MATCH (m) RETURN m) SELECT * FROM a, b",
+    );
+}
+
+#[test]
+fn select_from_nested_query_sources_parses() {
+    parse_ok("SELECT * FROM (MATCH (n) RETURN n) AS nset, (MATCH (m) RETURN m) mset");
+}
+
+#[test]
+fn select_window_function_parses() {
+    parse_ok("SELECT SUM(n.age) OVER (PARTITION BY n.city ORDER BY n.age) FROM MATCH (n) RETURN n");
+}

@@ -85,6 +85,13 @@ pub(crate) fn parse_primitive_query_statement(
                 diags,
             )
         }
+        TokenKind::With => {
+            let (select_opt, diags) = parse_select_statement(tokens, pos);
+            (
+                select_opt.map(|select| PrimitiveQueryStatement::Select(Box::new(select))),
+                diags,
+            )
+        }
         _ => (None, vec![]),
     }
 }
