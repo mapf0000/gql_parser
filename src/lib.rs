@@ -134,13 +134,9 @@ pub fn parse_and_validate(source: &str) -> ParseAndValidateResult {
 /// let source = "MATCH (n:Person) RETURN n";
 /// let config = ValidationConfig {
 ///     strict_mode: true,
-///     schema_validation: false,
-///     catalog_validation: false,
 ///     warn_on_shadowing: true,
 ///     warn_on_disconnected_patterns: true,
-///     advanced_schema_validation: false,
-///     callable_validation: false,
-///     enhanced_type_inference: false,
+///     metadata_validation: false,
 /// };
 ///
 /// let result = parse_and_validate_with_config(source, config);

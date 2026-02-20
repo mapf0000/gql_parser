@@ -663,6 +663,12 @@ impl<'a> ReferenceParser<'a> {
                 self.stream.advance();
                 Ok((SmolStr::new(kind.to_string()), token.span))
             }
+            kind if kind.is_built_in_function_keyword() => {
+                // Allow built-in function keywords as identifiers in catalog names
+                // This enables calling built-in functions as procedures: CALL abs(-5)
+                self.stream.advance();
+                Ok((SmolStr::new(kind.to_string()), token.span))
+            }
             _ => Err(self.error_here(format!("expected {expected}"))),
         }
     }

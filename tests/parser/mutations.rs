@@ -135,3 +135,52 @@ fn inline_call_reports_unclosed_procedure_specification() {
         "unexpected diagnostics: {diag_text}"
     );
 }
+
+#[test]
+fn parse_match_followed_by_set_is_single_mutation_statement() {
+    // MATCH followed by SET/DELETE/REMOVE should be parsed as a single mutation statement,
+    // not as separate Query and Mutation statements
+    let program = parse_cleanly("MATCH (n) SET n.age = 30");
+
+    // Should be parsed as a single mutation statement
+    assert_eq!(program.statements.len(), 1,
+        "MATCH...SET should be parsed as one statement, got {} statements",
+        program.statements.len());
+
+    let Statement::Mutation(stmt) = &program.statements[0] else {
+        panic!("expected mutation statement, got {:?}", program.statements[0]);
+    };
+
+    let LinearDataModifyingStatement::Ambient(ambient) = &stmt.statement else {
+        panic!("expected ambient mutation statement");
+    };
+
+    // Should have MATCH as query statement and SET as modifying statement
+    assert_eq!(ambient.statements.len(), 2, "expected MATCH and SET as two sub-statements");
+    assert!(matches!(
+        ambient.statements[0],
+        SimpleDataAccessingStatement::Query(_)
+    ), "first sub-statement should be Query (MATCH)");
+    assert!(matches!(
+        ambient.statements[1],
+        SimpleDataAccessingStatement::Modifying(_)
+    ), "second sub-statement should be Modifying (SET)");
+}
+
+#[test]
+fn parse_match_followed_by_delete_is_single_mutation_statement() {
+    let program = parse_cleanly("MATCH (n) DELETE n");
+
+    assert_eq!(program.statements.len(), 1,
+        "MATCH...DELETE should be parsed as one statement");
+    assert!(matches!(program.statements[0], Statement::Mutation(_)));
+}
+
+#[test]
+fn parse_match_followed_by_remove_is_single_mutation_statement() {
+    let program = parse_cleanly("MATCH (n) REMOVE n:Label");
+
+    assert_eq!(program.statements.len(), 1,
+        "MATCH...REMOVE should be parsed as one statement");
+    assert!(matches!(program.statements[0], Statement::Mutation(_)));
+}

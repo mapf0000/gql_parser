@@ -46,7 +46,7 @@ fn test_set_undefined_variable_fails() {
     // Should fail - 'm' is not in scope
     assert!(!outcome.is_success(), "Expected validation failure");
     assert!(outcome.diagnostics.iter().any(|d|
-        d.message.contains("undefined") || d.message.contains("not in scope")
+        d.message.contains("Undefined") || d.message.contains("undefined") || d.message.contains("not in scope")
     ), "Expected undefined variable diagnostic");
 }
 
@@ -66,7 +66,7 @@ fn test_delete_undefined_variable_fails() {
 
     assert!(!outcome.is_success(), "Expected validation failure");
     assert!(outcome.diagnostics.iter().any(|d|
-        d.message.contains("undefined") || d.message.contains("not in scope")
+        d.message.contains("Undefined") || d.message.contains("undefined") || d.message.contains("not in scope")
     ));
 }
 

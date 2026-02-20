@@ -674,6 +674,53 @@ impl TokenKind {
                 | TokenKind::Zone
         )
     }
+
+    /// Returns true if this token is a built-in function or aggregate keyword.
+    pub fn is_built_in_function_keyword(&self) -> bool {
+        matches!(
+            self,
+            // Aggregates
+            TokenKind::Avg
+                | TokenKind::Count
+                | TokenKind::Max
+                | TokenKind::Min
+                | TokenKind::Sum
+                | TokenKind::CollectList
+                | TokenKind::StddevSamp
+                | TokenKind::StddevPop
+                | TokenKind::PercentileCont
+                | TokenKind::PercentileDisc
+                // Numeric
+                | TokenKind::Abs
+                | TokenKind::Mod
+                | TokenKind::Floor
+                | TokenKind::Ceil
+                | TokenKind::Sqrt
+                | TokenKind::Power
+                | TokenKind::Exp
+                | TokenKind::Ln
+                | TokenKind::Log
+                // Trigonometric
+                | TokenKind::Sin
+                | TokenKind::Cos
+                | TokenKind::Tan
+                | TokenKind::Asin
+                | TokenKind::Acos
+                | TokenKind::Atan
+                // String functions
+                | TokenKind::Upper
+                | TokenKind::Lower
+                | TokenKind::Trim
+                | TokenKind::Substring
+                | TokenKind::Normalize
+                // Conditional
+                | TokenKind::Coalesce
+                | TokenKind::Nullif
+                // Cardinality
+                | TokenKind::Cardinality
+                | TokenKind::Size
+        )
+    }
 }
 
 impl fmt::Display for TokenKind {

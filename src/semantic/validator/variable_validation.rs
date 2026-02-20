@@ -37,6 +37,18 @@ pub(super) fn run_variable_validation(
                     diagnostics,
                 );
             }
+            Statement::Mutation(mutation_stmt) => {
+                let statement_id = next_statement_id;
+                next_statement_id += 1;
+                validate_mutation_variables(
+                    validator,
+                    &mutation_stmt.statement,
+                    symbol_table,
+                    scope_metadata,
+                    statement_id,
+                    diagnostics,
+                );
+            }
             _ => {
                 // Other statements don't need variable validation at this level
             }
@@ -111,6 +123,349 @@ fn validate_query_variables(
                 next_statement_id,
                 diagnostics,
             );
+        }
+    }
+}
+
+/// Validates variable references in a mutation statement.
+fn validate_mutation_variables(
+    validator: &super::SemanticValidator,
+    mutation: &crate::ast::mutation::LinearDataModifyingStatement,
+    symbol_table: &SymbolTable,
+    scope_metadata: &super::ScopeMetadata,
+    statement_id: usize,
+    diagnostics: &mut Vec<Diag>,
+) {
+    use crate::ast::mutation::LinearDataModifyingStatement;
+
+    let (statements, result_statement) = match mutation {
+        LinearDataModifyingStatement::Focused(focused) => {
+            (&focused.statements, &focused.primitive_result_statement)
+        }
+        LinearDataModifyingStatement::Ambient(ambient) => {
+            (&ambient.statements, &ambient.primitive_result_statement)
+        }
+    };
+
+    // Validate all simple data-accessing statements (query and mutation statements)
+    for stmt in statements {
+        validate_simple_data_accessing_statement(
+            validator,
+            stmt,
+            symbol_table,
+            scope_metadata,
+            statement_id,
+            diagnostics,
+        );
+    }
+
+    // Validate RETURN statement if present
+    if let Some(result_stmt) = result_statement {
+        validate_result_statement_variables(
+            validator,
+            result_stmt,
+            symbol_table,
+            scope_metadata,
+            statement_id,
+            diagnostics,
+        );
+    }
+}
+
+/// Validates variable references in a simple data-accessing statement.
+fn validate_simple_data_accessing_statement(
+    validator: &super::SemanticValidator,
+    statement: &crate::ast::mutation::SimpleDataAccessingStatement,
+    symbol_table: &SymbolTable,
+    scope_metadata: &super::ScopeMetadata,
+    statement_id: usize,
+    diagnostics: &mut Vec<Diag>,
+) {
+    use crate::ast::mutation::SimpleDataAccessingStatement;
+
+    match statement {
+        SimpleDataAccessingStatement::Query(query_stmt) => {
+            // Query statements in mutations (like MATCH, FILTER, etc.) define and use variables
+            // within the same mutation scope. We need to validate any expressions they contain.
+            // For MATCH statements, we primarily need to validate WHERE clauses.
+            validate_query_statement_in_mutation(
+                query_stmt,
+                symbol_table,
+                scope_metadata,
+                statement_id,
+                diagnostics,
+            );
+        }
+        SimpleDataAccessingStatement::Modifying(modifying_stmt) => {
+            validate_simple_data_modifying_statement(
+                modifying_stmt,
+                symbol_table,
+                scope_metadata,
+                statement_id,
+                diagnostics,
+            );
+        }
+    }
+}
+
+/// Validates expressions in query statements within mutations.
+fn validate_query_statement_in_mutation(
+    statement: &crate::ast::query::PrimitiveQueryStatement,
+    symbol_table: &SymbolTable,
+    scope_metadata: &super::ScopeMetadata,
+    statement_id: usize,
+    diagnostics: &mut Vec<Diag>,
+) {
+    use crate::ast::query::PrimitiveQueryStatement;
+
+    match statement {
+        PrimitiveQueryStatement::Match(match_stmt) => {
+            // MATCH patterns define variables, they don't reference them (except in WHERE clauses)
+            // Validate WHERE clause if present
+            use crate::ast::query::MatchStatement;
+            match match_stmt {
+                MatchStatement::Simple(simple) => {
+                    if let Some(where_clause) = &simple.pattern.where_clause {
+                        validate_expression_variables(
+                            &where_clause.condition,
+                            symbol_table,
+                            scope_metadata,
+                            statement_id,
+                            diagnostics,
+                        );
+                    }
+                }
+                MatchStatement::Optional(_) => {
+                    // Optional matches would be validated here if needed
+                }
+            }
+        }
+        PrimitiveQueryStatement::Let(let_stmt) => {
+            // Validate LET value expressions
+            for binding in &let_stmt.bindings {
+                validate_expression_variables(
+                    &binding.value,
+                    symbol_table,
+                    scope_metadata,
+                    statement_id,
+                    diagnostics,
+                );
+            }
+        }
+        PrimitiveQueryStatement::For(for_stmt) => {
+            // Validate FOR collection expression
+            validate_expression_variables(
+                &for_stmt.item.collection,
+                symbol_table,
+                scope_metadata,
+                statement_id,
+                diagnostics,
+            );
+        }
+        PrimitiveQueryStatement::Filter(filter) => {
+            // Validate FILTER condition
+            validate_expression_variables(
+                &filter.condition,
+                symbol_table,
+                scope_metadata,
+                statement_id,
+                diagnostics,
+            );
+        }
+        PrimitiveQueryStatement::OrderByAndPage(order_by_page) => {
+            // Validate ORDER BY expressions
+            if let Some(order_by) = &order_by_page.order_by {
+                for sort_spec in &order_by.sort_specifications {
+                    validate_expression_variables(
+                        &sort_spec.key,
+                        symbol_table,
+                        scope_metadata,
+                        statement_id,
+                        diagnostics,
+                    );
+                }
+            }
+            // Validate LIMIT/OFFSET expressions if present
+            if let Some(limit) = &order_by_page.limit {
+                validate_expression_variables(
+                    &limit.count,
+                    symbol_table,
+                    scope_metadata,
+                    statement_id,
+                    diagnostics,
+                );
+            }
+            if let Some(offset) = &order_by_page.offset {
+                validate_expression_variables(
+                    &offset.count,
+                    symbol_table,
+                    scope_metadata,
+                    statement_id,
+                    diagnostics,
+                );
+            }
+        }
+        _ => {
+            // Other query statements (SELECT, CALL) handled elsewhere or not applicable in mutations
+        }
+    }
+}
+
+/// Validates variable references in a simple data modifying statement.
+fn validate_simple_data_modifying_statement(
+    modifying_stmt: &crate::ast::mutation::SimpleDataModifyingStatement,
+    symbol_table: &SymbolTable,
+    scope_metadata: &super::ScopeMetadata,
+    statement_id: usize,
+    diagnostics: &mut Vec<Diag>,
+) {
+    use crate::ast::mutation::SimpleDataModifyingStatement;
+
+    match modifying_stmt {
+        SimpleDataModifyingStatement::Primitive(primitive) => {
+            validate_primitive_data_modifying_statement(
+                primitive,
+                symbol_table,
+                scope_metadata,
+                statement_id,
+                diagnostics,
+            );
+        }
+        SimpleDataModifyingStatement::Call(_call_stmt) => {
+            // CALL statements in mutation context - validate procedure arguments
+            // Similar to query CALL validation (already handled in query validation if needed)
+            // For now, skip as procedure argument validation is handled elsewhere
+        }
+    }
+}
+
+/// Validates variable references in primitive data modifying statements.
+fn validate_primitive_data_modifying_statement(
+    statement: &crate::ast::mutation::PrimitiveDataModifyingStatement,
+    symbol_table: &SymbolTable,
+    scope_metadata: &super::ScopeMetadata,
+    statement_id: usize,
+    diagnostics: &mut Vec<Diag>,
+) {
+    use crate::ast::mutation::PrimitiveDataModifyingStatement;
+    use crate::semantic::diag::SemanticDiagBuilder;
+
+    let scope_to_check = statement_scope_id(symbol_table, scope_metadata, statement_id);
+
+    match statement {
+        PrimitiveDataModifyingStatement::Insert(_) => {
+            // INSERT statements define new variables, they don't reference existing ones
+            // (except in property value expressions, which would be validated separately)
+        }
+        PrimitiveDataModifyingStatement::Set(set_stmt) => {
+            // Validate SET items - check that element variables are in scope
+            for item in &set_stmt.items.items {
+                use crate::ast::mutation::SetItem;
+                match item {
+                    SetItem::Property(prop_item) => {
+                        // Check element variable is in scope
+                        if symbol_table.lookup_from(scope_to_check, prop_item.element.as_str()).is_none() {
+                            let diag = SemanticDiagBuilder::undefined_variable(
+                                prop_item.element.as_str(),
+                                prop_item.span.clone(),
+                            )
+                            .build();
+                            diagnostics.push(diag);
+                        }
+                        // Validate value expression
+                        validate_expression_variables(
+                            &prop_item.value,
+                            symbol_table,
+                            scope_metadata,
+                            statement_id,
+                            diagnostics,
+                        );
+                    }
+                    SetItem::AllProperties(all_props_item) => {
+                        // Check element variable is in scope
+                        if symbol_table
+                            .lookup_from(scope_to_check, all_props_item.element.as_str())
+                            .is_none()
+                        {
+                            let diag = SemanticDiagBuilder::undefined_variable(
+                                all_props_item.element.as_str(),
+                                all_props_item.span.clone(),
+                            )
+                            .build();
+                            diagnostics.push(diag);
+                        }
+                        // Validate property value expressions in the property specification
+                        for field in &all_props_item.properties.properties {
+                            validate_expression_variables(
+                                &field.value,
+                                symbol_table,
+                                scope_metadata,
+                                statement_id,
+                                diagnostics,
+                            );
+                        }
+                    }
+                    SetItem::Label(label_item) => {
+                        // Check element variable is in scope
+                        if symbol_table
+                            .lookup_from(scope_to_check, label_item.element.as_str())
+                            .is_none()
+                        {
+                            let diag = SemanticDiagBuilder::undefined_variable(
+                                label_item.element.as_str(),
+                                label_item.span.clone(),
+                            )
+                            .build();
+                            diagnostics.push(diag);
+                        }
+                    }
+                }
+            }
+        }
+        PrimitiveDataModifyingStatement::Remove(remove_stmt) => {
+            // Validate REMOVE items - check that element variables are in scope
+            for item in &remove_stmt.items.items {
+                use crate::ast::mutation::RemoveItem;
+                match item {
+                    RemoveItem::Property(prop_item) => {
+                        // Check element variable is in scope
+                        if symbol_table.lookup_from(scope_to_check, prop_item.element.as_str()).is_none() {
+                            let diag = SemanticDiagBuilder::undefined_variable(
+                                prop_item.element.as_str(),
+                                prop_item.span.clone(),
+                            )
+                            .build();
+                            diagnostics.push(diag);
+                        }
+                    }
+                    RemoveItem::Label(label_item) => {
+                        // Check element variable is in scope
+                        if symbol_table
+                            .lookup_from(scope_to_check, label_item.element.as_str())
+                            .is_none()
+                        {
+                            let diag = SemanticDiagBuilder::undefined_variable(
+                                label_item.element.as_str(),
+                                label_item.span.clone(),
+                            )
+                            .build();
+                            diagnostics.push(diag);
+                        }
+                    }
+                }
+            }
+        }
+        PrimitiveDataModifyingStatement::Delete(delete_stmt) => {
+            // Validate DELETE items - each item is an expression that should reference a variable
+            for item in &delete_stmt.items.items {
+                validate_expression_variables(
+                    &item.expression,
+                    symbol_table,
+                    scope_metadata,
+                    statement_id,
+                    diagnostics,
+                );
+            }
         }
     }
 }

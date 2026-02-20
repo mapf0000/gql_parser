@@ -55,15 +55,12 @@ pub(crate) fn parse_program_tokens(tokens: &[Token], source_len: usize) -> (Prog
 
     while cursor < tokens.len() {
         let start_cursor = cursor;
-        let syntax = if matches!(tokens[cursor].kind, TokenKind::Optional)
-            && matches!(
-                tokens.get(cursor + 1).map(|t| &t.kind),
-                Some(TokenKind::Call)
-            ) {
-            SyntaxToken::CatalogStart
-        } else {
-            classify(&tokens[cursor].kind)
-        };
+        let mut syntax = classify(&tokens[cursor].kind);
+
+        // Special case: MATCH followed by mutation keywords should be treated as a mutation
+        if syntax == SyntaxToken::QueryStart && is_match_starting_mutation(tokens, cursor) {
+            syntax = SyntaxToken::MutationStart;
+        }
 
         match syntax {
             SyntaxToken::Eof => break,
@@ -143,6 +140,67 @@ fn classify(kind: &TokenKind) -> SyntaxToken {
     }
 }
 
+/// Checks if a MATCH statement is actually the start of a mutation by looking ahead
+/// for mutation keywords (SET, DELETE, REMOVE) that would make it a linear data-modifying statement.
+fn is_match_starting_mutation(tokens: &[Token], start: usize) -> bool {
+    if !matches!(tokens.get(start).map(|t| &t.kind), Some(TokenKind::Match)) {
+        return false;
+    }
+
+    // Look ahead for mutation keywords, skipping nested structures
+    let mut cursor = start + 1;
+    let mut paren_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut bracket_depth = 0usize;
+
+    while cursor < tokens.len() {
+        let kind = &tokens[cursor].kind;
+
+        // Track nesting depth
+        match kind {
+            TokenKind::LParen => paren_depth += 1,
+            TokenKind::RParen => paren_depth = paren_depth.saturating_sub(1),
+            TokenKind::LBrace => brace_depth += 1,
+            TokenKind::RBrace => brace_depth = brace_depth.saturating_sub(1),
+            TokenKind::LBracket => bracket_depth += 1,
+            TokenKind::RBracket => bracket_depth = bracket_depth.saturating_sub(1),
+            _ => {}
+        }
+
+        let at_top_level = paren_depth == 0 && brace_depth == 0 && bracket_depth == 0;
+
+        if at_top_level {
+            match kind {
+                // Found a mutation keyword at top level - this MATCH starts a mutation
+                TokenKind::Set | TokenKind::Delete | TokenKind::Remove | TokenKind::Insert => {
+                    return true;
+                }
+                // Statement separators or starts of other statements - not a mutation
+                TokenKind::Semicolon | TokenKind::Next | TokenKind::Eof => return false,
+                // Other statement starters - not a mutation
+                TokenKind::Session
+                | TokenKind::Start
+                | TokenKind::Commit
+                | TokenKind::Rollback
+                | TokenKind::Create
+                | TokenKind::Drop => return false,
+                // RETURN means this is just a query
+                TokenKind::Return | TokenKind::Finish => return false,
+                _ => {}
+            }
+        }
+
+        cursor += 1;
+
+        // Safety: don't scan too far ahead (reasonable limit)
+        if cursor - start > 1000 {
+            return false;
+        }
+    }
+
+    false
+}
+
 fn syntax_to_statement_class(token: SyntaxToken) -> StatementClass {
     match token {
         SyntaxToken::QueryStart => StatementClass::Query,
@@ -193,13 +251,6 @@ fn find_statement_end(tokens: &[Token], start: usize, class: StatementClass) -> 
         let mut paren_depth = 0usize;
         let mut brace_depth = 0usize;
         let mut bracket_depth = 0usize;
-        let starts_with_optional_call = matches!(
-            tokens.get(start).map(|t| &t.kind),
-            Some(TokenKind::Optional)
-        ) && matches!(
-            tokens.get(start + 1).map(|t| &t.kind),
-            Some(TokenKind::Call)
-        );
 
         while cursor < tokens.len() {
             let kind = &tokens[cursor].kind;
@@ -210,16 +261,14 @@ fn find_statement_end(tokens: &[Token], start: usize, class: StatementClass) -> 
                     return cursor;
                 }
 
-                if !(starts_with_optional_call && cursor == start + 1) {
-                    match classify(kind) {
-                        SyntaxToken::QueryStart
-                        | SyntaxToken::MutationStart
-                        | SyntaxToken::SessionStart
-                        | SyntaxToken::TransactionStart
-                        | SyntaxToken::CatalogStart => return cursor,
-                        SyntaxToken::Semicolon | SyntaxToken::Eof => return cursor,
-                        SyntaxToken::Other => {}
-                    }
+                match classify(kind) {
+                    SyntaxToken::QueryStart
+                    | SyntaxToken::MutationStart
+                    | SyntaxToken::SessionStart
+                    | SyntaxToken::TransactionStart
+                    | SyntaxToken::CatalogStart => return cursor,
+                    SyntaxToken::Semicolon | SyntaxToken::Eof => return cursor,
+                    SyntaxToken::Other => {}
                 }
             }
 
@@ -255,11 +304,6 @@ fn find_statement_end(tokens: &[Token], start: usize, class: StatementClass) -> 
             if is_query_or_mutation_sync_start(kind) {
                 return cursor;
             }
-            cursor += 1;
-            continue;
-        }
-
-        if matches!(class, StatementClass::Query) && matches!(kind, TokenKind::Call) {
             cursor += 1;
             continue;
         }
@@ -2267,13 +2311,18 @@ mod tests {
         assert!(diagnostics.is_empty());
         assert_eq!(program.statements.len(), 1);
 
-        let Statement::Catalog(stmt) = &program.statements[0] else {
-            panic!("expected catalog statement");
+        // CALL statements are now parsed as Query statements (ISO GQL compliance)
+        let Statement::Query(stmt) = &program.statements[0] else {
+            panic!("expected query statement");
         };
-        let CatalogStatementKind::CallCatalogModifyingProcedure(call) = &stmt.kind else {
-            panic!("expected CALL");
+        let Query::Linear(LinearQuery::Ambient(query)) = &stmt.query else {
+            panic!("expected ambient linear query");
         };
-        let crate::ast::ProcedureCall::Named(named_call) = &call.call.call else {
+        assert_eq!(query.primitive_statements.len(), 1);
+        let PrimitiveQueryStatement::Call(call) = &query.primitive_statements[0] else {
+            panic!("expected CALL primitive statement");
+        };
+        let crate::ast::ProcedureCall::Named(named_call) = &call.call else {
             panic!("expected named procedure call");
         };
         let ProcedureReference::CatalogQualified { name, .. } = &named_call.procedure else {
