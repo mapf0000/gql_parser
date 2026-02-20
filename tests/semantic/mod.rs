@@ -10,3 +10,5 @@ mod schema_integration;
 mod aggregate_validation;
 mod callable_validation;
 mod type_inference;
+mod mutation_validation;
+mod procedure_validation;

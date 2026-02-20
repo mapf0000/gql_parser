@@ -1,0 +1,209 @@
+//! Semantic validation tests for procedure statements.
+//!
+//! Tests procedure signature matching, YIELD validation, and
+//! variable scoping in inline procedures.
+
+use gql_parser::parse;
+use gql_parser::semantic::validator::{SemanticValidator, ValidationConfig};
+use gql_parser::ir::ValidationOutcome;
+use gql_parser::semantic::callable::{
+    CallableCatalog, CallableSignature, CallableKind,
+    ParameterSignature, InMemoryCallableCatalog,
+    BuiltinCallableCatalog, Volatility, Nullability,
+};
+use smol_str::SmolStr;
+
+fn validate_with_procedures(source: &str, catalog: impl CallableCatalog + 'static)
+    -> ValidationOutcome
+{
+    let parse_result = parse(source);
+    assert!(parse_result.ast.is_some(), "Failed to parse: {}", source);
+
+    let config = ValidationConfig {
+        callable_validation: true,
+        ..Default::default()
+    };
+    let validator = SemanticValidator::with_config(config).with_callable_catalog(&catalog);
+    validator.validate(parse_result.ast.as_ref().unwrap())
+}
+
+// ===== Test 1-5: Procedure Existence & Arguments =====
+
+#[test]
+fn test_builtin_procedure_validates() {
+    let source = "CALL abs(-5)";
+
+    // Use builtin catalog which has 'abs' function
+    let catalog = BuiltinCallableCatalog::new();
+    let outcome = validate_with_procedures(source, catalog);
+
+    assert!(outcome.is_success(), "Diagnostics: {:?}", outcome.diagnostics);
+}
+
+#[test]
+fn test_unknown_procedure_fails_with_validation_enabled() {
+    let source = "CALL nonexistent_procedure()";
+
+    let catalog = InMemoryCallableCatalog::new();
+    let outcome = validate_with_procedures(source, catalog);
+
+    // Should fail - procedure doesn't exist
+    assert!(!outcome.is_success() ||
+            outcome.diagnostics.iter().any(|d| d.message.contains("not found")),
+            "Expected undefined procedure diagnostic");
+}
+
+#[test]
+fn test_procedure_with_correct_arity_validates() {
+    let mut catalog = InMemoryCallableCatalog::new();
+
+    // Register a procedure that takes 2 arguments
+    catalog.register(CallableSignature {
+        name: SmolStr::new("my_proc"),
+        kind: CallableKind::Procedure,
+        parameters: vec![
+            ParameterSignature {
+                name: SmolStr::new("arg1"),
+                param_type: SmolStr::new("ANY"),
+                optional: false,
+                variadic: false,
+            },
+            ParameterSignature {
+                name: SmolStr::new("arg2"),
+                param_type: SmolStr::new("ANY"),
+                optional: false,
+                variadic: false,
+            },
+        ],
+        return_type: None,
+        volatility: Volatility::Volatile,
+        nullability: Nullability::NullOnNullInput,
+    });
+
+    let source = "CALL my_proc(1, 2)";
+    let outcome = validate_with_procedures(source, catalog);
+
+    assert!(outcome.is_success(), "Diagnostics: {:?}", outcome.diagnostics);
+}
+
+#[test]
+fn test_procedure_with_wrong_arity_fails() {
+    let mut catalog = InMemoryCallableCatalog::new();
+
+    catalog.register(CallableSignature {
+        name: SmolStr::new("my_proc"),
+        kind: CallableKind::Procedure,
+        parameters: vec![
+            ParameterSignature {
+                name: SmolStr::new("arg1"),
+                param_type: SmolStr::new("ANY"),
+                optional: false,
+                variadic: false,
+            },
+        ],
+        return_type: None,
+        volatility: Volatility::Volatile,
+        nullability: Nullability::NullOnNullInput,
+    });
+
+    let source = "CALL my_proc(1, 2, 3)";
+    let outcome = validate_with_procedures(source, catalog);
+
+    // Should fail - wrong number of arguments
+    assert!(!outcome.is_success() ||
+            outcome.diagnostics.iter().any(|d|
+                d.message.contains("argument") || d.message.contains("arity")
+            ));
+}
+
+#[test]
+fn test_optional_call_validates() {
+    let source = "OPTIONAL CALL abs(5)";
+
+    let catalog = BuiltinCallableCatalog::new();
+    let outcome = validate_with_procedures(source, catalog);
+
+    assert!(outcome.is_success(), "Diagnostics: {:?}", outcome.diagnostics);
+}
+
+// ===== Test 6-10: YIELD & Inline Procedures =====
+
+#[test]
+fn test_yield_valid_field_validates() {
+    let mut catalog = InMemoryCallableCatalog::new();
+
+    catalog.register(CallableSignature {
+        name: SmolStr::new("my_proc"),
+        kind: CallableKind::Procedure,
+        parameters: vec![],
+        return_type: Some(SmolStr::new("result")),
+        volatility: Volatility::Volatile,
+        nullability: Nullability::NullOnNullInput,
+    });
+
+    let source = "CALL my_proc() YIELD result";
+    let outcome = validate_with_procedures(source, catalog);
+
+    assert!(outcome.is_success(), "Diagnostics: {:?}", outcome.diagnostics);
+}
+
+#[test]
+fn test_yield_invalid_field_fails() {
+    let mut catalog = InMemoryCallableCatalog::new();
+
+    catalog.register(CallableSignature {
+        name: SmolStr::new("my_proc"),
+        kind: CallableKind::Procedure,
+        parameters: vec![],
+        return_type: Some(SmolStr::new("result")),
+        volatility: Volatility::Volatile,
+        nullability: Nullability::NullOnNullInput,
+    });
+
+    let source = "CALL my_proc() YIELD nonexistent";
+    let outcome = validate_with_procedures(source, catalog);
+
+    // Should fail or warn - field doesn't exist
+    assert!(!outcome.is_success() ||
+            outcome.diagnostics.iter().any(|d|
+                d.message.contains("nonexistent") || d.message.contains("field")
+            ));
+}
+
+#[test]
+fn test_inline_procedure_validates() {
+    let source = "CALL { MATCH (n) RETURN n }";
+
+    let validator = SemanticValidator::new();
+    let parse_result = parse(source);
+    let outcome = validator.validate(parse_result.ast.as_ref().unwrap());
+
+    assert!(outcome.is_success(), "Diagnostics: {:?}", outcome.diagnostics);
+}
+
+#[test]
+fn test_inline_procedure_with_scope_validates() {
+    let source = "MATCH (x) CALL (x) { MATCH (y) WHERE y.id = x.id RETURN y }";
+
+    let validator = SemanticValidator::new();
+    let parse_result = parse(source);
+    let outcome = validator.validate(parse_result.ast.as_ref().unwrap());
+
+    // 'x' should be in scope within the inline procedure
+    assert!(outcome.is_success(), "Diagnostics: {:?}", outcome.diagnostics);
+}
+
+#[test]
+fn test_inline_procedure_out_of_scope_variable_fails() {
+    let source = "CALL (x) { RETURN y }";
+
+    let validator = SemanticValidator::new();
+    let parse_result = parse(source);
+    let outcome = validator.validate(parse_result.ast.as_ref().unwrap());
+
+    // 'y' is not in scope (only 'x' is)
+    assert!(!outcome.is_success() ||
+            outcome.diagnostics.iter().any(|d|
+                d.message.contains("undefined") || d.message.contains("scope")
+            ));
+}

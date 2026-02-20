@@ -10,5 +10,6 @@ mod mutations;
 mod procedures;
 mod aggregates;
 mod graph_types;
+mod graph_types_comprehensive;
 mod type_references;
 mod case_insensitivity;

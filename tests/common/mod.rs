@@ -18,9 +18,10 @@
 //! - [`parse_and_validate`] - Parse source and run semantic validation
 //! - [`parse_and_expect_failure`] - Parse and validate, expecting validation to fail
 
-use gql_parser::{ast::Program, diag::DiagSeverity, parse, ParseResult, Token};
+use gql_parser::{ast::Program, diag::{DiagSeverity, Diag}, parse, ParseResult, Token};
 use gql_parser::lexer::Lexer;
-use gql_parser::semantic::validator::{SemanticValidator, ValidationOutcome};
+use gql_parser::semantic::validator::SemanticValidator;
+use gql_parser::ir::ValidationOutcome;
 
 // ============================================================================
 // Diagnostic Formatting and Assertion Helpers
@@ -40,6 +41,15 @@ pub fn format_diagnostics(diags: &[miette::Report]) -> String {
     diags
         .iter()
         .map(|diag| format!("{diag:?}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Format Diag diagnostics for display in assertion messages.
+pub fn format_diag_diagnostics(diags: &[Diag]) -> String {
+    diags
+        .iter()
+        .map(|diag| format!("{:?}", diag))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -85,7 +95,7 @@ pub fn assert_no_validation_errors(outcome: &ValidationOutcome) {
         errors.is_empty(),
         "validation should not have errors, but found {}:\n{}",
         errors.len(),
-        format_diagnostics(&outcome.diagnostics)
+        format_diag_diagnostics(&outcome.diagnostics)
     );
 }
 
@@ -108,7 +118,7 @@ pub fn assert_has_error_containing(outcome: &ValidationOutcome, text: &str) {
         has_matching_error,
         "expected error containing '{}', but found:\n{}",
         text,
-        format_diagnostics(&outcome.diagnostics)
+        format_diag_diagnostics(&outcome.diagnostics)
     );
 }
 

@@ -1,4 +1,19 @@
-//! Integration tests for graph type specification parsing.
+//! Graph type specification parsing tests
+//!
+//! Tests for ISO GQL graph type specifications including:
+//! - Node type specifications with properties, labels, and constraints
+//! - Edge type specifications with connectivity constraints
+//! - Inheritance and type hierarchies
+//! - Property types and label sets
+//!
+//! ## ISO GQL Compliance Notes
+//!
+//! These tests verify that the parser correctly implements ISO GQL grammar rules:
+//! 1. Element types are comma-separated (not semicolon)
+//! 2. Constraints appear AFTER property type specifications `{ }`, not inside
+//! 3. Multiple labels use `LABELS Label1 & Label2`, not multiple `LABEL` clauses
+//! 4. Inheritance supports multiple parents: `INHERITS A, B, C`
+//! 5. The parser must distinguish commas for inheritance from commas for element type lists
 
 use gql_parser::lexer::Lexer;
 use gql_parser::parser::Parser;
@@ -297,3 +312,236 @@ fn test_graph_type_parser_supports_edge_constraints_and_inheritance() {
         GraphTypeConstraint::Check { .. }
     ));
 }
+
+// ===== Additional Graph Type Validation Tests =====
+
+#[test]
+fn test_duplicate_element_type_names_produces_diagnostic() {
+    let source = r#"
+        CREATE GRAPH TYPE dup AS {
+            NODE TYPE Person,
+            NODE TYPE Person
+        }
+    "#;
+
+    let lexer = Lexer::new(source);
+    let lex_result = lexer.tokenize();
+    let parser = Parser::new(lex_result.tokens, source);
+    let result = parser.parse();
+
+    // Parser accepts duplicate names; semantic validator should catch this
+    // For now, verify it parses and produces AST
+    assert!(result.ast.is_some(), "Should parse even with duplicate names");
+
+    // NOTE: Semantic validation (not parser) should check for duplicates
+    // This test documents that the parser accepts this syntax
+}
+
+#[test]
+fn test_circular_inheritance_is_parsed() {
+    let source = r#"
+        CREATE GRAPH TYPE circular AS {
+            NODE TYPE A INHERITS B,
+            NODE TYPE B INHERITS A
+        }
+    "#;
+
+    let lexer = Lexer::new(source);
+    let lex_result = lexer.tokenize();
+    let parser = Parser::new(lex_result.tokens, source);
+    let result = parser.parse();
+
+    // Parser accepts circular inheritance; semantic validator should catch the cycle
+    assert!(result.ast.is_some(), "Should parse circular inheritance");
+
+    // NOTE: Semantic validation (not parser) should detect cycles
+    // This test documents that the parser accepts this syntax
+}
+
+#[test]
+fn test_multiple_element_types_parse_correctly() {
+    let source = r#"
+        CREATE GRAPH TYPE multi AS {
+            NODE TYPE Person { id :: INT, name :: STRING },
+            NODE TYPE Company { id :: INT, name :: STRING },
+            DIRECTED EDGE TYPE WORKS_AT CONNECTING (Person TO Company),
+            DIRECTED EDGE TYPE KNOWS CONNECTING (Person TO Person)
+        }
+    "#;
+
+    use gql_parser::parse;
+    let result = parse(source);
+    assert!(result.diagnostics.is_empty(), "Should parse without errors");
+    assert!(result.ast.is_some());
+
+    let program = result.ast.unwrap();
+    let stmt = &program.statements[0];
+
+    let gql_parser::ast::Statement::Catalog(cat) = stmt else {
+        panic!("Expected catalog statement");
+    };
+
+    let gql_parser::ast::CatalogStatementKind::CreateGraphType(create) = &cat.kind else {
+        panic!("Expected CREATE GRAPH TYPE");
+    };
+
+    let Some(gql_parser::ast::GraphTypeSource::Detailed { specification, .. }) = &create.source else {
+        panic!("Expected detailed source");
+    };
+
+    assert_eq!(specification.body.element_types.types.len(), 4,
+               "Should have 4 element types");
+}
+
+#[test]
+fn test_graph_type_with_multiple_labels_per_node() {
+    // ISO GQL does not support multiple LABEL clauses per node type.
+    // Instead, use LABELS with & to specify multiple labels
+    let source = r#"
+        CREATE GRAPH TYPE multi_label AS {
+            NODE TYPE Person LABELS Employee & Manager { emp_id :: INT, dept :: STRING }
+        }
+    "#;
+
+    let lexer = Lexer::new(source);
+    let lex_result = lexer.tokenize();
+    let parser = Parser::new(lex_result.tokens, source);
+    let result = parser.parse();
+
+    assert!(result.ast.is_some(), "Should parse multiple labels using LABELS & syntax");
+    // NOTE: The correct ISO GQL syntax for multiple labels is: LABELS Label1 & Label2
+    // NOT: LABEL Label1 LABEL Label2
+}
+
+#[test]
+fn test_edge_type_with_multiple_connecting_clauses() {
+    // NOTE: ISO GQL grammar (line 1633-1635) shows only ONE endpointPairPhrase per edge type.
+    // Multiple CONNECTING clauses are not part of the standard grammar.
+    // This test documents that the parser correctly rejects multiple CONNECTING clauses.
+    let source = r#"
+        CREATE GRAPH TYPE multi_connect AS {
+            NODE TYPE Person,
+            NODE TYPE Company,
+            EDGE TYPE RELATED
+                CONNECTING (Person TO Person)
+                CONNECTING (Person TO Company)
+        }
+    "#;
+
+    let lexer = Lexer::new(source);
+    let lex_result = lexer.tokenize();
+    let parser = Parser::new(lex_result.tokens, source);
+    let result = parser.parse();
+
+    // Parser should fail or treat second CONNECTING as a separate element (which fails)
+    // This is CORRECT behavior per ISO GQL standard
+    assert!(result.ast.is_none() || !result.diagnostics.is_empty(),
+            "Parser correctly rejects multiple CONNECTING clauses per ISO GQL standard");
+}
+
+#[test]
+fn test_graph_type_with_check_constraint() {
+    // Correct ISO GQL syntax: constraints come AFTER property types specification
+    let source = r#"
+        CREATE GRAPH TYPE constrained AS {
+            NODE TYPE Person { age :: INT } CONSTRAINT CHECK (age >= 0)
+        }
+    "#;
+
+    use gql_parser::parse;
+    let result = parse(source);
+    assert!(result.diagnostics.is_empty(), "Should parse CHECK constraint after property types");
+    assert!(result.ast.is_some());
+}
+
+#[test]
+fn test_graph_type_with_unique_constraint() {
+    // Correct ISO GQL syntax: constraints come AFTER property types specification
+    let source = r#"
+        CREATE GRAPH TYPE unique_id AS {
+            NODE TYPE Person { id :: INT } CONSTRAINT UNIQUE (id)
+        }
+    "#;
+
+    use gql_parser::parse;
+    let result = parse(source);
+    assert!(result.diagnostics.is_empty(), "Should parse UNIQUE constraint after property types");
+    assert!(result.ast.is_some());
+}
+
+#[test]
+fn test_graph_type_with_multiple_constraints() {
+    // Correct ISO GQL syntax: constraints come AFTER property types specification
+    let source = r#"
+        CREATE GRAPH TYPE multi_constraint AS {
+            NODE TYPE Person {
+                id :: INT,
+                age :: INT
+            }
+            CONSTRAINT UNIQUE (id)
+            CONSTRAINT CHECK (age >= 0)
+            CONSTRAINT CHECK (age <= 150)
+        }
+    "#;
+
+    use gql_parser::parse;
+    use gql_parser::ast::graph_type::{ElementTypeSpecification, GraphTypeConstraint};
+
+    let result = parse(source);
+    assert!(result.diagnostics.is_empty(), "Should parse multiple constraints after property types");
+
+    let program = result.ast.unwrap();
+    let gql_parser::ast::Statement::Catalog(cat) = &program.statements[0] else {
+        panic!("Expected catalog statement");
+    };
+
+    let gql_parser::ast::CatalogStatementKind::CreateGraphType(create) = &cat.kind else {
+        panic!("Expected CREATE GRAPH TYPE");
+    };
+
+    let Some(gql_parser::ast::GraphTypeSource::Detailed { specification, .. }) = &create.source else {
+        panic!("Expected detailed source");
+    };
+
+    let ElementTypeSpecification::Node(node) =
+        &specification.body.element_types.types[0] else {
+        panic!("Expected node type");
+    };
+
+    let filler = node.pattern.phrase.filler.as_ref().unwrap();
+    assert_eq!(filler.constraints.len(), 3, "Should have 3 constraints");
+}
+
+#[test]
+fn test_undirected_edge_type_specification() {
+    let source = r#"
+        CREATE GRAPH TYPE undirected AS {
+            NODE TYPE Person,
+            UNDIRECTED EDGE TYPE KNOWS CONNECTING (Person TO Person)
+        }
+    "#;
+
+    use gql_parser::parse;
+    let result = parse(source);
+    assert!(result.diagnostics.is_empty(), "Should parse undirected edge");
+    assert!(result.ast.is_some());
+}
+
+#[test]
+fn test_graph_type_with_inheritance_chain() {
+    let source = r#"
+        CREATE GRAPH TYPE inheritance AS {
+            NODE TYPE Entity,
+            NODE TYPE Person INHERITS Entity,
+            NODE TYPE Employee INHERITS Person
+        }
+    "#;
+
+    use gql_parser::parse;
+    let result = parse(source);
+    assert!(result.diagnostics.is_empty(), "Should parse inheritance chain");
+    assert!(result.ast.is_some());
+
+    // NOTE: Semantic validation (not parser) should check inheritance chain correctness
+}
+

@@ -3,6 +3,79 @@
 //! This module implements parsing of the complete graph type specification system,
 //! enabling comprehensive schema definition for property graphs including node types,
 //! edge types, property types, label sets, and connectivity constraints.
+//!
+//! # ISO GQL Compliance
+//!
+//! This parser implements the ISO GQL standard grammar rules as specified in
+//! ISO/IEC 39075 (GQL). Key conformance points:
+//!
+//! ## Element Type Lists (§18.1)
+//! - Element types (NODE TYPE, EDGE TYPE) are **comma-separated**, not semicolon-separated
+//! - Grammar: `elementTypeList ::= elementTypeSpecification (COMMA elementTypeSpecification)*`
+//! - Trailing commas are allowed before closing brace
+//!
+//! ## Inheritance Clauses (§18.2, §18.3)
+//! - Supports single and multiple inheritance: `INHERITS Parent1, Parent2, Parent3`
+//! - **Critical ambiguity resolution**: When parsing inheritance clauses, the parser must
+//!   distinguish between commas for multiple parents vs. commas for element type separation
+//! - Implementation: Checks for element type start keywords after consuming comma to determine
+//!   if it's a new parent or a new element type
+//!
+//! ## Property Types Specification (§18.5)
+//! - Grammar: `propertyTypesSpecification ::= LEFT_BRACE propertyTypeList? RIGHT_BRACE`
+//! - Properties: `propertyName [::] propertyValueType [NOT NULL]`
+//! - **Empty property blocks are allowed**: `{ }`
+//!
+//! ## Constraints
+//! - Constraints appear **AFTER** property types specification, not inside `{ }` blocks
+//! - Valid: `NODE TYPE Person { id :: INT } CONSTRAINT UNIQUE (id)`
+//! - Invalid: `NODE TYPE Person { id :: INT, CONSTRAINT UNIQUE (id) }`
+//! - Supported constraint types: UNIQUE, CHECK, MANDATORY, KEY, Custom
+//!
+//! ## Label Sets (§18.4)
+//! - Single label: `LABEL LabelName`
+//! - Multiple labels: `LABELS Label1 & Label2 & Label3`
+//! - **Multiple LABEL clauses are NOT supported** (use LABELS with & instead)
+//!
+//! ## Edge Type Specifications (§18.3)
+//! - Directed edges: `DIRECTED EDGE TYPE name CONNECTING (Source TO Destination)`
+//! - Undirected edges: `UNDIRECTED EDGE TYPE name CONNECTING (Source TO Destination)`
+//! - **Only ONE CONNECTING clause per edge type** (per ISO GQL grammar line 1633-1635)
+//!
+//! ## Abstract Types
+//! - Both node and edge types can be marked ABSTRACT
+//! - Syntax: `ABSTRACT NODE TYPE name` or `ABSTRACT DIRECTED EDGE TYPE name`
+//!
+//! # Grammar References
+//!
+//! This module implements these ISO GQL grammar rules (line numbers from GQL.g4):
+//! - §18.1 `nestedGraphTypeSpecification` (line 1482-1488)
+//! - §18.2 `nodeTypeSpecification` (line 1501-1545)
+//! - §18.3 `edgeTypeSpecification` (line 1548-1588)
+//! - §18.4 `labelSetPhrase` (line 1679-1687)
+//! - §18.5 `propertyTypesSpecification` (line 1691-1697)
+//!
+//! # Example
+//!
+//! ```gql
+//! CREATE GRAPH TYPE social_network AS {
+//!     NODE TYPE Person
+//!         LABEL Person {
+//!             id :: INT,
+//!             name :: STRING,
+//!             email :: STRING
+//!         }
+//!         CONSTRAINT UNIQUE (id)
+//!         CONSTRAINT UNIQUE (email),
+//!     NODE TYPE Company
+//!         LABELS Company & Organization {
+//!             id :: INT,
+//!             name :: STRING
+//!         },
+//!     DIRECTED EDGE TYPE WORKS_AT
+//!         CONNECTING (Person TO Company)
+//! }
+//! ```
 
 use crate::ast::{
     ArcTypePointingLeft, ArcTypePointingRight, ArcTypeUndirected, DirectedArcType, EdgeKind,
@@ -1063,7 +1136,16 @@ impl<'a> GraphTypeParser<'a> {
             span: first.1.clone(),
         });
 
+        // Parse additional parent types separated by commas
+        // IMPORTANT: Stop if we see keywords that start a new element type or filler
         while self.stream.consume(&TokenKind::Comma) {
+            // Check if this comma actually starts a new element type (not another parent)
+            if self.is_element_type_start() {
+                // Put the comma back by repositioning
+                self.stream.set_position(self.stream.position() - 1);
+                break;
+            }
+
             let parent = self.parse_type_reference_identifier("parent type name")?;
             parents.push(InheritedTypeReference {
                 name: parent.0,
@@ -1080,6 +1162,17 @@ impl<'a> GraphTypeParser<'a> {
             parents,
             span: merge_spans(&start_span, &end_span),
         }))
+    }
+
+    fn is_element_type_start(&self) -> bool {
+        // Check for keywords that start an element type specification
+        self.check_word("ABSTRACT")
+            || self.stream.check(&TokenKind::Node)
+            || self.stream.check(&TokenKind::Vertex)
+            || self.stream.check(&TokenKind::Edge)
+            || self.stream.check(&TokenKind::Relationship)
+            || self.stream.check(&TokenKind::Directed)
+            || self.stream.check(&TokenKind::Undirected)
     }
 
     fn is_inheritance_start(&self) -> bool {

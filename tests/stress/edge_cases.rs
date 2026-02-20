@@ -984,3 +984,108 @@ fn multiple_errors_reported() {
         "Should have multiple diagnostics"
     );
 }
+
+// ===== Mutation Error Recovery =====
+
+#[test]
+fn incomplete_insert_with_recovery() {
+    let result = parse("INSERT (n) SET ; MATCH (m) RETURN m");
+
+    // Should have diagnostic for incomplete SET, but still parse MATCH
+    assert!(!result.diagnostics.is_empty(), "Expected diagnostic for incomplete SET");
+    assert!(result.ast.is_some(), "Should produce partial AST");
+}
+
+#[test]
+fn malformed_set_property() {
+    let result = parse("SET n.prop = ");
+
+    assert!(!result.diagnostics.is_empty(), "Expected diagnostic for missing value");
+}
+
+#[test]
+fn incomplete_delete_list() {
+    let result = parse("DELETE n, , m");
+
+    // Parser should handle double comma gracefully
+    assert!(!result.diagnostics.is_empty());
+}
+
+#[test]
+fn incomplete_remove_statement() {
+    let result = parse("REMOVE n:");
+
+    // Missing label name
+    assert!(!result.diagnostics.is_empty(), "Expected diagnostic for missing label");
+}
+
+#[test]
+fn incomplete_remove_property() {
+    let result = parse("REMOVE n.");
+
+    // Missing property name
+    assert!(!result.diagnostics.is_empty(), "Expected diagnostic for missing property");
+}
+
+// ===== Procedure Error Recovery =====
+
+#[test]
+fn unclosed_inline_procedure() {
+    let result = parse("CALL { MATCH (n) RETURN n");
+
+    // Missing closing brace
+    assert!(!result.diagnostics.is_empty(), "Expected diagnostic for unclosed procedure");
+}
+
+#[test]
+fn incomplete_yield_clause() {
+    let result = parse("CALL myProc() YIELD");
+
+    // Missing yield items
+    assert!(!result.diagnostics.is_empty(), "Expected diagnostic for empty YIELD");
+}
+
+#[test]
+fn incomplete_variable_definition() {
+    let result = parse("CALL { GRAPH g = }");
+
+    // Missing initializer value
+    assert!(!result.diagnostics.is_empty(), "Expected diagnostic for incomplete definition");
+}
+
+#[test]
+fn malformed_procedure_arguments() {
+    let result = parse("CALL myProc(1, , 3)");
+
+    // Double comma in argument list
+    assert!(!result.diagnostics.is_empty(), "Expected diagnostic for malformed arguments");
+}
+
+// ===== Multi-Error Recovery =====
+
+#[test]
+fn multiple_errors_in_statement() {
+    let result = parse("INSERT (n {bad: }) SET m.prop = RETURN x");
+
+    // Should catch: incomplete property spec, undefined 'm', missing value, unexpected RETURN
+    assert!(result.diagnostics.len() >= 2, "Expected multiple diagnostics");
+}
+
+#[test]
+fn statement_continuation_after_error() {
+    let result = parse("SET invalid syntax ; MATCH (n) RETURN n");
+
+    // Should have error on first statement, but parse second statement
+    assert!(!result.diagnostics.is_empty());
+    assert!(result.ast.is_some(), "Should parse valid statement after error");
+}
+
+#[test]
+fn nested_error_recovery() {
+    let result = parse("CALL { INSERT (n) bad_syntax SET n.prop = 1 }");
+
+    // Error inside inline procedure
+    assert!(!result.diagnostics.is_empty());
+    assert!(result.ast.is_some(), "Should recognize CALL structure");
+}
+
