@@ -433,666 +433,488 @@ pub trait CallableValidator: Send + Sync {
 }
 
 // ============================================================================
-// BuiltinCallableCatalog
+// Built-in Function Resolution
 // ============================================================================
 
-/// Catalog of built-in GQL functions and aggregates.
+/// Resolves a built-in callable signature by name and kind.
 ///
-/// This catalog contains all standard GQL built-in functions organized by category:
+/// This function provides zero-cost access to all standard GQL built-in functions:
 /// - Numeric: abs, mod, floor, ceil, sqrt, power, exp, ln, log, sin, cos, tan
 /// - String: length, substring, upper, lower, trim, replace
 /// - Temporal: current_date, current_time, current_timestamp
 /// - Aggregates: count, sum, avg, min, max
 /// - Other: coalesce, nullif
-pub struct BuiltinCallableCatalog {
-    signatures: HashMap<(SmolStr, CallableKind), Vec<CallableSignature>>,
+///
+/// Uses match statements for O(1) lookup (compiler-optimized).
+/// Returns `None` if the callable is not a built-in function.
+pub fn lookup_builtin_callable(name: &str, kind: CallableKind) -> Option<CallableSignature> {
+    resolve_builtin_signatures(name, kind)
+        .and_then(|sigs| sigs.into_iter().next())
 }
 
-impl BuiltinCallableCatalog {
-    /// Creates a new built-in callable catalog with all standard GQL functions.
-    pub fn new() -> Self {
-        let mut catalog = Self {
-            signatures: HashMap::new(),
-        };
-        catalog.register_all_builtins();
-        catalog
+/// Resolves all overloaded signatures for a built-in callable.
+///
+/// Most built-ins have a single signature, but this supports overloading.
+/// Returns `None` if the callable is not a built-in function.
+pub fn resolve_builtin_signatures(name: &str, kind: CallableKind) -> Option<Vec<CallableSignature>> {
+    // Normalize name to lowercase for case-insensitive lookup
+    let name_lower = name.to_lowercase();
+    let name = name_lower.as_str();
+
+    match kind {
+        CallableKind::Function => resolve_builtin_function(name),
+        CallableKind::AggregateFunction => resolve_builtin_aggregate(name),
+        CallableKind::Procedure => None, // No built-in procedures
     }
+}
 
-    /// Registers all built-in functions and aggregates.
-    fn register_all_builtins(&mut self) {
-        self.register_numeric_functions();
-        self.register_string_functions();
-        self.register_temporal_functions();
-        self.register_list_and_cardinality_functions();
-        self.register_graph_functions();
-        self.register_aggregate_functions();
-        self.register_other_functions();
-    }
-
-    /// Registers a single signature.
-    fn register(&mut self, sig: CallableSignature) {
-        let key = (sig.name.clone(), sig.kind);
-        self.signatures.entry(key).or_default().push(sig);
-    }
-
-    /// Registers numeric functions.
-    fn register_numeric_functions(&mut self) {
-        // ABS(x) -> numeric
-        self.register(CallableSignature::new(
-            "abs",
-            CallableKind::Function,
-            vec![ParameterSignature::required("x", "NUMERIC")],
-            Some("NUMERIC"),
-        ));
-
-        // MOD(x, y) -> numeric
-        self.register(CallableSignature::new(
-            "mod",
-            CallableKind::Function,
-            vec![
-                ParameterSignature::required("x", "NUMERIC"),
-                ParameterSignature::required("y", "NUMERIC"),
-            ],
-            Some("NUMERIC"),
-        ));
-
-        // FLOOR(x) -> numeric
-        self.register(CallableSignature::new(
-            "floor",
-            CallableKind::Function,
-            vec![ParameterSignature::required("x", "NUMERIC")],
-            Some("NUMERIC"),
-        ));
-
-        // CEIL(x) -> numeric
-        self.register(CallableSignature::new(
-            "ceil",
-            CallableKind::Function,
-            vec![ParameterSignature::required("x", "NUMERIC")],
-            Some("NUMERIC"),
-        ));
-
-        // SQRT(x) -> numeric
-        self.register(CallableSignature::new(
-            "sqrt",
-            CallableKind::Function,
-            vec![ParameterSignature::required("x", "NUMERIC")],
-            Some("NUMERIC"),
-        ));
-
-        // POWER(x, y) -> numeric
-        self.register(CallableSignature::new(
-            "power",
-            CallableKind::Function,
-            vec![
-                ParameterSignature::required("base", "NUMERIC"),
-                ParameterSignature::required("exponent", "NUMERIC"),
-            ],
-            Some("NUMERIC"),
-        ));
-
-        // EXP(x) -> numeric
-        self.register(CallableSignature::new(
-            "exp",
-            CallableKind::Function,
-            vec![ParameterSignature::required("x", "NUMERIC")],
-            Some("NUMERIC"),
-        ));
-
-        // LN(x) -> numeric (natural logarithm)
-        self.register(CallableSignature::new(
-            "ln",
-            CallableKind::Function,
-            vec![ParameterSignature::required("x", "NUMERIC")],
-            Some("NUMERIC"),
-        ));
-
-        // LOG(base, x) -> numeric
-        self.register(CallableSignature::new(
-            "log",
-            CallableKind::Function,
-            vec![
-                ParameterSignature::required("base", "NUMERIC"),
-                ParameterSignature::required("x", "NUMERIC"),
-            ],
-            Some("NUMERIC"),
-        ));
-
-        // LOG10(x) -> numeric
-        self.register(CallableSignature::new(
-            "log10",
-            CallableKind::Function,
-            vec![ParameterSignature::required("x", "NUMERIC")],
-            Some("NUMERIC"),
-        ));
-
-        // Trigonometric functions
-        for func in ["sin", "cos", "tan", "asin", "acos", "atan", "cot", "sinh", "cosh", "tanh"] {
-            self.register(CallableSignature::new(
-                func,
+/// Resolves built-in regular functions.
+fn resolve_builtin_function(name: &str) -> Option<Vec<CallableSignature>> {
+        let sig = match name {
+            // Numeric functions
+            "abs" => CallableSignature::new(
+                "abs",
                 CallableKind::Function,
                 vec![ParameterSignature::required("x", "NUMERIC")],
                 Some("NUMERIC"),
-            ));
-        }
+            ),
+            "mod" => CallableSignature::new(
+                "mod",
+                CallableKind::Function,
+                vec![
+                    ParameterSignature::required("x", "NUMERIC"),
+                    ParameterSignature::required("y", "NUMERIC"),
+                ],
+                Some("NUMERIC"),
+            ),
+            "floor" => CallableSignature::new(
+                "floor",
+                CallableKind::Function,
+                vec![ParameterSignature::required("x", "NUMERIC")],
+                Some("NUMERIC"),
+            ),
+            "ceil" => CallableSignature::new(
+                "ceil",
+                CallableKind::Function,
+                vec![ParameterSignature::required("x", "NUMERIC")],
+                Some("NUMERIC"),
+            ),
+            "sqrt" => CallableSignature::new(
+                "sqrt",
+                CallableKind::Function,
+                vec![ParameterSignature::required("x", "NUMERIC")],
+                Some("NUMERIC"),
+            ),
+            "power" => CallableSignature::new(
+                "power",
+                CallableKind::Function,
+                vec![
+                    ParameterSignature::required("base", "NUMERIC"),
+                    ParameterSignature::required("exponent", "NUMERIC"),
+                ],
+                Some("NUMERIC"),
+            ),
+            "exp" => CallableSignature::new(
+                "exp",
+                CallableKind::Function,
+                vec![ParameterSignature::required("x", "NUMERIC")],
+                Some("NUMERIC"),
+            ),
+            "ln" => CallableSignature::new(
+                "ln",
+                CallableKind::Function,
+                vec![ParameterSignature::required("x", "NUMERIC")],
+                Some("NUMERIC"),
+            ),
+            "log" => CallableSignature::new(
+                "log",
+                CallableKind::Function,
+                vec![
+                    ParameterSignature::required("base", "NUMERIC"),
+                    ParameterSignature::required("x", "NUMERIC"),
+                ],
+                Some("NUMERIC"),
+            ),
+            "log10" => CallableSignature::new(
+                "log10",
+                CallableKind::Function,
+                vec![ParameterSignature::required("x", "NUMERIC")],
+                Some("NUMERIC"),
+            ),
+            "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "cot" | "sinh" | "cosh" | "tanh" => {
+                CallableSignature::new(
+                    name,
+                    CallableKind::Function,
+                    vec![ParameterSignature::required("x", "NUMERIC")],
+                    Some("NUMERIC"),
+                )
+            }
+            "atan2" => CallableSignature::new(
+                "atan2",
+                CallableKind::Function,
+                vec![
+                    ParameterSignature::required("y", "NUMERIC"),
+                    ParameterSignature::required("x", "NUMERIC"),
+                ],
+                Some("NUMERIC"),
+            ),
+            "degrees" => CallableSignature::new(
+                "degrees",
+                CallableKind::Function,
+                vec![ParameterSignature::required("x", "NUMERIC")],
+                Some("NUMERIC"),
+            ),
+            "radians" => CallableSignature::new(
+                "radians",
+                CallableKind::Function,
+                vec![ParameterSignature::required("x", "NUMERIC")],
+                Some("NUMERIC"),
+            ),
+            "round" => CallableSignature::new(
+                "round",
+                CallableKind::Function,
+                vec![
+                    ParameterSignature::required("x", "NUMERIC"),
+                    ParameterSignature::optional("decimals", "INT"),
+                ],
+                Some("NUMERIC"),
+            ),
 
-        // ATAN2(y, x) -> numeric
-        self.register(CallableSignature::new(
-            "atan2",
-            CallableKind::Function,
-            vec![
-                ParameterSignature::required("y", "NUMERIC"),
-                ParameterSignature::required("x", "NUMERIC"),
-            ],
-            Some("NUMERIC"),
-        ));
+            // String functions
+            "length" => CallableSignature::new(
+                "length",
+                CallableKind::Function,
+                vec![ParameterSignature::required("s", "STRING")],
+                Some("INT"),
+            ),
+            "substring" => CallableSignature::new(
+                "substring",
+                CallableKind::Function,
+                vec![
+                    ParameterSignature::required("s", "STRING"),
+                    ParameterSignature::required("start", "INT"),
+                    ParameterSignature::optional("length", "INT"),
+                ],
+                Some("STRING"),
+            ),
+            "upper" => CallableSignature::new(
+                "upper",
+                CallableKind::Function,
+                vec![ParameterSignature::required("s", "STRING")],
+                Some("STRING"),
+            ),
+            "lower" => CallableSignature::new(
+                "lower",
+                CallableKind::Function,
+                vec![ParameterSignature::required("s", "STRING")],
+                Some("STRING"),
+            ),
+            "trim" => CallableSignature::new(
+                "trim",
+                CallableKind::Function,
+                vec![ParameterSignature::required("s", "STRING")],
+                Some("STRING"),
+            ),
+            "ltrim" => CallableSignature::new(
+                "ltrim",
+                CallableKind::Function,
+                vec![ParameterSignature::required("s", "STRING")],
+                Some("STRING"),
+            ),
+            "rtrim" => CallableSignature::new(
+                "rtrim",
+                CallableKind::Function,
+                vec![ParameterSignature::required("s", "STRING")],
+                Some("STRING"),
+            ),
+            "replace" => CallableSignature::new(
+                "replace",
+                CallableKind::Function,
+                vec![
+                    ParameterSignature::required("s", "STRING"),
+                    ParameterSignature::required("search", "STRING"),
+                    ParameterSignature::required("replace", "STRING"),
+                ],
+                Some("STRING"),
+            ),
+            "concat" => CallableSignature::new(
+                "concat",
+                CallableKind::Function,
+                vec![ParameterSignature::variadic("strings", "STRING")],
+                Some("STRING"),
+            ),
+            "left" => CallableSignature::new(
+                "left",
+                CallableKind::Function,
+                vec![
+                    ParameterSignature::required("s", "STRING"),
+                    ParameterSignature::required("n", "INT"),
+                ],
+                Some("STRING"),
+            ),
+            "right" => CallableSignature::new(
+                "right",
+                CallableKind::Function,
+                vec![
+                    ParameterSignature::required("s", "STRING"),
+                    ParameterSignature::required("n", "INT"),
+                ],
+                Some("STRING"),
+            ),
+            "normalize" => CallableSignature::new(
+                "normalize",
+                CallableKind::Function,
+                vec![
+                    ParameterSignature::required("s", "STRING"),
+                    ParameterSignature::optional("form", "STRING"),
+                ],
+                Some("STRING"),
+            ),
+            "char_length" => CallableSignature::new(
+                "char_length",
+                CallableKind::Function,
+                vec![ParameterSignature::required("s", "STRING")],
+                Some("INT"),
+            ),
+            "byte_length" => CallableSignature::new(
+                "byte_length",
+                CallableKind::Function,
+                vec![ParameterSignature::required("s", "STRING")],
+                Some("INT"),
+            ),
 
-        // DEGREES(x) -> numeric (radians to degrees)
-        self.register(CallableSignature::new(
-            "degrees",
-            CallableKind::Function,
-            vec![ParameterSignature::required("x", "NUMERIC")],
-            Some("NUMERIC"),
-        ));
-
-        // RADIANS(x) -> numeric (degrees to radians)
-        self.register(CallableSignature::new(
-            "radians",
-            CallableKind::Function,
-            vec![ParameterSignature::required("x", "NUMERIC")],
-            Some("NUMERIC"),
-        ));
-
-        // ROUND(x, [decimals]) -> numeric
-        self.register(CallableSignature::new(
-            "round",
-            CallableKind::Function,
-            vec![
-                ParameterSignature::required("x", "NUMERIC"),
-                ParameterSignature::optional("decimals", "INT"),
-            ],
-            Some("NUMERIC"),
-        ));
-    }
-
-    /// Registers string functions.
-    fn register_string_functions(&mut self) {
-        // LENGTH(s) -> int
-        self.register(CallableSignature::new(
-            "length",
-            CallableKind::Function,
-            vec![ParameterSignature::required("s", "STRING")],
-            Some("INT"),
-        ));
-
-        // SUBSTRING(s, start, [length]) -> string
-        self.register(CallableSignature::new(
-            "substring",
-            CallableKind::Function,
-            vec![
-                ParameterSignature::required("s", "STRING"),
-                ParameterSignature::required("start", "INT"),
-                ParameterSignature::optional("length", "INT"),
-            ],
-            Some("STRING"),
-        ));
-
-        // UPPER(s) -> string
-        self.register(CallableSignature::new(
-            "upper",
-            CallableKind::Function,
-            vec![ParameterSignature::required("s", "STRING")],
-            Some("STRING"),
-        ));
-
-        // LOWER(s) -> string
-        self.register(CallableSignature::new(
-            "lower",
-            CallableKind::Function,
-            vec![ParameterSignature::required("s", "STRING")],
-            Some("STRING"),
-        ));
-
-        // TRIM(s) -> string
-        self.register(CallableSignature::new(
-            "trim",
-            CallableKind::Function,
-            vec![ParameterSignature::required("s", "STRING")],
-            Some("STRING"),
-        ));
-
-        // LTRIM(s) -> string
-        self.register(CallableSignature::new(
-            "ltrim",
-            CallableKind::Function,
-            vec![ParameterSignature::required("s", "STRING")],
-            Some("STRING"),
-        ));
-
-        // RTRIM(s) -> string
-        self.register(CallableSignature::new(
-            "rtrim",
-            CallableKind::Function,
-            vec![ParameterSignature::required("s", "STRING")],
-            Some("STRING"),
-        ));
-
-        // REPLACE(s, search, replace) -> string
-        self.register(CallableSignature::new(
-            "replace",
-            CallableKind::Function,
-            vec![
-                ParameterSignature::required("s", "STRING"),
-                ParameterSignature::required("search", "STRING"),
-                ParameterSignature::required("replace", "STRING"),
-            ],
-            Some("STRING"),
-        ));
-
-        // CONCAT(s1, s2, ...) -> string (variadic)
-        self.register(CallableSignature::new(
-            "concat",
-            CallableKind::Function,
-            vec![ParameterSignature::variadic("strings", "STRING")],
-            Some("STRING"),
-        ));
-
-        // LEFT(s, n) -> string
-        self.register(CallableSignature::new(
-            "left",
-            CallableKind::Function,
-            vec![
-                ParameterSignature::required("s", "STRING"),
-                ParameterSignature::required("n", "INT"),
-            ],
-            Some("STRING"),
-        ));
-
-        // RIGHT(s, n) -> string
-        self.register(CallableSignature::new(
-            "right",
-            CallableKind::Function,
-            vec![
-                ParameterSignature::required("s", "STRING"),
-                ParameterSignature::required("n", "INT"),
-            ],
-            Some("STRING"),
-        ));
-
-        // NORMALIZE(s, [form]) -> string
-        self.register(CallableSignature::new(
-            "normalize",
-            CallableKind::Function,
-            vec![
-                ParameterSignature::required("s", "STRING"),
-                ParameterSignature::optional("form", "STRING"),
-            ],
-            Some("STRING"),
-        ));
-
-        // CHAR_LENGTH(s) -> int
-        self.register(CallableSignature::new(
-            "char_length",
-            CallableKind::Function,
-            vec![ParameterSignature::required("s", "STRING")],
-            Some("INT"),
-        ));
-
-        // BYTE_LENGTH(s) -> int
-        self.register(CallableSignature::new(
-            "byte_length",
-            CallableKind::Function,
-            vec![ParameterSignature::required("s", "STRING")],
-            Some("INT"),
-        ));
-    }
-
-    /// Registers temporal functions.
-    fn register_temporal_functions(&mut self) {
-        // CURRENT_DATE() -> date
-        self.register(
-            CallableSignature::new("current_date", CallableKind::Function, vec![], Some("DATE"))
-                .with_volatility(Volatility::Stable),
-        );
-
-        // CURRENT_TIME() -> time
-        self.register(
-            CallableSignature::new("current_time", CallableKind::Function, vec![], Some("TIME"))
-                .with_volatility(Volatility::Stable),
-        );
-
-        // CURRENT_TIMESTAMP() -> timestamp
-        self.register(
-            CallableSignature::new(
+            // Temporal functions
+            "current_date" => CallableSignature::new(
+                "current_date",
+                CallableKind::Function,
+                vec![],
+                Some("DATE"),
+            ).with_volatility(Volatility::Stable),
+            "current_time" => CallableSignature::new(
+                "current_time",
+                CallableKind::Function,
+                vec![],
+                Some("TIME"),
+            ).with_volatility(Volatility::Stable),
+            "current_timestamp" => CallableSignature::new(
                 "current_timestamp",
                 CallableKind::Function,
                 vec![],
                 Some("TIMESTAMP"),
-            )
-            .with_volatility(Volatility::Stable),
-        );
+            ).with_volatility(Volatility::Stable),
+            "now" => CallableSignature::new(
+                "now",
+                CallableKind::Function,
+                vec![],
+                Some("TIMESTAMP"),
+            ).with_volatility(Volatility::Stable),
+            "date" => CallableSignature::new(
+                "date",
+                CallableKind::Function,
+                vec![
+                    ParameterSignature::required("year", "INT"),
+                    ParameterSignature::required("month", "INT"),
+                    ParameterSignature::required("day", "INT"),
+                ],
+                Some("DATE"),
+            ),
+            "time" => CallableSignature::new(
+                "time",
+                CallableKind::Function,
+                vec![
+                    ParameterSignature::required("hour", "INT"),
+                    ParameterSignature::required("minute", "INT"),
+                    ParameterSignature::required("second", "INT"),
+                    ParameterSignature::optional("nanosecond", "INT"),
+                ],
+                Some("TIME"),
+            ),
+            "datetime" => CallableSignature::new(
+                "datetime",
+                CallableKind::Function,
+                vec![
+                    ParameterSignature::required("year", "INT"),
+                    ParameterSignature::required("month", "INT"),
+                    ParameterSignature::required("day", "INT"),
+                    ParameterSignature::optional("hour", "INT"),
+                    ParameterSignature::optional("minute", "INT"),
+                    ParameterSignature::optional("second", "INT"),
+                ],
+                Some("DATETIME"),
+            ),
+            "duration" => CallableSignature::new(
+                "duration",
+                CallableKind::Function,
+                vec![ParameterSignature::required("value", "STRING")],
+                Some("DURATION"),
+            ),
+            "duration_between" => CallableSignature::new(
+                "duration_between",
+                CallableKind::Function,
+                vec![
+                    ParameterSignature::required("start", "ANY"),
+                    ParameterSignature::required("end", "ANY"),
+                ],
+                Some("DURATION"),
+            ),
 
-        // NOW() -> timestamp (alias for CURRENT_TIMESTAMP)
-        self.register(
-            CallableSignature::new("now", CallableKind::Function, vec![], Some("TIMESTAMP"))
-                .with_volatility(Volatility::Stable),
-        );
-
-        // Temporal constructor functions (simplified - real signatures may vary)
-        // DATE(year, month, day) -> date
-        self.register(CallableSignature::new(
-            "date",
-            CallableKind::Function,
-            vec![
-                ParameterSignature::required("year", "INT"),
-                ParameterSignature::required("month", "INT"),
-                ParameterSignature::required("day", "INT"),
-            ],
-            Some("DATE"),
-        ));
-
-        // TIME(hour, minute, second, [nanosecond]) -> time
-        self.register(CallableSignature::new(
-            "time",
-            CallableKind::Function,
-            vec![
-                ParameterSignature::required("hour", "INT"),
-                ParameterSignature::required("minute", "INT"),
-                ParameterSignature::required("second", "INT"),
-                ParameterSignature::optional("nanosecond", "INT"),
-            ],
-            Some("TIME"),
-        ));
-
-        // DATETIME - similar to date + time
-        self.register(CallableSignature::new(
-            "datetime",
-            CallableKind::Function,
-            vec![
-                ParameterSignature::required("year", "INT"),
-                ParameterSignature::required("month", "INT"),
-                ParameterSignature::required("day", "INT"),
-                ParameterSignature::optional("hour", "INT"),
-                ParameterSignature::optional("minute", "INT"),
-                ParameterSignature::optional("second", "INT"),
-            ],
-            Some("DATETIME"),
-        ));
-
-        // DURATION(value) -> duration
-        self.register(CallableSignature::new(
-            "duration",
-            CallableKind::Function,
-            vec![ParameterSignature::required("value", "STRING")],
-            Some("DURATION"),
-        ));
-
-        // DURATION_BETWEEN(start, end) -> duration
-        self.register(CallableSignature::new(
-            "duration_between",
-            CallableKind::Function,
-            vec![
-                ParameterSignature::required("start", "ANY"),
-                ParameterSignature::required("end", "ANY"),
-            ],
-            Some("DURATION"),
-        ));
-    }
-
-    /// Registers list and cardinality functions.
-    fn register_list_and_cardinality_functions(&mut self) {
-        // ELEMENTS(list) -> list elements
-        self.register(CallableSignature::new(
-            "elements",
-            CallableKind::Function,
-            vec![ParameterSignature::required("list", "LIST")],
-            Some("LIST"),
-        ));
-
-        // CARDINALITY(collection) -> int
-        self.register(CallableSignature::new(
-            "cardinality",
-            CallableKind::Function,
-            vec![ParameterSignature::required("collection", "ANY")],
-            Some("INT"),
-        ));
-
-        // SIZE(collection) -> int
-        self.register(CallableSignature::new(
-            "size",
-            CallableKind::Function,
-            vec![ParameterSignature::required("collection", "ANY")],
-            Some("INT"),
-        ));
-
-        // PATH_LENGTH(path) -> int
-        self.register(CallableSignature::new(
-            "path_length",
-            CallableKind::Function,
-            vec![ParameterSignature::required("path", "PATH")],
-            Some("INT"),
-        ));
-    }
-
-    /// Registers graph functions.
-    fn register_graph_functions(&mut self) {
-        // ELEMENT_ID(element) -> string
-        self.register(CallableSignature::new(
-            "element_id",
-            CallableKind::Function,
-            vec![ParameterSignature::required("element", "ANY")],
-            Some("STRING"),
-        ));
-    }
-
-    /// Registers aggregate functions.
-    fn register_aggregate_functions(&mut self) {
-        // COUNT(*) or COUNT(expr) - expr is optional to support COUNT(*)
-        self.register(
-            CallableSignature::new(
-                "count",
-                CallableKind::AggregateFunction,
-                vec![ParameterSignature::optional("expr", "ANY")],
+            // List and cardinality functions
+            "elements" => CallableSignature::new(
+                "elements",
+                CallableKind::Function,
+                vec![ParameterSignature::required("list", "LIST")],
+                Some("LIST"),
+            ),
+            "cardinality" => CallableSignature::new(
+                "cardinality",
+                CallableKind::Function,
+                vec![ParameterSignature::required("collection", "ANY")],
                 Some("INT"),
-            )
-            .with_nullability(Nullability::CalledOnNullInput),
-        );
+            ),
+            "size" => CallableSignature::new(
+                "size",
+                CallableKind::Function,
+                vec![ParameterSignature::required("collection", "ANY")],
+                Some("INT"),
+            ),
+            "path_length" => CallableSignature::new(
+                "path_length",
+                CallableKind::Function,
+                vec![ParameterSignature::required("path", "PATH")],
+                Some("INT"),
+            ),
 
-        // SUM(expr) -> numeric
-        self.register(CallableSignature::new(
-            "sum",
-            CallableKind::AggregateFunction,
-            vec![ParameterSignature::required("expr", "NUMERIC")],
-            Some("NUMERIC"),
-        ));
+            // Graph functions
+            "element_id" => CallableSignature::new(
+                "element_id",
+                CallableKind::Function,
+                vec![ParameterSignature::required("element", "ANY")],
+                Some("STRING"),
+            ),
 
-        // AVG(expr) -> numeric
-        self.register(CallableSignature::new(
-            "avg",
-            CallableKind::AggregateFunction,
-            vec![ParameterSignature::required("expr", "NUMERIC")],
-            Some("NUMERIC"),
-        ));
-
-        // MIN(expr) -> same as input type
-        self.register(CallableSignature::new(
-            "min",
-            CallableKind::AggregateFunction,
-            vec![ParameterSignature::required("expr", "ANY")],
-            Some("ANY"),
-        ));
-
-        // MAX(expr) -> same as input type
-        self.register(CallableSignature::new(
-            "max",
-            CallableKind::AggregateFunction,
-            vec![ParameterSignature::required("expr", "ANY")],
-            Some("ANY"),
-        ));
-
-        // COLLECT(expr) -> list
-        self.register(CallableSignature::new(
-            "collect",
-            CallableKind::AggregateFunction,
-            vec![ParameterSignature::required("expr", "ANY")],
-            Some("LIST<ANY>"),
-        ));
-
-        // STDDEV_SAMP(expr) -> numeric (sample standard deviation)
-        self.register(CallableSignature::new(
-            "stddev_samp",
-            CallableKind::AggregateFunction,
-            vec![ParameterSignature::required("expr", "NUMERIC")],
-            Some("NUMERIC"),
-        ));
-
-        // STDDEV_POP(expr) -> numeric (population standard deviation)
-        self.register(CallableSignature::new(
-            "stddev_pop",
-            CallableKind::AggregateFunction,
-            vec![ParameterSignature::required("expr", "NUMERIC")],
-            Some("NUMERIC"),
-        ));
-    }
-
-    /// Registers other utility functions.
-    fn register_other_functions(&mut self) {
-        // COALESCE(expr1, expr2, ...) -> first non-null value (variadic)
-        self.register(
-            CallableSignature::new(
+            // Other utility functions
+            "coalesce" => CallableSignature::new(
                 "coalesce",
                 CallableKind::Function,
                 vec![ParameterSignature::variadic("exprs", "ANY")],
                 Some("ANY"),
-            )
-            .with_nullability(Nullability::CalledOnNullInput),
-        );
+            ).with_nullability(Nullability::CalledOnNullInput),
+            "nullif" => CallableSignature::new(
+                "nullif",
+                CallableKind::Function,
+                vec![
+                    ParameterSignature::required("expr1", "ANY"),
+                    ParameterSignature::required("expr2", "ANY"),
+                ],
+                Some("ANY"),
+            ),
+            "type_of" => CallableSignature::new(
+                "type_of",
+                CallableKind::Function,
+                vec![ParameterSignature::required("expr", "ANY")],
+                Some("STRING"),
+            ),
+            "collect" => CallableSignature::new(
+                "collect",
+                CallableKind::Function,
+                vec![ParameterSignature::required("expr", "ANY")],
+                Some("LIST<ANY>"),
+            ),
 
-        // NULLIF(expr1, expr2) -> expr1 if expr1 != expr2, else NULL
-        self.register(CallableSignature::new(
-            "nullif",
-            CallableKind::Function,
-            vec![
-                ParameterSignature::required("expr1", "ANY"),
-                ParameterSignature::required("expr2", "ANY"),
-            ],
-            Some("ANY"),
-        ));
+            _ => return None,
+        };
 
-        // CAST(expr AS type) - handled separately in parser/validator
-        // Not registered here as it has special syntax
-
-        // TYPE_OF(expr) -> string
-        self.register(CallableSignature::new(
-            "type_of",
-            CallableKind::Function,
-            vec![ParameterSignature::required("expr", "ANY")],
-            Some("STRING"),
-        ));
-
-        // COLLECT(expr) -> list (can also be used as regular function in some contexts)
-        self.register(CallableSignature::new(
-            "collect",
-            CallableKind::Function,
-            vec![ParameterSignature::required("expr", "ANY")],
-            Some("LIST<ANY>"),
-        ));
-    }
+    Some(vec![sig])
 }
 
-impl Default for BuiltinCallableCatalog {
-    fn default() -> Self {
-        Self::new()
-    }
+/// Resolves built-in aggregate functions.
+fn resolve_builtin_aggregate(name: &str) -> Option<Vec<CallableSignature>> {
+        let sig = match name {
+            "count" => CallableSignature::new(
+                "count",
+                CallableKind::AggregateFunction,
+                vec![ParameterSignature::optional("expr", "ANY")],
+                Some("INT"),
+            ).with_nullability(Nullability::CalledOnNullInput),
+            "sum" => CallableSignature::new(
+                "sum",
+                CallableKind::AggregateFunction,
+                vec![ParameterSignature::required("expr", "NUMERIC")],
+                Some("NUMERIC"),
+            ),
+            "avg" => CallableSignature::new(
+                "avg",
+                CallableKind::AggregateFunction,
+                vec![ParameterSignature::required("expr", "NUMERIC")],
+                Some("NUMERIC"),
+            ),
+            "min" => CallableSignature::new(
+                "min",
+                CallableKind::AggregateFunction,
+                vec![ParameterSignature::required("expr", "ANY")],
+                Some("ANY"),
+            ),
+            "max" => CallableSignature::new(
+                "max",
+                CallableKind::AggregateFunction,
+                vec![ParameterSignature::required("expr", "ANY")],
+                Some("ANY"),
+            ),
+            "collect" => CallableSignature::new(
+                "collect",
+                CallableKind::AggregateFunction,
+                vec![ParameterSignature::required("expr", "ANY")],
+                Some("LIST<ANY>"),
+            ),
+            "stddev_samp" => CallableSignature::new(
+                "stddev_samp",
+                CallableKind::AggregateFunction,
+                vec![ParameterSignature::required("expr", "NUMERIC")],
+                Some("NUMERIC"),
+            ),
+            "stddev_pop" => CallableSignature::new(
+                "stddev_pop",
+                CallableKind::AggregateFunction,
+                vec![ParameterSignature::required("expr", "NUMERIC")],
+                Some("NUMERIC"),
+            ),
+            _ => return None,
+        };
+
+    Some(vec![sig])
 }
 
-impl CallableCatalog for BuiltinCallableCatalog {
-    fn resolve(
-        &self,
-        name: &str,
-        kind: CallableKind,
-        _ctx: &CallableLookupContext,
-    ) -> Result<Vec<CallableSignature>, CatalogError> {
-        let name_lower = SmolStr::new(name.to_lowercase());
-        let key = (name_lower, kind);
-        Ok(self.signatures.get(&key).cloned().unwrap_or_default())
-    }
-
-    fn list(&self, kind: CallableKind, _ctx: &CallableLookupContext) -> Vec<SmolStr> {
-        let mut names: Vec<_> = self
-            .signatures
-            .keys()
-            .filter(|(_, k)| *k == kind)
-            .map(|(name, _)| name.clone())
-            .collect();
-        names.sort();
-        names.dedup();
-        names
-    }
-}
-
-// ============================================================================
-// MetadataProvider implementation for BuiltinCallableCatalog
-// ============================================================================
-
-impl crate::semantic::metadata_provider::MetadataProvider for BuiltinCallableCatalog {
-    fn get_schema_snapshot(
-        &self,
-        _graph: &crate::semantic::schema_catalog::GraphRef,
-        _schema: Option<&crate::semantic::schema_catalog::SchemaRef>,
-    ) -> Result<Arc<dyn crate::semantic::schema_catalog::SchemaSnapshot>, crate::semantic::schema_catalog::CatalogError> {
-        // Built-in catalog doesn't provide schema information
-        Err(crate::semantic::schema_catalog::CatalogError::GraphNotFound {
-            graph: "no_graph".into(),
-        })
-    }
-
-    fn resolve_active_graph(
-        &self,
-        _session: &crate::semantic::schema_catalog::SessionContext,
-    ) -> Result<crate::semantic::schema_catalog::GraphRef, crate::semantic::schema_catalog::CatalogError> {
-        // Built-in catalog doesn't manage session state
-        Err(crate::semantic::schema_catalog::CatalogError::GraphNotFound {
-            graph: "no_graph".into(),
-        })
-    }
-
-    fn resolve_active_schema(
-        &self,
-        _graph: &crate::semantic::schema_catalog::GraphRef,
-    ) -> Result<crate::semantic::schema_catalog::SchemaRef, crate::semantic::schema_catalog::CatalogError> {
-        // Built-in catalog doesn't manage schemas
-        Err(crate::semantic::schema_catalog::CatalogError::SchemaNotFound {
-            schema: "no_schema".into(),
-        })
-    }
-
-    fn validate_graph_exists(&self, _name: &str) -> Result<(), crate::semantic::schema_catalog::CatalogError> {
-        // Built-in catalog doesn't validate graphs
-        Ok(())
-    }
-
-    fn lookup_callable(&self, name: &str) -> Option<CallableSignature> {
-        let name_lower = SmolStr::new(name.to_lowercase());
-        // Try as function first
-        if let Ok(sigs) = self.resolve(&name_lower, CallableKind::Function, &CallableLookupContext::new()) {
-            if let Some(sig) = sigs.first() {
-                return Some(sig.clone());
-            }
-        }
-        // Try as aggregate
-        if let Ok(sigs) = self.resolve(&name_lower, CallableKind::AggregateFunction, &CallableLookupContext::new()) {
-            if let Some(sig) = sigs.first() {
-                return Some(sig.clone());
-            }
-        }
-        // Try as procedure
-        if let Ok(sigs) = self.resolve(&name_lower, CallableKind::Procedure, &CallableLookupContext::new()) {
-            if let Some(sig) = sigs.first() {
-                return Some(sig.clone());
-            }
-        }
-        None
+/// Lists all built-in callable names of a given kind.
+pub fn list_builtin_callables(kind: CallableKind) -> Vec<SmolStr> {
+        match kind {
+            CallableKind::Function => vec![
+                // Numeric functions
+                "abs", "mod", "floor", "ceil", "sqrt", "power", "exp", "ln", "log", "log10",
+                "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "cot",
+                "sinh", "cosh", "tanh", "degrees", "radians", "round",
+                // String functions
+                "length", "substring", "upper", "lower", "trim", "ltrim", "rtrim",
+                "replace", "concat", "left", "right", "normalize", "char_length", "byte_length",
+                // Temporal functions
+                "current_date", "current_time", "current_timestamp", "now",
+                "date", "time", "datetime", "duration", "duration_between",
+                // List and cardinality functions
+                "elements", "cardinality", "size", "path_length",
+                // Graph functions
+                "element_id",
+                // Other utility functions
+                "coalesce", "nullif", "type_of", "collect",
+            ]
+            .into_iter()
+            .map(SmolStr::new)
+            .collect(),
+            CallableKind::AggregateFunction => vec![
+                "count", "sum", "avg", "min", "max", "collect", "stddev_samp", "stddev_pop",
+            ]
+            .into_iter()
+            .map(SmolStr::new)
+            .collect(),
+        CallableKind::Procedure => vec![], // No built-in procedures
     }
 }
 
@@ -1449,80 +1271,73 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_builtin_catalog_numeric_functions() {
-        let catalog = BuiltinCallableCatalog::new();
-        let ctx = CallableLookupContext::new();
-
+    fn test_builtin_numeric_functions() {
         // Test ABS
-        let sigs = catalog
-            .resolve("abs", CallableKind::Function, &ctx)
-            .unwrap();
-        assert_eq!(sigs.len(), 1);
-        assert_eq!(sigs[0].min_arity(), 1);
-        assert_eq!(sigs[0].max_arity(), Some(1));
+        let sig = lookup_builtin_callable("abs", CallableKind::Function).unwrap();
+        assert_eq!(sig.name, "abs");
+        assert_eq!(sig.min_arity(), 1);
+        assert_eq!(sig.max_arity(), Some(1));
 
         // Test MOD
-        let sigs = catalog
-            .resolve("mod", CallableKind::Function, &ctx)
-            .unwrap();
-        assert_eq!(sigs.len(), 1);
-        assert_eq!(sigs[0].min_arity(), 2);
-        assert_eq!(sigs[0].max_arity(), Some(2));
+        let sig = lookup_builtin_callable("mod", CallableKind::Function).unwrap();
+        assert_eq!(sig.name, "mod");
+        assert_eq!(sig.min_arity(), 2);
+        assert_eq!(sig.max_arity(), Some(2));
 
         // Test POWER
-        let sigs = catalog
-            .resolve("power", CallableKind::Function, &ctx)
-            .unwrap();
-        assert_eq!(sigs.len(), 1);
-        assert_eq!(sigs[0].min_arity(), 2);
+        let sig = lookup_builtin_callable("power", CallableKind::Function).unwrap();
+        assert_eq!(sig.name, "power");
+        assert_eq!(sig.min_arity(), 2);
     }
 
     #[test]
-    fn test_builtin_catalog_string_functions() {
-        let catalog = BuiltinCallableCatalog::new();
-        let ctx = CallableLookupContext::new();
-
+    fn test_builtin_string_functions() {
         // Test LENGTH
-        let sigs = catalog
-            .resolve("length", CallableKind::Function, &ctx)
-            .unwrap();
-        assert_eq!(sigs.len(), 1);
-        assert_eq!(sigs[0].return_type, Some("INT".into()));
+        let sig = lookup_builtin_callable("length", CallableKind::Function).unwrap();
+        assert_eq!(sig.name, "length");
+        assert_eq!(sig.return_type, Some("INT".into()));
 
         // Test SUBSTRING (with optional length parameter)
-        let sigs = catalog
-            .resolve("substring", CallableKind::Function, &ctx)
-            .unwrap();
-        assert_eq!(sigs.len(), 1);
-        assert_eq!(sigs[0].min_arity(), 2);
-        assert_eq!(sigs[0].max_arity(), Some(3));
+        let sig = lookup_builtin_callable("substring", CallableKind::Function).unwrap();
+        assert_eq!(sig.name, "substring");
+        assert_eq!(sig.min_arity(), 2);
+        assert_eq!(sig.max_arity(), Some(3));
 
         // Test CONCAT (variadic)
-        let sigs = catalog
-            .resolve("concat", CallableKind::Function, &ctx)
-            .unwrap();
-        assert_eq!(sigs.len(), 1);
-        assert!(sigs[0].max_arity().is_none()); // variadic
+        let sig = lookup_builtin_callable("concat", CallableKind::Function).unwrap();
+        assert_eq!(sig.name, "concat");
+        assert!(sig.max_arity().is_none()); // variadic
     }
 
     #[test]
-    fn test_builtin_catalog_aggregates() {
-        let catalog = BuiltinCallableCatalog::new();
-        let ctx = CallableLookupContext::new();
-
+    fn test_builtin_aggregates() {
         // Test COUNT
-        let sigs = catalog
-            .resolve("count", CallableKind::AggregateFunction, &ctx)
-            .unwrap();
-        assert_eq!(sigs.len(), 1);
-        assert_eq!(sigs[0].return_type, Some("INT".into()));
+        let sig = lookup_builtin_callable("count", CallableKind::AggregateFunction).unwrap();
+        assert_eq!(sig.name, "count");
+        assert_eq!(sig.return_type, Some("INT".into()));
 
         // Test SUM
-        let sigs = catalog
-            .resolve("sum", CallableKind::AggregateFunction, &ctx)
-            .unwrap();
-        assert_eq!(sigs.len(), 1);
-        assert_eq!(sigs[0].return_type, Some("NUMERIC".into()));
+        let sig = lookup_builtin_callable("sum", CallableKind::AggregateFunction).unwrap();
+        assert_eq!(sig.name, "sum");
+        assert_eq!(sig.return_type, Some("NUMERIC".into()));
+    }
+
+    #[test]
+    fn test_builtin_not_found() {
+        // Non-existent function
+        assert!(lookup_builtin_callable("nonexistent", CallableKind::Function).is_none());
+    }
+
+    #[test]
+    fn test_builtin_list() {
+        let functions = list_builtin_callables(CallableKind::Function);
+        assert!(functions.contains(&"abs".into()));
+        assert!(functions.contains(&"upper".into()));
+        assert!(functions.contains(&"current_date".into()));
+
+        let aggregates = list_builtin_callables(CallableKind::AggregateFunction);
+        assert!(aggregates.contains(&"count".into()));
+        assert!(aggregates.contains(&"sum".into()));
     }
 
     #[test]
@@ -1559,7 +1374,7 @@ mod tests {
 
     #[test]
     fn test_composite_catalog() {
-        let builtins = BuiltinCallableCatalog::new();
+        // Create custom catalog with user-defined functions
         let mut custom = InMemoryCallableCatalog::new();
 
         custom.register(CallableSignature::new(
@@ -1569,23 +1384,15 @@ mod tests {
             Some("INT"),
         ));
 
-        let catalog = CompositeCallableCatalog::new(builtins, custom);
         let ctx = CallableLookupContext::new();
 
-        // Can resolve built-in
-        let sigs = catalog.resolve("abs", CallableKind::Function, &ctx).unwrap();
-        assert_eq!(sigs.len(), 1);
+        // Can resolve built-in (would come from metadata provider default)
+        let sig = lookup_builtin_callable("abs", CallableKind::Function);
+        assert!(sig.is_some());
 
         // Can resolve custom
-        let sigs = catalog
-            .resolve("custom_func", CallableKind::Function, &ctx)
-            .unwrap();
+        let sigs = custom.resolve("custom_func", CallableKind::Function, &ctx).unwrap();
         assert_eq!(sigs.len(), 1);
-
-        // Can list both
-        let names = catalog.list(CallableKind::Function, &ctx);
-        assert!(names.contains(&"abs".into()));
-        assert!(names.contains(&"custom_func".into()));
     }
 
     #[test]

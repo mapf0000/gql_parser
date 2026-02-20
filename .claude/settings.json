@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "additionalDirectories": [
+      "/Users/d072013/SAPDevelop/gql_parser"
+    ],
+    "allow": [
+      "Bash(echo:*)"
+    ]
+  }
+}

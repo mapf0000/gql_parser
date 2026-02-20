@@ -2,7 +2,7 @@
 
 use gql_parser::parse;
 use gql_parser::semantic::callable::{
-    BuiltinCallableCatalog, DefaultCallableValidator,
+    resolve_builtin_signatures, CallableKind,
 };
 use gql_parser::semantic::SemanticValidator;
 
@@ -14,11 +14,8 @@ fn test_aggregate_function_validation_count_star() {
 
     assert!(parse_result.ast.is_some(), "Parse should succeed");
 
-    let catalog = BuiltinCallableCatalog::new();
-    let validator_impl = DefaultCallableValidator::new();
-    let validator = SemanticValidator::new()
-        .with_metadata_provider(&catalog)
-        ;
+    // Built-ins are always available (checked directly by validator)
+    let validator = SemanticValidator::new();
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
@@ -38,11 +35,8 @@ fn test_aggregate_function_validation_sum() {
 
     assert!(parse_result.ast.is_some(), "Parse should succeed");
 
-    let catalog = BuiltinCallableCatalog::new();
-    let validator_impl = DefaultCallableValidator::new();
-    let validator = SemanticValidator::new()
-        .with_metadata_provider(&catalog)
-        ;
+    // Built-ins are always available (checked directly by validator)
+    let validator = SemanticValidator::new();
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
@@ -61,11 +55,8 @@ fn test_aggregate_function_validation_avg() {
 
     assert!(parse_result.ast.is_some(), "Parse should succeed");
 
-    let catalog = BuiltinCallableCatalog::new();
-    let validator_impl = DefaultCallableValidator::new();
-    let validator = SemanticValidator::new()
-        .with_metadata_provider(&catalog)
-        ;
+    // Built-ins are always available (checked directly by validator)
+    let validator = SemanticValidator::new();
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
@@ -84,11 +75,8 @@ fn test_aggregate_function_validation_max() {
 
     assert!(parse_result.ast.is_some(), "Parse should succeed");
 
-    let catalog = BuiltinCallableCatalog::new();
-    let validator_impl = DefaultCallableValidator::new();
-    let validator = SemanticValidator::new()
-        .with_metadata_provider(&catalog)
-        ;
+    // Built-ins are always available (checked directly by validator)
+    let validator = SemanticValidator::new();
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
@@ -107,11 +95,8 @@ fn test_aggregate_function_validation_min() {
 
     assert!(parse_result.ast.is_some(), "Parse should succeed");
 
-    let catalog = BuiltinCallableCatalog::new();
-    let validator_impl = DefaultCallableValidator::new();
-    let validator = SemanticValidator::new()
-        .with_metadata_provider(&catalog)
-        ;
+    // Built-ins are always available (checked directly by validator)
+    let validator = SemanticValidator::new();
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
@@ -130,11 +115,8 @@ fn test_aggregate_function_validation_collect() {
 
     assert!(parse_result.ast.is_some(), "Parse should succeed");
 
-    let catalog = BuiltinCallableCatalog::new();
-    let validator_impl = DefaultCallableValidator::new();
-    let validator = SemanticValidator::new()
-        .with_metadata_provider(&catalog)
-        ;
+    // Built-ins are always available (checked directly by validator)
+    let validator = SemanticValidator::new();
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
@@ -155,41 +137,37 @@ fn test_aggregate_function_validation_collect() {
 #[test]
 fn test_new_functions_registered() {
     // Test that newly added functions are registered
-    use gql_parser::semantic::callable::{CallableCatalog, CallableKind, CallableLookupContext};
-
-    let catalog = BuiltinCallableCatalog::new();
-    let ctx = CallableLookupContext::new();
 
     // Test new trigonometric functions
-    assert!(!catalog.resolve("cot", CallableKind::Function, &ctx).unwrap().is_empty());
-    assert!(!catalog.resolve("sinh", CallableKind::Function, &ctx).unwrap().is_empty());
-    assert!(!catalog.resolve("cosh", CallableKind::Function, &ctx).unwrap().is_empty());
-    assert!(!catalog.resolve("tanh", CallableKind::Function, &ctx).unwrap().is_empty());
-    assert!(!catalog.resolve("degrees", CallableKind::Function, &ctx).unwrap().is_empty());
-    assert!(!catalog.resolve("radians", CallableKind::Function, &ctx).unwrap().is_empty());
+    assert!(resolve_builtin_signatures("cot", CallableKind::Function).is_some());
+    assert!(resolve_builtin_signatures("sinh", CallableKind::Function).is_some());
+    assert!(resolve_builtin_signatures("cosh", CallableKind::Function).is_some());
+    assert!(resolve_builtin_signatures("tanh", CallableKind::Function).is_some());
+    assert!(resolve_builtin_signatures("degrees", CallableKind::Function).is_some());
+    assert!(resolve_builtin_signatures("radians", CallableKind::Function).is_some());
 
     // Test new string functions
-    assert!(!catalog.resolve("left", CallableKind::Function, &ctx).unwrap().is_empty());
-    assert!(!catalog.resolve("right", CallableKind::Function, &ctx).unwrap().is_empty());
-    assert!(!catalog.resolve("normalize", CallableKind::Function, &ctx).unwrap().is_empty());
-    assert!(!catalog.resolve("char_length", CallableKind::Function, &ctx).unwrap().is_empty());
-    assert!(!catalog.resolve("byte_length", CallableKind::Function, &ctx).unwrap().is_empty());
+    assert!(resolve_builtin_signatures("left", CallableKind::Function).is_some());
+    assert!(resolve_builtin_signatures("right", CallableKind::Function).is_some());
+    assert!(resolve_builtin_signatures("normalize", CallableKind::Function).is_some());
+    assert!(resolve_builtin_signatures("char_length", CallableKind::Function).is_some());
+    assert!(resolve_builtin_signatures("byte_length", CallableKind::Function).is_some());
 
     // Test temporal constructors
-    assert!(!catalog.resolve("date", CallableKind::Function, &ctx).unwrap().is_empty());
-    assert!(!catalog.resolve("time", CallableKind::Function, &ctx).unwrap().is_empty());
-    assert!(!catalog.resolve("datetime", CallableKind::Function, &ctx).unwrap().is_empty());
-    assert!(!catalog.resolve("duration", CallableKind::Function, &ctx).unwrap().is_empty());
-    assert!(!catalog.resolve("duration_between", CallableKind::Function, &ctx).unwrap().is_empty());
+    assert!(resolve_builtin_signatures("date", CallableKind::Function).is_some());
+    assert!(resolve_builtin_signatures("time", CallableKind::Function).is_some());
+    assert!(resolve_builtin_signatures("datetime", CallableKind::Function).is_some());
+    assert!(resolve_builtin_signatures("duration", CallableKind::Function).is_some());
+    assert!(resolve_builtin_signatures("duration_between", CallableKind::Function).is_some());
 
     // Test cardinality functions
-    assert!(!catalog.resolve("cardinality", CallableKind::Function, &ctx).unwrap().is_empty());
-    assert!(!catalog.resolve("size", CallableKind::Function, &ctx).unwrap().is_empty());
-    assert!(!catalog.resolve("path_length", CallableKind::Function, &ctx).unwrap().is_empty());
-    assert!(!catalog.resolve("element_id", CallableKind::Function, &ctx).unwrap().is_empty());
-    assert!(!catalog.resolve("elements", CallableKind::Function, &ctx).unwrap().is_empty());
+    assert!(resolve_builtin_signatures("cardinality", CallableKind::Function).is_some());
+    assert!(resolve_builtin_signatures("size", CallableKind::Function).is_some());
+    assert!(resolve_builtin_signatures("path_length", CallableKind::Function).is_some());
+    assert!(resolve_builtin_signatures("element_id", CallableKind::Function).is_some());
+    assert!(resolve_builtin_signatures("elements", CallableKind::Function).is_some());
 
     // Test new aggregate functions
-    assert!(!catalog.resolve("stddev_samp", CallableKind::AggregateFunction, &ctx).unwrap().is_empty());
-    assert!(!catalog.resolve("stddev_pop", CallableKind::AggregateFunction, &ctx).unwrap().is_empty());
+    assert!(resolve_builtin_signatures("stddev_samp", CallableKind::AggregateFunction).is_some());
+    assert!(resolve_builtin_signatures("stddev_pop", CallableKind::AggregateFunction).is_some());
 }

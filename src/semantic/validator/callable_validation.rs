@@ -46,14 +46,6 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
     fn validate_procedure_call(&mut self, call: &NamedProcedureCall) {
         eprintln!("DEBUG: validate_procedure_call called");
 
-        // Only validate if we have a metadata provider
-        let Some(metadata) = self.validator.metadata_provider else {
-            eprintln!("DEBUG: No metadata provider");
-            return; // No metadata provider configured, skip validation
-        };
-
-        eprintln!("DEBUG: Metadata provider found");
-
         // Get procedure name - extract from ProcedureReference
         use crate::ast::references::ProcedureReference;
         let name = match &call.procedure {
@@ -63,20 +55,31 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
 
         eprintln!("DEBUG: Looking up callable: {}", name);
 
-        // Lookup callable signature (procedures are callables with kind=Procedure)
-        let Some(signature) = metadata.lookup_callable(name) else {
+        // Check built-ins first (direct function call - zero cost)
+        use crate::semantic::callable::{lookup_builtin_callable, CallableKind};
+        let signature = lookup_builtin_callable(name, CallableKind::Procedure)
+            .or_else(|| lookup_builtin_callable(name, CallableKind::Function))
+            // Then check metadata provider for UDFs (if configured)
+            .or_else(|| {
+                self.validator.metadata_provider
+                    .and_then(|m| m.lookup_callable(name))
+            });
+
+        let Some(signature) = signature else {
             eprintln!("DEBUG: Callable not found, reporting error");
-            // Unknown procedure - report error
-            self.diagnostics.push(
-                crate::diag::Diag::new(
-                    crate::diag::DiagSeverity::Error,
-                    format!("Unknown procedure or function '{}'", name),
-                )
-                .with_label(crate::diag::DiagLabel::primary(
-                    call.span.clone(),
-                    "not found in catalog",
-                )),
-            );
+            // Only report error if metadata validation is enabled
+            if self.validator.config.metadata_validation {
+                self.diagnostics.push(
+                    crate::diag::Diag::new(
+                        crate::diag::DiagSeverity::Error,
+                        format!("Unknown procedure or function '{}'", name),
+                    )
+                    .with_label(crate::diag::DiagLabel::primary(
+                        call.span.clone(),
+                        "not found in catalog",
+                    )),
+                );
+            }
             return;
         };
 
@@ -85,7 +88,37 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
         // Validate arity if arguments provided
         if let Some(arguments) = &call.arguments {
             let args: Vec<&Expression> = arguments.arguments.iter().map(|a| &a.expression).collect();
-            if let Err(e) = metadata.validate_callable_invocation(&signature, &args) {
+
+            // Use metadata provider for validation if available, otherwise do basic arity check
+            let validation_result = if let Some(metadata) = self.validator.metadata_provider {
+                metadata.validate_callable_invocation(&signature, &args)
+            } else {
+                // Basic arity check
+                let min_arity = signature.min_arity();
+                if args.len() < min_arity {
+                    Err(format!(
+                        "Function '{}' requires at least {} arguments, got {}",
+                        signature.name,
+                        min_arity,
+                        args.len()
+                    ))
+                } else if let Some(max_arity) = signature.max_arity() {
+                    if args.len() > max_arity {
+                        Err(format!(
+                            "Function '{}' accepts at most {} arguments, got {}",
+                            signature.name,
+                            max_arity,
+                            args.len()
+                        ))
+                    } else {
+                        Ok(())
+                    }
+                } else {
+                    Ok(())
+                }
+            };
+
+            if let Err(e) = validation_result {
                 self.diagnostics.push(
                     crate::diag::Diag::new(
                         crate::diag::DiagSeverity::Error,
@@ -139,33 +172,69 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
 
     /// Validates a function call against the metadata provider.
     fn validate_function_call(&mut self, call: &FunctionCall) {
-        // Only validate if we have a metadata provider
-        let Some(metadata) = self.validator.metadata_provider else {
-            return; // No metadata provider configured, skip validation
-        };
-
         // Build callable name
         let name = function_name_to_string(&call.name);
 
-        // Lookup callable signature
-        let Some(signature) = metadata.lookup_callable(name) else {
-            // Unknown callable - report error
-            self.diagnostics.push(
-                crate::diag::Diag::new(
-                    crate::diag::DiagSeverity::Error,
-                    format!("Unknown function '{}'", name),
-                )
-                .with_label(crate::diag::DiagLabel::primary(
-                    call.span.clone(),
-                    "undefined function",
-                )),
-            );
+        // Check built-ins first (direct function call - zero cost)
+        use crate::semantic::callable::{lookup_builtin_callable, CallableKind};
+        let signature = lookup_builtin_callable(name, CallableKind::Function)
+            .or_else(|| lookup_builtin_callable(name, CallableKind::AggregateFunction))
+            // Then check metadata provider for UDFs (if configured)
+            .or_else(|| {
+                self.validator.metadata_provider
+                    .and_then(|m| m.lookup_callable(name))
+            });
+
+        let Some(signature) = signature else {
+            // Only report error if metadata validation is enabled
+            if self.validator.config.metadata_validation {
+                self.diagnostics.push(
+                    crate::diag::Diag::new(
+                        crate::diag::DiagSeverity::Error,
+                        format!("Unknown function '{}'", name),
+                    )
+                    .with_label(crate::diag::DiagLabel::primary(
+                        call.span.clone(),
+                        "undefined function",
+                    )),
+                );
+            }
             return;
         };
 
-        // Validate the call using metadata provider
+        // Validate the call
         let args: Vec<&Expression> = call.arguments.iter().collect();
-        if let Err(e) = metadata.validate_callable_invocation(&signature, &args) {
+
+        // Use metadata provider for validation if available, otherwise do basic arity check
+        let validation_result = if let Some(metadata) = self.validator.metadata_provider {
+            metadata.validate_callable_invocation(&signature, &args)
+        } else {
+            // Basic arity check
+            let min_arity = signature.min_arity();
+            if args.len() < min_arity {
+                Err(format!(
+                    "Function '{}' requires at least {} arguments, got {}",
+                    signature.name,
+                    min_arity,
+                    args.len()
+                ))
+            } else if let Some(max_arity) = signature.max_arity() {
+                if args.len() > max_arity {
+                    Err(format!(
+                        "Function '{}' accepts at most {} arguments, got {}",
+                        signature.name,
+                        max_arity,
+                        args.len()
+                    ))
+                } else {
+                    Ok(())
+                }
+            } else {
+                Ok(())
+            }
+        };
+
+        if let Err(e) = validation_result {
             self.diagnostics.push(
                 crate::diag::Diag::new(
                     crate::diag::DiagSeverity::Error,
@@ -181,17 +250,37 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
 
     /// Validates an aggregate function call against the metadata provider.
     fn validate_aggregate_function(&mut self, agg: &AggregateFunction) {
-        // Only validate if we have a metadata provider
-        let Some(metadata) = self.validator.metadata_provider else {
-            return; // No metadata provider configured, skip validation
-        };
+        use crate::semantic::callable::{lookup_builtin_callable, CallableKind};
 
         match agg {
             AggregateFunction::CountStar { span } => {
                 // COUNT(*) - special case with 0 arguments
-                if let Some(signature) = metadata.lookup_callable("count") {
+                // Check built-ins first, then UDFs
+                let signature = lookup_builtin_callable("count", CallableKind::AggregateFunction)
+                    .or_else(|| {
+                        self.validator.metadata_provider
+                            .and_then(|m| m.lookup_callable("count"))
+                    });
+
+                if let Some(signature) = signature {
                     let args: Vec<&Expression> = vec![];
-                    if let Err(e) = metadata.validate_callable_invocation(&signature, &args) {
+
+                    // Use metadata provider for validation if available, otherwise do basic arity check
+                    let validation_result = if let Some(metadata) = self.validator.metadata_provider {
+                        metadata.validate_callable_invocation(&signature, &args)
+                    } else {
+                        // Basic arity check
+                        if signature.matches_arity(0) {
+                            Ok(())
+                        } else {
+                            Err(format!(
+                                "Function '{}' does not accept {} arguments",
+                                signature.name, 0
+                            ))
+                        }
+                    };
+
+                    if let Err(e) = validation_result {
                         self.diagnostics.push(
                             crate::diag::Diag::new(
                                 crate::diag::DiagSeverity::Error,
@@ -218,9 +307,32 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
                     GeneralSetFunctionType::StddevPop => "stddev_pop",
                 };
 
-                if let Some(signature) = metadata.lookup_callable(name) {
+                // Check built-ins first, then UDFs
+                let signature = lookup_builtin_callable(name, CallableKind::AggregateFunction)
+                    .or_else(|| {
+                        self.validator.metadata_provider
+                            .and_then(|m| m.lookup_callable(name))
+                    });
+
+                if let Some(signature) = signature {
                     let args: Vec<&Expression> = vec![general_func.expression.as_ref()];
-                    if let Err(e) = metadata.validate_callable_invocation(&signature, &args) {
+
+                    // Use metadata provider for validation if available, otherwise do basic arity check
+                    let validation_result = if let Some(metadata) = self.validator.metadata_provider {
+                        metadata.validate_callable_invocation(&signature, &args)
+                    } else {
+                        // Basic arity check
+                        if signature.matches_arity(1) {
+                            Ok(())
+                        } else {
+                            Err(format!(
+                                "Function '{}' does not accept {} arguments",
+                                signature.name, 1
+                            ))
+                        }
+                    };
+
+                    if let Err(e) = validation_result {
                         self.diagnostics.push(
                             crate::diag::Diag::new(
                                 crate::diag::DiagSeverity::Error,

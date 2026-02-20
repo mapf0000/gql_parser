@@ -68,9 +68,12 @@ pub trait MetadataProvider: Send + Sync {
     /// Validates that a graph exists (for USE GRAPH validation).
     fn validate_graph_exists(&self, name: &str) -> Result<(), CatalogError>;
 
-    /// Looks up callable (function/procedure) signature.
+    /// Looks up user-defined callable (function/procedure) signature.
     ///
-    /// Returns the signature if the callable exists, None otherwise.
+    /// Returns the signature if the UDF exists, None otherwise.
+    ///
+    /// **Note**: This method should only return user-defined functions/procedures.
+    /// Built-in functions are checked separately by the validator.
     fn lookup_callable(&self, name: &str) -> Option<CallableSignature>;
 
     /// Validates a callable invocation.
@@ -214,8 +217,8 @@ impl InMemoryMetadataProvider {
         let snapshot = crate::semantic::schema_catalog::InMemorySchemaSnapshot::example();
         provider.add_schema_snapshot("default", snapshot);
 
-        // Add built-in callables (these would normally come from BuiltinCallableCatalog)
-        // For simplicity, we'll let the actual CallableCatalog handle this
+        // Built-ins are automatically available via default implementation
+        // Just add any custom UDFs if needed
 
         provider
     }
@@ -264,7 +267,10 @@ impl MetadataProvider for InMemoryMetadataProvider {
     }
 
     fn lookup_callable(&self, name: &str) -> Option<CallableSignature> {
-        self.callables.get(name).cloned()
+        // Only return UDFs - built-ins are checked separately by the validator
+        self.callables
+            .get(name)
+            .cloned()
     }
 
     fn get_property_metadata(&self, owner: &TypeRef, property: &str) -> Option<ValueType> {

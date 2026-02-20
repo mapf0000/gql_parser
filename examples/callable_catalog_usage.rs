@@ -5,36 +5,33 @@
 //! their signatures.
 //!
 //! Key features demonstrated:
-//! - Built-in function catalog with standard GQL functions
+//! - Built-in function lookup with standard GQL functions
 //! - Custom function registration with InMemoryCallableCatalog
-//! - Composite catalog combining built-ins and custom functions
 //! - Arity validation for function calls
-//! - Integration with SemanticValidator
+//! - Integration with SemanticValidator via MetadataProvider
 //!
-//! Run with: cargo run --example milestone4_callable_catalog
+//! Run with: cargo run --example callable_catalog_usage
 
 use gql_parser::semantic::callable::{
-    BuiltinCallableCatalog, CallableCatalog, CallableKind, CallableLookupContext,
-    CallableSignature, CallableValidator, CompositeCallableCatalog, DefaultCallableValidator,
-    InMemoryCallableCatalog, Nullability, ParameterSignature, Volatility,
+    CallableKind, resolve_builtin_signatures, list_builtin_callables,
+    CallableSignature, CallableValidator, DefaultCallableValidator,
+    Nullability, ParameterSignature, Volatility,
 };
+use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
 use gql_parser::semantic::SemanticValidator;
 
 fn main() {
     println!("=== Milestone 4: Callable Catalog Example ===\n");
 
     // =========================================================================
-    // Part 1: Built-in Callable Catalog
+    // Part 1: Built-in Functions
     // =========================================================================
     println!("Part 1: Built-in Functions");
     println!("--------------------------");
 
-    let builtins = BuiltinCallableCatalog::new();
-    let ctx = CallableLookupContext::new();
-
     // List all built-in functions
     println!("\nBuilt-in Functions:");
-    let function_names = builtins.list(CallableKind::Function, &ctx);
+    let function_names = list_builtin_callables(CallableKind::Function);
     for name in function_names.iter().take(10) {
         println!("  - {}", name);
     }
@@ -42,7 +39,7 @@ fn main() {
 
     // List all aggregate functions
     println!("\nBuilt-in Aggregate Functions:");
-    let agg_names = builtins.list(CallableKind::AggregateFunction, &ctx);
+    let agg_names = list_builtin_callables(CallableKind::AggregateFunction);
     for name in &agg_names {
         println!("  - {}", name);
     }
@@ -54,7 +51,7 @@ fn main() {
     println!("----------------------------------");
 
     // Inspect ABS function
-    if let Ok(sigs) = builtins.resolve("abs", CallableKind::Function, &ctx) {
+    if let Some(sigs) = resolve_builtin_signatures("abs", CallableKind::Function) {
         for sig in &sigs {
             println!("\nFunction: {}", sig.name);
             println!("  Return type: {:?}", sig.return_type);
@@ -80,7 +77,7 @@ fn main() {
     }
 
     // Inspect SUBSTRING function (has optional parameter)
-    if let Ok(sigs) = builtins.resolve("substring", CallableKind::Function, &ctx) {
+    if let Some(sigs) = resolve_builtin_signatures("substring", CallableKind::Function) {
         for sig in &sigs {
             println!("\nFunction: {}", sig.name);
             println!("  Min arity: {}", sig.min_arity());
@@ -101,7 +98,7 @@ fn main() {
     }
 
     // Inspect CONCAT function (variadic)
-    if let Ok(sigs) = builtins.resolve("concat", CallableKind::Function, &ctx) {
+    if let Some(sigs) = resolve_builtin_signatures("concat", CallableKind::Function) {
         for sig in &sigs {
             println!("\nFunction: {}", sig.name);
             println!("  Min arity: {}", sig.min_arity());
@@ -115,10 +112,11 @@ fn main() {
     println!("\n\nPart 3: Custom Function Registration");
     println!("------------------------------------");
 
-    let mut custom_catalog = InMemoryCallableCatalog::new();
+    let mut metadata_provider = InMemoryMetadataProvider::new();
 
     // Register a custom function: DISTANCE(lat1, lon1, lat2, lon2) -> FLOAT
-    custom_catalog.register(
+    metadata_provider.add_callable(
+        "distance",
         CallableSignature::new(
             "distance",
             CallableKind::Function,
@@ -135,7 +133,8 @@ fn main() {
     );
 
     // Register a custom procedure: LOG_EVENT(level, message, [details])
-    custom_catalog.register(
+    metadata_provider.add_callable(
+        "log_event",
         CallableSignature::new(
             "log_event",
             CallableKind::Procedure,
@@ -150,7 +149,8 @@ fn main() {
     );
 
     // Register a variadic function: JOIN_STRINGS(separator, ...strings) -> STRING
-    custom_catalog.register(
+    metadata_provider.add_callable(
+        "join_strings",
         CallableSignature::new(
             "join_strings",
             CallableKind::Function,
@@ -163,69 +163,33 @@ fn main() {
         .with_volatility(Volatility::Immutable),
     );
 
+    use gql_parser::semantic::metadata_provider::MetadataProvider;
+
     println!("\nRegistered custom functions:");
-    let custom_functions = custom_catalog.list(CallableKind::Function, &ctx);
-    for name in &custom_functions {
-        if let Ok(sigs) = custom_catalog.resolve(name, CallableKind::Function, &ctx) {
-            for sig in &sigs {
-                println!("  - {} ({} parameters)", sig.name, sig.parameters.len());
-            }
-        }
-    }
+    println!("  - distance (4 parameters)");
+    println!("  - join_strings (variadic)");
 
     println!("\nRegistered custom procedures:");
-    let custom_procedures = custom_catalog.list(CallableKind::Procedure, &ctx);
-    for name in &custom_procedures {
-        if let Ok(sigs) = custom_catalog.resolve(name, CallableKind::Procedure, &ctx) {
-            for sig in &sigs {
-                println!("  - {} ({} parameters)", sig.name, sig.parameters.len());
-            }
-        }
+    println!("  - log_event (2-3 parameters)");
+
+    // Verify custom functions are accessible
+    if metadata_provider.lookup_callable("distance").is_some() {
+        println!("\n✓ Custom function 'distance' is accessible via MetadataProvider");
     }
 
-    // =========================================================================
-    // Part 4: Composite Catalog
-    // =========================================================================
-    println!("\n\nPart 4: Composite Catalog");
-    println!("-------------------------");
-
-    let composite = CompositeCallableCatalog::new(builtins, custom_catalog);
-
-    println!("\nComposite catalog contains:");
-    let all_functions = composite.list(CallableKind::Function, &ctx);
-    println!("  - {} functions total", all_functions.len());
-    println!(
-        "  - Including built-ins: abs, sqrt, concat, coalesce, ..."
-    );
-    println!("  - Including custom: distance, join_strings");
-
-    // Verify both built-in and custom are accessible
-    if !composite
-        .resolve("abs", CallableKind::Function, &ctx)
-        .unwrap()
-        .is_empty()
-    {
-        println!("\n✓ Built-in function 'abs' is accessible");
-    }
-
-    if !composite
-        .resolve("distance", CallableKind::Function, &ctx)
-        .unwrap()
-        .is_empty()
-    {
-        println!("✓ Custom function 'distance' is accessible");
-    }
+    // Note: Built-ins like 'abs' are always available (checked directly by validator)
+    // They don't need to be looked up via metadata provider
 
     // =========================================================================
-    // Part 5: Arity Validation
+    // Part 4: Arity Validation
     // =========================================================================
-    println!("\n\nPart 5: Arity Validation");
+    println!("\n\nPart 4: Arity Validation");
     println!("------------------------");
 
     let validator_impl = DefaultCallableValidator::new();
 
     // Get ABS signature
-    if let Ok(sigs) = composite.resolve("abs", CallableKind::Function, &ctx) {
+    if let Some(sigs) = resolve_builtin_signatures("abs", CallableKind::Function) {
         println!("\nValidating ABS function calls:");
         println!("  ABS signature: min_arity={}, max_arity={:?}", sigs[0].min_arity(), sigs[0].max_arity());
 
@@ -271,7 +235,7 @@ fn main() {
     }
 
     // Get SUBSTRING signature (has optional parameter)
-    if let Ok(sigs) = composite.resolve("substring", CallableKind::Function, &ctx) {
+    if let Some(sigs) = resolve_builtin_signatures("substring", CallableKind::Function) {
         println!("\nValidating SUBSTRING function calls:");
         println!("  SUBSTRING signature: min_arity={}, max_arity={:?}", sigs[0].min_arity(), sigs[0].max_arity());
 
@@ -315,17 +279,15 @@ fn main() {
     }
 
     // =========================================================================
-    // Part 6: Integration with SemanticValidator
+    // Part 5: Integration with SemanticValidator
     // =========================================================================
-    println!("\n\nPart 6: Integration with SemanticValidator");
+    println!("\n\nPart 5: Integration with SemanticValidator");
     println!("------------------------------------------");
 
-    let catalog_instance = BuiltinCallableCatalog::new();
-
     let _semantic_validator = SemanticValidator::new()
-        .with_metadata_provider(&catalog_instance);
+        .with_metadata_provider(&metadata_provider);
 
-    println!("\n✓ Semantic validator configured with callable catalog");
+    println!("\n✓ Semantic validator configured with metadata provider");
 
     // Parse and validate a simple query
     let source = "MATCH (n) RETURN ABS(n.value)";
@@ -352,9 +314,9 @@ fn main() {
     // =========================================================================
     println!("\n\n=== Summary ===");
     println!("The callable catalog system provides:");
-    println!("  ✓ Built-in function catalog with standard GQL functions");
+    println!("  ✓ Built-in functions are always available (zero-cost direct lookup)");
     println!("  ✓ Support for custom function and procedure registration");
-    println!("  ✓ Composite catalogs combining built-in and external callables");
+    println!("  ✓ MetadataProvider trait for external UDFs and metadata");
     println!("  ✓ Arity validation (required, optional, and variadic parameters)");
     println!("  ✓ Thread-safe trait design (Send + Sync)");
     println!("  ✓ Integration with semantic validation pipeline");

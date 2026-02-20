@@ -12,3 +12,7 @@ mod callable_validation;
 mod type_inference;
 mod mutation_validation;
 mod procedure_validation;
+mod path_pattern_validation;
+mod label_expression_validation;
+mod subquery_exists_validation;
+mod type_system_validation;

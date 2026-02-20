@@ -9,9 +9,9 @@ use gql_parser::semantic::metadata_provider::MetadataProvider;
 use gql_parser::ir::ValidationOutcome;
 use gql_parser::semantic::callable::{
     CallableCatalog, CallableSignature, CallableKind,
-    ParameterSignature, InMemoryCallableCatalog,
-    BuiltinCallableCatalog, Volatility, Nullability,
+    ParameterSignature, InMemoryCallableCatalog, Volatility, Nullability,
 };
+use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
 use smol_str::SmolStr;
 
 fn validate_with_procedures(source: &str, catalog: &impl MetadataProvider)
@@ -50,8 +50,8 @@ fn validate_with_procedures(source: &str, catalog: &impl MetadataProvider)
 fn test_builtin_procedure_validates() {
     let source = "CALL abs(-5) RETURN 1";
 
-    // Use builtin catalog which has 'abs' function
-    let catalog = BuiltinCallableCatalog::new();
+    // Use metadata provider which has built-ins
+    let catalog = InMemoryMetadataProvider::new();
     let outcome = validate_with_procedures(source, &catalog);
 
     assert!(outcome.is_success(), "Diagnostics: {:?}", outcome.diagnostics);
@@ -145,7 +145,8 @@ fn test_procedure_with_wrong_arity_fails() {
 fn test_optional_call_validates() {
     let source = "OPTIONAL CALL abs(5) RETURN 1";
 
-    let catalog = BuiltinCallableCatalog::new();
+    // Built-ins are always available (checked directly by validator)
+    let catalog = InMemoryMetadataProvider::new();
     let outcome = validate_with_procedures(source, &catalog);
 
     assert!(outcome.is_success(), "Diagnostics: {:?}", outcome.diagnostics);
