@@ -34,6 +34,7 @@ fn test_validator_with_config() {
         catalog_validation: true,
         warn_on_shadowing: true,
         warn_on_disconnected_patterns: true,
+        advanced_schema_validation: false,
     };
 
     let validator = SemanticValidator::with_config(config);
@@ -1534,6 +1535,7 @@ fn test_warning_visibility_shadowing() {
         catalog_validation: false,
         warn_on_shadowing: true,
         warn_on_disconnected_patterns: false,
+        advanced_schema_validation: false,
     };
 
     let source = "MATCH (n:Person) LET n = n.name RETURN n";
@@ -1631,6 +1633,7 @@ fn test_no_warnings_when_disabled() {
         catalog_validation: false,
         warn_on_shadowing: false,
         warn_on_disconnected_patterns: false,
+        advanced_schema_validation: false,
     };
 
     let source = "MATCH (a:Person), (b:Company) RETURN a, b";

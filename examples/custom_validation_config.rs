@@ -96,6 +96,7 @@ fn demo_custom_config() {
         catalog_validation: false, // No catalog available
         warn_on_shadowing: true,
         warn_on_disconnected_patterns: true,
+        advanced_schema_validation: false,
     };
 
     let validator = SemanticValidator::with_config(config);

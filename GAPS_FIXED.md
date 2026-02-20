@@ -100,6 +100,9 @@ Public integration/API plan (generic + mockable):
 - All public integration traits must be `Send + Sync` safe to support multi-threaded validator execution.
 - All externally supplied metadata is snapshot-based and immutable during one validation run.
 - All traits return typed errors (`CatalogError`/`FixtureError`) and never panic.
+- Engines can opt into catalog-backed capabilities incrementally; unsupported capabilities must degrade gracefully by skipping that check path.
+- Validation behavior must stay deterministic when metadata is absent via documented fallback policy (including `Type::Any` and unknown-callable handling).
+- Test suites must use in-memory/mock providers to opt in per test case, so catalog-backed behavior is covered without requiring a live DB engine.
 - All default test implementations must live in-tree and be usable without a running DB engine.
 - Validator constructors must accept interfaces via dependency injection, not global singletons, to keep tests isolated.
 

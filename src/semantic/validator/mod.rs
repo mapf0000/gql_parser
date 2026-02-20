@@ -56,6 +56,17 @@ pub struct ValidationConfig {
 
     /// Enable disconnected pattern warnings.
     pub warn_on_disconnected_patterns: bool,
+
+    /// Enable advanced schema catalog validation (Milestone 3).
+    ///
+    /// When enabled, the validator will accept schema catalog, graph context
+    /// resolver, and variable type context provider dependencies. However,
+    /// the actual validation logic that uses these dependencies is not yet
+    /// implemented. This flag currently only controls whether the dependencies
+    /// are stored and made available for future validation passes.
+    ///
+    /// See `SemanticValidator::with_schema_catalog()` for implementation status.
+    pub advanced_schema_validation: bool,
 }
 
 impl Default for ValidationConfig {
@@ -66,6 +77,7 @@ impl Default for ValidationConfig {
             catalog_validation: false,
             warn_on_shadowing: true,
             warn_on_disconnected_patterns: true,
+            advanced_schema_validation: false,
         }
     }
 }
@@ -75,11 +87,20 @@ pub struct SemanticValidator<'s, 'c> {
     /// Validation configuration.
     pub(super) config: ValidationConfig,
 
-    /// Optional schema for schema-dependent validation.
+    /// Optional schema for schema-dependent validation (legacy).
     pub(super) schema: Option<&'s dyn crate::semantic::schema::Schema>,
 
-    /// Optional catalog for catalog-dependent validation.
+    /// Optional catalog for catalog-dependent validation (legacy).
     pub(super) catalog: Option<&'c dyn crate::semantic::catalog::Catalog>,
+
+    /// Optional schema catalog for advanced schema validation (Milestone 3).
+    pub(super) schema_catalog: Option<&'s dyn crate::semantic::schema_catalog::SchemaCatalog>,
+
+    /// Optional graph context resolver (Milestone 3).
+    pub(super) graph_context_resolver: Option<&'s dyn crate::semantic::schema_catalog::GraphContextResolver>,
+
+    /// Optional variable type context provider (Milestone 3).
+    pub(super) variable_context_provider: Option<&'s dyn crate::semantic::schema_catalog::VariableTypeContextProvider>,
 }
 
 impl<'s, 'c> SemanticValidator<'s, 'c> {
@@ -89,6 +110,9 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
             config: ValidationConfig::default(),
             schema: None,
             catalog: None,
+            schema_catalog: None,
+            graph_context_resolver: None,
+            variable_context_provider: None,
         }
     }
 
@@ -98,20 +122,68 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
             config,
             schema: None,
             catalog: None,
+            schema_catalog: None,
+            graph_context_resolver: None,
+            variable_context_provider: None,
         }
     }
 
-    /// Sets the schema for schema-dependent validation.
+    /// Sets the schema for schema-dependent validation (legacy).
     pub fn with_schema(mut self, schema: &'s dyn crate::semantic::schema::Schema) -> Self {
         self.schema = Some(schema);
         self.config.schema_validation = true;
         self
     }
 
-    /// Sets the catalog for catalog-dependent validation.
+    /// Sets the catalog for catalog-dependent validation (legacy).
     pub fn with_catalog(mut self, catalog: &'c dyn crate::semantic::catalog::Catalog) -> Self {
         self.catalog = Some(catalog);
         self.config.catalog_validation = true;
+        self
+    }
+
+    /// Sets the schema catalog for advanced schema validation (Milestone 3).
+    ///
+    /// # Implementation Status
+    ///
+    /// The schema catalog infrastructure is fully implemented and ready for use.
+    /// However, the actual validation passes that utilize the schema catalog
+    /// are not yet implemented. When `advanced_schema_validation` is enabled,
+    /// the validator will store the catalog reference but will not perform
+    /// any additional validation beyond the standard checks.
+    ///
+    /// Future validation passes will include:
+    /// - Property existence validation against schema
+    /// - Type compatibility checking with schema metadata
+    /// - Constraint enforcement (PRIMARY KEY, UNIQUE, FOREIGN KEY, etc.)
+    /// - Schema-aware type inference improvements
+    pub fn with_schema_catalog(mut self, catalog: &'s dyn crate::semantic::schema_catalog::SchemaCatalog) -> Self {
+        self.schema_catalog = Some(catalog);
+        self.config.advanced_schema_validation = true;
+        self
+    }
+
+    /// Sets the graph context resolver (Milestone 3).
+    ///
+    /// # Implementation Status
+    ///
+    /// Infrastructure complete. The resolver is stored but not yet used
+    /// in validation passes. Future implementation will use this to determine
+    /// the active graph/schema context for validation.
+    pub fn with_graph_context_resolver(mut self, resolver: &'s dyn crate::semantic::schema_catalog::GraphContextResolver) -> Self {
+        self.graph_context_resolver = Some(resolver);
+        self
+    }
+
+    /// Sets the variable type context provider (Milestone 3).
+    ///
+    /// # Implementation Status
+    ///
+    /// Infrastructure complete. The provider is stored but not yet used
+    /// in validation passes. Future implementation will use this for
+    /// enhanced type inference and scope analysis.
+    pub fn with_variable_context_provider(mut self, provider: &'s dyn crate::semantic::schema_catalog::VariableTypeContextProvider) -> Self {
+        self.variable_context_provider = Some(provider);
         self
     }
 
@@ -130,6 +202,12 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
     /// Enables catalog-dependent validation.
     pub fn with_catalog_validation(mut self, enabled: bool) -> Self {
         self.config.catalog_validation = enabled;
+        self
+    }
+
+    /// Enables advanced schema validation (Milestone 3).
+    pub fn with_advanced_schema_validation(mut self, enabled: bool) -> Self {
+        self.config.advanced_schema_validation = enabled;
         self
     }
 
