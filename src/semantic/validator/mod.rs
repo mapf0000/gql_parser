@@ -75,6 +75,12 @@ pub struct ValidationConfig {
     /// against their signatures, including arity checking and parameter validation.
     /// Requires a callable catalog and validator to be configured.
     pub callable_validation: bool,
+
+    /// Enable enhanced type inference (Milestone 5).
+    ///
+    /// When enabled, the validator will use type metadata catalogs for improved
+    /// type inference quality, reducing Type::Any fallbacks in complex expressions.
+    pub enhanced_type_inference: bool,
 }
 
 impl Default for ValidationConfig {
@@ -87,6 +93,7 @@ impl Default for ValidationConfig {
             warn_on_disconnected_patterns: true,
             advanced_schema_validation: false,
             callable_validation: false,
+            enhanced_type_inference: false,
         }
     }
 }
@@ -116,6 +123,15 @@ pub struct SemanticValidator<'s, 'c> {
 
     /// Optional callable validator for call site validation (Milestone 4).
     pub(super) callable_validator: Option<&'c dyn crate::semantic::callable::CallableValidator>,
+
+    /// Optional type metadata catalog for enhanced type inference (Milestone 5).
+    pub(super) type_metadata: Option<&'c dyn crate::semantic::type_metadata::TypeMetadataCatalog>,
+
+    /// Optional type check context provider (Milestone 5).
+    pub(super) context_provider: Option<&'c dyn crate::semantic::type_metadata::TypeCheckContextProvider>,
+
+    /// Inference policy for type inference (Milestone 5).
+    pub(super) inference_policy: crate::semantic::type_metadata::InferencePolicy,
 }
 
 impl<'s, 'c> SemanticValidator<'s, 'c> {
@@ -130,6 +146,9 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
             variable_context_provider: None,
             callable_catalog: None,
             callable_validator: None,
+            type_metadata: None,
+            context_provider: None,
+            inference_policy: crate::semantic::type_metadata::InferencePolicy::default(),
         }
     }
 
@@ -144,6 +163,9 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
             variable_context_provider: None,
             callable_catalog: None,
             callable_validator: None,
+            type_metadata: None,
+            context_provider: None,
+            inference_policy: crate::semantic::type_metadata::InferencePolicy::default(),
         }
     }
 
@@ -288,6 +310,65 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
     /// If either is missing, callable validation will be skipped.
     pub fn with_callable_validation(mut self, enabled: bool) -> Self {
         self.config.callable_validation = enabled;
+        self
+    }
+
+    /// Sets the type metadata catalog for enhanced type inference (Milestone 5).
+    ///
+    /// # Implementation Status
+    ///
+    /// The type metadata catalog infrastructure is fully implemented. When enabled,
+    /// the validator can use property type information and callable return types
+    /// to improve type inference quality and reduce Type::Any fallbacks.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use gql_parser::semantic::{SemanticValidator, type_metadata::MockTypeMetadataCatalog};
+    ///
+    /// let mut catalog = MockTypeMetadataCatalog::new();
+    /// // Register property types...
+    ///
+    /// let validator = SemanticValidator::new()
+    ///     .with_type_metadata(&catalog);
+    /// ```
+    pub fn with_type_metadata(mut self, catalog: &'c dyn crate::semantic::type_metadata::TypeMetadataCatalog) -> Self {
+        self.type_metadata = Some(catalog);
+        self.config.enhanced_type_inference = true;
+        self
+    }
+
+    /// Sets the type check context provider (Milestone 5).
+    ///
+    /// This provider supplies type contexts for statements, enabling downstream
+    /// type checkers to consume inferred types uniformly.
+    pub fn with_context_provider(mut self, provider: &'c dyn crate::semantic::type_metadata::TypeCheckContextProvider) -> Self {
+        self.context_provider = Some(provider);
+        self
+    }
+
+    /// Sets the inference policy (Milestone 5).
+    ///
+    /// The inference policy controls fallback behavior for type inference,
+    /// such as whether to allow Type::Any and how to handle unknown callables.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use gql_parser::semantic::{SemanticValidator, type_metadata::InferencePolicy};
+    ///
+    /// let policy = InferencePolicy::strict();
+    /// let validator = SemanticValidator::new()
+    ///     .with_inference_policy(policy);
+    /// ```
+    pub fn with_inference_policy(mut self, policy: crate::semantic::type_metadata::InferencePolicy) -> Self {
+        self.inference_policy = policy;
+        self
+    }
+
+    /// Enables enhanced type inference (Milestone 5).
+    pub fn with_enhanced_type_inference(mut self, enabled: bool) -> Self {
+        self.config.enhanced_type_inference = enabled;
         self
     }
 

@@ -141,6 +141,7 @@ pub fn parse_and_validate(source: &str) -> ParseAndValidateResult {
 ///     warn_on_disconnected_patterns: true,
 ///     advanced_schema_validation: false,
 ///     callable_validation: false,
+///     enhanced_type_inference: false,
 /// };
 ///
 /// let result = parse_and_validate_with_config(source, config);
@@ -245,6 +246,7 @@ mod tests {
             warn_on_disconnected_patterns: true,
             advanced_schema_validation: false,
             callable_validation: false,
+            enhanced_type_inference: false,
         };
         let result = parse_and_validate_with_config(source, config);
         assert!(

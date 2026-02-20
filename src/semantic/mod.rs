@@ -57,6 +57,7 @@ pub mod catalog;
 pub mod diag;
 pub mod schema;
 pub mod schema_catalog;
+pub mod type_metadata;
 pub mod validator;
 
 pub use validator::{SemanticValidator, ValidationConfig};

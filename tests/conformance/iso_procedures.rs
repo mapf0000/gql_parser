@@ -1,12 +1,5 @@
 use gql_parser::parse;
-
-fn diagnostics_text(diags: &[miette::Report]) -> String {
-    diags
-        .iter()
-        .map(|diag| format!("{diag:?}"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
+use crate::common::*;
 
 #[test]
 fn top_level_call_with_yield_parses() {
@@ -64,7 +57,7 @@ fn variable_definition_requires_initializer() {
 fn yield_disallows_arbitrary_expression_items() {
     let result = parse("CALL my_proc() YIELD 1 + 2");
     assert!(!result.diagnostics.is_empty(), "expected diagnostics");
-    let text = diagnostics_text(&result.diagnostics);
+    let text = format_diagnostics(&result.diagnostics);
     assert!(
         text.contains("yield") || text.contains("Expected"),
         "unexpected diagnostics: {text}"

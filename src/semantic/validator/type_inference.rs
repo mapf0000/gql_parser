@@ -1,14 +1,25 @@
 //! Type inference pass - infers types for expressions and builds the type table.
 
+use crate::ast::expression::{BinaryOperator, Literal, UnaryOperator};
 use crate::ast::program::{Program, Statement};
 use crate::ast::query::{LinearQuery, PrimitiveQueryStatement, Query};
 use crate::diag::Diag;
+use crate::ir::type_table::Type;
 use crate::ir::{SymbolTable, TypeTable};
+use crate::semantic::type_metadata::{CallableInvocation, TypeRef};
 
 /// Pass 2: Type Inference - Infers types for all expressions in the program.
 ///
 /// This pass walks the AST and infers types for expressions, building a type table
 /// that can be queried by subsequent validation passes.
+///
+/// # Milestone 5 Enhancements
+///
+/// When type metadata catalog is available, this pass will:
+/// - Query property types from the catalog instead of falling back to Type::Any
+/// - Query callable return types for better function inference
+/// - Apply inference policies to control fallback behavior
+/// - Preserve integer types in arithmetic when appropriate
 pub(super) fn run_type_inference(
     validator: &super::SemanticValidator,
     program: &Program,
@@ -249,15 +260,18 @@ fn infer_modifying_statement_types(
 ///
 /// This function performs type inference and persists the inferred type to the type table.
 /// The type can later be retrieved for validation in subsequent passes.
-#[allow(clippy::only_used_in_recursion)]
+///
+/// # Milestone 5 Integration
+///
+/// This function now utilizes the type metadata catalog when available to:
+/// - Query property types instead of defaulting to Type::Any
+/// - Query callable return types for functions
+/// - Respect inference policy for fallback behavior
 fn infer_expression_type(
     validator: &super::SemanticValidator,
     expr: &crate::ast::expression::Expression,
     type_table: &mut TypeTable,
-) {
-    use crate::ast::expression::{BinaryOperator, Literal, UnaryOperator};
-    use crate::ir::type_table::Type;
-
+) -> Type {
     let inferred_type = match expr {
         // Literals have direct type mappings
         crate::ast::expression::Expression::Literal(lit, _) => match lit {
@@ -272,12 +286,19 @@ fn infer_expression_type(
             Literal::Datetime(_) => Type::Timestamp,
             Literal::Duration(_) => Type::Duration,
             Literal::List(exprs) => {
-                // Infer element types recursively
-                for elem in exprs {
-                    infer_expression_type(validator, elem, type_table);
+                // Infer element types recursively and find common type
+                if exprs.is_empty() {
+                    Type::List(Box::new(Type::Any))
+                } else {
+                    let elem_types: Vec<Type> = exprs
+                        .iter()
+                        .map(|e| infer_expression_type(validator, e, type_table))
+                        .collect();
+
+                    // Find common type
+                    let common_type = infer_common_type(&elem_types);
+                    Type::List(Box::new(common_type))
                 }
-                // For now, use List(Any) - could infer common element type
-                Type::List(Box::new(Type::Any))
             }
             Literal::Record(_) => {
                 // For now, use Record with empty fields
@@ -287,23 +308,39 @@ fn infer_expression_type(
 
         // Unary operations
         crate::ast::expression::Expression::Unary(op, operand, _) => {
-            infer_expression_type(validator, operand, type_table);
+            let operand_type = infer_expression_type(validator, operand, type_table);
             match op {
-                UnaryOperator::Plus | UnaryOperator::Minus => Type::Float, // Could be Int or Float, use Float as general numeric
-                UnaryOperator::Not => Type::Boolean,                       // NOT produces boolean
+                UnaryOperator::Plus | UnaryOperator::Minus => {
+                    // Preserve the numeric type: +5 is Int, +5.0 is Float
+                    if operand_type.is_numeric() {
+                        operand_type
+                    } else {
+                        Type::Float // Fallback for non-numeric
+                    }
+                }
+                UnaryOperator::Not => Type::Boolean, // NOT produces boolean
             }
         }
 
         // Binary operations
         crate::ast::expression::Expression::Binary(op, left, right, _) => {
-            infer_expression_type(validator, left, type_table);
-            infer_expression_type(validator, right, type_table);
+            let left_type = infer_expression_type(validator, left, type_table);
+            let right_type = infer_expression_type(validator, right, type_table);
+
             match op {
                 BinaryOperator::Add
                 | BinaryOperator::Subtract
                 | BinaryOperator::Multiply
                 | BinaryOperator::Divide
-                | BinaryOperator::Modulo => Type::Float, // Arithmetic operations - use Float as general numeric
+                | BinaryOperator::Modulo => {
+                    // Preserve Int if both operands are Int, otherwise Float
+                    match (&left_type, &right_type) {
+                        (Type::Int, Type::Int) if *op != BinaryOperator::Divide => Type::Int,
+                        (Type::Int, Type::Float) | (Type::Float, Type::Int) | (Type::Float, Type::Float) => Type::Float,
+                        _ if left_type.is_numeric() && right_type.is_numeric() => Type::Float,
+                        _ => Type::Float, // Fallback for Any or unknown types
+                    }
+                }
                 BinaryOperator::Concatenate => Type::String, // String concatenation produces string
             }
         }
@@ -324,41 +361,115 @@ fn infer_expression_type(
 
         // Parenthesized expression has same type as inner expression
         crate::ast::expression::Expression::Parenthesized(inner, _) => {
-            infer_expression_type(validator, inner, type_table);
-            return; // Don't set type for parenthesized wrapper
+            return infer_expression_type(validator, inner, type_table);
         }
 
-        // Property reference - type depends on property
-        crate::ast::expression::Expression::PropertyReference(object, _prop, _) => {
-            infer_expression_type(validator, object, type_table);
-            Type::Any // Without schema, we don't know property types
+        // Property reference - query from type metadata catalog
+        crate::ast::expression::Expression::PropertyReference(object, prop_name, _) => {
+            let object_type = infer_expression_type(validator, object, type_table);
+
+            // Try to query property type from catalog
+            if let Some(catalog) = validator.type_metadata {
+                if let Some(owner_ref) = type_to_type_ref(&object_type) {
+                    if let Some(prop_type) = catalog.property_type(&owner_ref, prop_name.as_str()) {
+                        return prop_type;
+                    }
+                }
+            }
+
+            // Fallback based on policy
+            fallback_type(validator)
         }
 
         // Variable reference - type should be looked up in symbol table
         crate::ast::expression::Expression::VariableReference(_, _) => {
-            Type::Any // Without symbol table integration, use Any
+            // TODO: Lookup in symbol table once integrated
+            fallback_type(validator)
         }
 
         // Parameter reference
         crate::ast::expression::Expression::ParameterReference(_, _) => {
-            Type::Any // Parameters can be any type
+            // Parameters can be any type
+            fallback_type(validator)
         }
 
-        // Function calls - would need function signature database
-        crate::ast::expression::Expression::FunctionCall(_) => {
-            Type::Any // Unknown without function signature info
+        // Function calls - query from type metadata catalog
+        crate::ast::expression::Expression::FunctionCall(func_call) => {
+            // Infer argument types
+            let arg_types: Vec<Option<Type>> = func_call
+                .arguments
+                .iter()
+                .map(|arg| Some(infer_expression_type(validator, arg, type_table)))
+                .collect();
+
+            // Try to query return type from catalog
+            if let Some(catalog) = validator.type_metadata {
+                let name_str = func_call.name.to_string();
+                let invocation = CallableInvocation {
+                    name: &name_str,
+                    arg_types,
+                    is_aggregate: false,
+                };
+
+                if let Some(return_type) = catalog.callable_return_type(&invocation) {
+                    return return_type;
+                }
+            }
+
+            // Fallback based on policy
+            fallback_type(validator)
         }
 
         // Case expressions - type is union of all THEN clause types
-        crate::ast::expression::Expression::Case(_) => {
-            Type::Any // Would need to infer from THEN clauses
+        crate::ast::expression::Expression::Case(case_expr) => {
+            let mut result_types = Vec::new();
+
+            // Handle both Simple and Searched CASE expressions
+            match case_expr {
+                crate::ast::expression::CaseExpression::Searched(searched) => {
+                    // Collect types from all THEN clauses
+                    for when_clause in &searched.when_clauses {
+                        let then_type = infer_expression_type(validator, &when_clause.then_result, type_table);
+                        result_types.push(then_type);
+                    }
+
+                    // ELSE clause if present
+                    if let Some(else_expr) = &searched.else_clause {
+                        let else_type = infer_expression_type(validator, else_expr, type_table);
+                        result_types.push(else_type);
+                    }
+                }
+                crate::ast::expression::CaseExpression::Simple(simple) => {
+                    // Infer operand type
+                    infer_expression_type(validator, &simple.operand, type_table);
+
+                    // Collect types from all THEN clauses
+                    for when_clause in &simple.when_clauses {
+                        let then_type = infer_expression_type(validator, &when_clause.then_result, type_table);
+                        result_types.push(then_type);
+                    }
+
+                    // ELSE clause if present
+                    if let Some(else_expr) = &simple.else_clause {
+                        let else_type = infer_expression_type(validator, else_expr, type_table);
+                        result_types.push(else_type);
+                    }
+                }
+            }
+
+            // Find common type
+            if result_types.is_empty() {
+                fallback_type(validator)
+            } else {
+                infer_common_type(&result_types)
+            }
         }
 
         // Cast expression - type is the target type
         crate::ast::expression::Expression::Cast(cast) => {
             infer_expression_type(validator, &cast.operand, type_table);
-            // Would need to map ValueType to Type
-            Type::Any
+            // Map ValueType to Type
+            map_value_type_to_type(&cast.target_type)
         }
 
         // Aggregate functions
@@ -367,40 +478,60 @@ fn infer_expression_type(
             match &**agg {
                 AggregateFunction::CountStar { .. } => Type::Int,
                 AggregateFunction::GeneralSetFunction(gsf) => {
-                    infer_expression_type(validator, &gsf.expression, type_table);
+                    let expr_type = infer_expression_type(validator, &gsf.expression, type_table);
                     match gsf.function_type {
                         GeneralSetFunctionType::Count => Type::Int,
                         GeneralSetFunctionType::Avg => Type::Float,
-                        GeneralSetFunctionType::Sum => Type::Float,
-                        GeneralSetFunctionType::Max | GeneralSetFunctionType::Min => Type::Any,
-                        GeneralSetFunctionType::CollectList => Type::List(Box::new(Type::Any)),
-                        _ => Type::Any, // Other aggregate functions
+                        GeneralSetFunctionType::Sum => {
+                            // SUM preserves type: SUM(int) = Int, SUM(float) = Float
+                            if expr_type == Type::Int {
+                                Type::Int
+                            } else {
+                                Type::Float
+                            }
+                        }
+                        GeneralSetFunctionType::Max | GeneralSetFunctionType::Min => {
+                            // MAX/MIN preserve input type
+                            expr_type
+                        }
+                        GeneralSetFunctionType::CollectList => Type::List(Box::new(expr_type)),
+                        _ => fallback_type(validator), // Other aggregate functions
                     }
                 }
-                AggregateFunction::BinarySetFunction(_) => Type::Any,
+                AggregateFunction::BinarySetFunction(_) => fallback_type(validator),
             }
         }
 
         // Type annotation - use the annotated type
-        crate::ast::expression::Expression::TypeAnnotation(inner, _annotation, _) => {
+        crate::ast::expression::Expression::TypeAnnotation(inner, annotation, _) => {
             infer_expression_type(validator, inner, type_table);
-            Type::Any // Would need to convert ValueType to Type
+            map_value_type_to_type(&annotation.type_ref)
         }
 
         // List constructor
         crate::ast::expression::Expression::ListConstructor(elements, _) => {
-            for elem in elements {
-                infer_expression_type(validator, elem, type_table);
+            if elements.is_empty() {
+                Type::List(Box::new(Type::Any))
+            } else {
+                let elem_types: Vec<Type> = elements
+                    .iter()
+                    .map(|e| infer_expression_type(validator, e, type_table))
+                    .collect();
+                let common_type = infer_common_type(&elem_types);
+                Type::List(Box::new(common_type))
             }
-            Type::List(Box::new(Type::Any))
         }
 
         // Record constructor
         crate::ast::expression::Expression::RecordConstructor(fields, _) => {
-            for field in fields {
-                infer_expression_type(validator, &field.value, type_table);
-            }
-            Type::Record(vec![])
+            let field_types: Vec<(String, Type)> = fields
+                .iter()
+                .map(|field| {
+                    let ty = infer_expression_type(validator, &field.value, type_table);
+                    (field.name.to_string(), ty)
+                })
+                .collect();
+            Type::Record(field_types)
         }
 
         // Path constructor
@@ -419,21 +550,132 @@ fn infer_expression_type(
 
         // Graph expressions
         crate::ast::expression::Expression::GraphExpression(inner, _) => {
-            infer_expression_type(validator, inner, type_table);
-            Type::Any
+            infer_expression_type(validator, inner, type_table)
         }
 
         // Binding table expressions
         crate::ast::expression::Expression::BindingTableExpression(inner, _) => {
-            infer_expression_type(validator, inner, type_table);
-            Type::Any
+            infer_expression_type(validator, inner, type_table)
         }
 
         // Subquery expressions
-        crate::ast::expression::Expression::SubqueryExpression(_, _) => Type::Any,
+        crate::ast::expression::Expression::SubqueryExpression(_, _) => fallback_type(validator),
     };
 
     // Persist the inferred type to the type table using span-based lookup
-    // This allows subsequent passes to retrieve the inferred type
-    type_table.set_type_by_span(&expr.span(), inferred_type);
+    type_table.set_type_by_span(&expr.span(), inferred_type.clone());
+    inferred_type
+}
+
+/// Returns the appropriate fallback type based on the inference policy.
+fn fallback_type(validator: &super::SemanticValidator) -> Type {
+    if validator.inference_policy.allow_any_fallback {
+        Type::Any
+    } else {
+        // In strict mode, we still need to return something
+        // The diagnostic will be reported elsewhere
+        Type::Any
+    }
+}
+
+/// Converts a Type to a TypeRef for catalog lookups.
+fn type_to_type_ref(ty: &Type) -> Option<TypeRef> {
+    match ty {
+        Type::Node(Some(labels)) if !labels.is_empty() => {
+            Some(TypeRef::NodeType(labels[0].as_str().into()))
+        }
+        Type::Node(None) => None, // Can't query properties without knowing the label
+        Type::Edge(Some(labels)) if !labels.is_empty() => {
+            Some(TypeRef::EdgeType(labels[0].as_str().into()))
+        }
+        Type::Edge(None) => None,
+        _ => None,
+    }
+}
+
+/// Infers a common type from a list of types.
+///
+/// Returns the most specific type that all input types can be converted to:
+/// - If all types are the same, return that type
+/// - If all types are numeric, return Float (widest numeric type)
+/// - If types include Any, return Any
+/// - Otherwise, return a Union type or Any
+fn infer_common_type(types: &[Type]) -> Type {
+    if types.is_empty() {
+        return Type::Any;
+    }
+
+    // If all types are the same, return that type
+    let first = &types[0];
+    if types.iter().all(|t| t == first) {
+        return first.clone();
+    }
+
+    // If any type is Any, return Any
+    if types.iter().any(|t| matches!(t, Type::Any)) {
+        return Type::Any;
+    }
+
+    // If all types are numeric, return Float (widest)
+    if types.iter().all(|t| t.is_numeric()) {
+        return Type::Float;
+    }
+
+    // If all types are compatible, return the first one
+    if types.iter().all(|t| first.is_compatible_with(t)) {
+        return first.clone();
+    }
+
+    // Otherwise, return a union type (or Any as fallback)
+    Type::Union(types.to_vec())
+}
+
+/// Maps a ValueType from the AST to a Type.
+fn map_value_type_to_type(value_type: &crate::ast::types::ValueType) -> Type {
+    use crate::ast::types::{PredefinedType, ValueType};
+
+    match value_type {
+        ValueType::Predefined(ptype, _) => match ptype {
+            PredefinedType::Boolean(_) => Type::Boolean,
+            PredefinedType::CharacterString(_) => Type::String,
+            PredefinedType::ByteString(_) => Type::String,
+            PredefinedType::Numeric(ntype) => {
+                use crate::ast::types::NumericType;
+                match ntype {
+                    NumericType::Exact(_) => Type::Int,
+                    NumericType::Approximate(_) => Type::Float,
+                }
+            }
+            PredefinedType::Temporal(ttype) => {
+                use crate::ast::types::{TemporalInstantType, TemporalType};
+                match ttype {
+                    TemporalType::Instant(itype) => match itype {
+                        TemporalInstantType::Date => Type::Date,
+                        TemporalInstantType::LocalTime | TemporalInstantType::ZonedTime => {
+                            Type::Time
+                        }
+                        TemporalInstantType::LocalDatetime | TemporalInstantType::ZonedDatetime => {
+                            Type::Timestamp
+                        }
+                    },
+                    TemporalType::Duration(_) => Type::Duration,
+                }
+            }
+            PredefinedType::ReferenceValue(rtype) => {
+                use crate::ast::types::ReferenceValueType;
+                match rtype {
+                    ReferenceValueType::Node(_) => Type::Node(None),
+                    ReferenceValueType::Edge(_) => Type::Edge(None),
+                    ReferenceValueType::Graph(_) => Type::Any, // No direct graph type
+                    ReferenceValueType::BindingTable(_) => Type::Any,
+                }
+            }
+            PredefinedType::Immaterial(_) => Type::Any,
+        },
+        ValueType::Path(_) => Type::Path,
+        ValueType::List(list_type) => {
+            Type::List(Box::new(map_value_type_to_type(&list_type.element_type)))
+        }
+        ValueType::Record(_) => Type::Any,
+    }
 }

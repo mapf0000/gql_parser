@@ -4,42 +4,25 @@ use gql_parser::ast::{
     Statement,
 };
 use gql_parser::parse;
-
-fn parse_ok(source: &str) -> gql_parser::ast::Program {
-    let result = parse(source);
-    assert!(
-        result.diagnostics.is_empty(),
-        "unexpected diagnostics for `{source}`: {:?}",
-        result.diagnostics
-    );
-    result.ast.expect("expected AST")
-}
-
-fn diagnostics_text(diags: &[miette::Report]) -> String {
-    diags
-        .iter()
-        .map(|diag| format!("{diag:?}"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
+use crate::common::*;
 
 #[test]
 fn parse_set_statement_is_mutation_start() {
-    let program = parse_ok("SET n.age = 1");
+    let program = parse_cleanly("SET n.age = 1");
     assert_eq!(program.statements.len(), 1);
     assert!(matches!(program.statements[0], Statement::Mutation(_)));
 }
 
 #[test]
 fn parse_remove_statement_is_mutation_start() {
-    let program = parse_ok("REMOVE n:OldLabel");
+    let program = parse_cleanly("REMOVE n:OldLabel");
     assert_eq!(program.statements.len(), 1);
     assert!(matches!(program.statements[0], Statement::Mutation(_)));
 }
 
 #[test]
 fn parse_detach_delete_statement_is_mutation_start() {
-    let program = parse_ok("DETACH DELETE n");
+    let program = parse_cleanly("DETACH DELETE n");
     let Statement::Mutation(stmt) = &program.statements[0] else {
         panic!("expected mutation statement");
     };
@@ -59,7 +42,7 @@ fn parse_detach_delete_statement_is_mutation_start() {
 
 #[test]
 fn parse_focused_use_graph_mutation() {
-    let program = parse_ok("USE myGraph INSERT (n) RETURN n");
+    let program = parse_cleanly("USE myGraph INSERT (n) RETURN n");
 
     let Statement::Mutation(stmt) = &program.statements[0] else {
         panic!("expected mutation statement");
@@ -78,7 +61,7 @@ fn parse_focused_use_graph_mutation() {
 
 #[test]
 fn parse_mutation_chain_with_query_step_stays_single_statement() {
-    let program = parse_ok("INSERT (n) MATCH (n) RETURN n");
+    let program = parse_cleanly("INSERT (n) MATCH (n) RETURN n");
     assert_eq!(program.statements.len(), 1);
 
     let Statement::Mutation(stmt) = &program.statements[0] else {
@@ -101,7 +84,7 @@ fn parse_mutation_chain_with_query_step_stays_single_statement() {
 
 #[test]
 fn parse_mutation_and_catalog_without_semicolon_split_correctly() {
-    let program = parse_ok("SET n.age = 1 CREATE SCHEMA /foo");
+    let program = parse_cleanly("SET n.age = 1 CREATE SCHEMA /foo");
     assert_eq!(program.statements.len(), 2);
     assert!(matches!(program.statements[0], Statement::Mutation(_)));
     assert!(matches!(program.statements[1], Statement::Catalog(_)));
@@ -109,7 +92,7 @@ fn parse_mutation_and_catalog_without_semicolon_split_correctly() {
 
 #[test]
 fn parse_insert_with_optional_fillers() {
-    let program = parse_ok("INSERT ()-[]->() , ()~[]~()");
+    let program = parse_cleanly("INSERT ()-[]->() , ()~[]~()");
     assert_eq!(program.statements.len(), 1);
     assert!(matches!(program.statements[0], Statement::Mutation(_)));
 }
@@ -128,14 +111,14 @@ fn set_all_properties_accepts_empty_map() {
 
 #[test]
 fn parse_inline_call_statement_is_mutation_start() {
-    let program = parse_ok("INSERT (n) CALL { RETURN n }");
+    let program = parse_cleanly("INSERT (n) CALL { RETURN n }");
     assert_eq!(program.statements.len(), 1);
     assert!(matches!(program.statements[0], Statement::Mutation(_)));
 }
 
 #[test]
 fn parse_inline_call_with_scope_is_mutation_start() {
-    let program = parse_ok("INSERT (n) CALL (n, m) { RETURN n }");
+    let program = parse_cleanly("INSERT (n) CALL (n, m) { RETURN n }");
     assert_eq!(program.statements.len(), 1);
     assert!(matches!(program.statements[0], Statement::Mutation(_)));
 }
@@ -145,7 +128,7 @@ fn inline_call_reports_unclosed_procedure_specification() {
     let result = parse("INSERT (n) CALL { RETURN n");
     assert!(!result.diagnostics.is_empty(), "expected diagnostics");
 
-    let diag_text = diagnostics_text(&result.diagnostics);
+    let diag_text = format_diagnostics(&result.diagnostics);
     assert!(
         diag_text.contains("Expected closing brace in nested procedure specification")
             || diag_text.contains("expected '}'"),

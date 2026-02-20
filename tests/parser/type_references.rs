@@ -7,20 +7,11 @@ use gql_parser::parser::types::{
     parse_edge_reference_value_type, parse_graph_reference_value_type,
     parse_node_reference_value_type,
 };
-
-fn tokenize(source: &str) -> Vec<gql_parser::Token> {
-    let lexed = Lexer::new(source).tokenize();
-    assert!(
-        lexed.diagnostics.is_empty(),
-        "unexpected lexer diagnostics: {:?}",
-        lexed.diagnostics
-    );
-    lexed.tokens
-}
+use crate::common::*;
 
 #[test]
 fn graph_reference_property_graph_parses_real_nested_specification() {
-    let tokens = tokenize("PROPERTY GRAPH { NODE TYPE Person LABEL Person } NOT NULL");
+    let tokens = tokenize_cleanly("PROPERTY GRAPH { NODE TYPE Person LABEL Person } NOT NULL");
     let graph_ref = parse_graph_reference_value_type(&tokens).expect("graph ref should parse");
 
     let GraphReferenceValueType::PropertyGraph { spec, not_null, .. } = graph_ref else {
@@ -36,7 +27,7 @@ fn graph_reference_property_graph_parses_real_nested_specification() {
 
 #[test]
 fn node_reference_typed_form_preserves_pattern_content() {
-    let tokens = tokenize("(n LABEL Person { name :: STRING }) NOT NULL");
+    let tokens = tokenize_cleanly("(n LABEL Person { name :: STRING }) NOT NULL");
     let node_ref = parse_node_reference_value_type(&tokens).expect("node ref should parse");
 
     let NodeReferenceValueType::Typed { spec, not_null, .. } = node_ref else {
@@ -52,7 +43,7 @@ fn node_reference_typed_form_preserves_pattern_content() {
 
 #[test]
 fn edge_reference_typed_form_parses_full_visual_pattern() {
-    let tokens = tokenize("(Person)-[LABEL KNOWS]->(Company) NOT NULL");
+    let tokens = tokenize_cleanly("(Person)-[LABEL KNOWS]->(Company) NOT NULL");
     let edge_ref = parse_edge_reference_value_type(&tokens).expect("edge ref should parse");
 
     let EdgeReferenceValueType::Typed { spec, not_null, .. } = edge_ref else {

@@ -35,6 +35,7 @@ fn test_validator_with_config() {
         warn_on_shadowing: true,
         warn_on_disconnected_patterns: true,
         advanced_schema_validation: false,
+        enhanced_type_inference: false,
         callable_validation: false,
     };
 
@@ -1537,6 +1538,7 @@ fn test_warning_visibility_shadowing() {
         warn_on_shadowing: true,
         warn_on_disconnected_patterns: false,
         advanced_schema_validation: false,
+        enhanced_type_inference: false,
         callable_validation: false,
     };
 
@@ -1636,6 +1638,7 @@ fn test_no_warnings_when_disabled() {
         warn_on_shadowing: false,
         warn_on_disconnected_patterns: false,
         advanced_schema_validation: false,
+        enhanced_type_inference: false,
         callable_validation: false,
     };
 

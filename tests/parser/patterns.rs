@@ -13,6 +13,7 @@ use gql_parser::lexer::Lexer;
 use gql_parser::lexer::token::TokenKind;
 use gql_parser::parse;
 use gql_parser::parser::patterns::{parse_graph_pattern, parse_graph_pattern_binding_table};
+use crate::common::*;
 
 fn parse_ambient_query(source: &str) -> gql_parser::ast::query::AmbientLinearQuery {
     let result = parse(source);
@@ -33,14 +34,6 @@ fn parse_ambient_query(source: &str) -> gql_parser::ast::query::AmbientLinearQue
     };
 
     query.clone()
-}
-
-fn diagnostics_text(diags: &[miette::Report]) -> String {
-    diags
-        .iter()
-        .map(|diag| format!("{diag:?}"))
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn parse_first_simple_match_pattern(source: &str) -> GraphPattern {
@@ -392,7 +385,7 @@ fn parse_node_pattern_rejects_mixed_property_and_where_predicates() {
     let result = parse("MATCH (n:Person {age: 42} WHERE n.age > 10) RETURN n");
     assert!(!result.diagnostics.is_empty(), "expected diagnostics");
 
-    let diag_text = diagnostics_text(&result.diagnostics);
+    let diag_text = format_diagnostics(&result.diagnostics);
     assert!(
         diag_text
             .contains("Element pattern can have either property specification or WHERE predicate"),
@@ -599,7 +592,7 @@ fn parse_reports_single_chained_quantifier_diagnostic() {
     assert!(result.ast.is_some(), "expected recoverable AST");
     assert!(!result.diagnostics.is_empty(), "expected diagnostics");
 
-    let diag_text = diagnostics_text(&result.diagnostics);
+    let diag_text = format_diagnostics(&result.diagnostics);
     assert!(
         diag_text.contains("Chained path quantifiers are not allowed"),
         "unexpected diagnostics: {diag_text}"
@@ -716,7 +709,7 @@ fn parse_path_variable_rejects_delimited_identifier() {
     let result = parse("MATCH `p` = (n) RETURN n");
     assert!(!result.diagnostics.is_empty(), "expected diagnostics");
 
-    let diag_text = diagnostics_text(&result.diagnostics);
+    let diag_text = format_diagnostics(&result.diagnostics);
     assert!(
         diag_text.contains("Path variable declaration requires a regular identifier"),
         "unexpected diagnostics: {diag_text}"
@@ -728,7 +721,7 @@ fn parse_element_variable_rejects_delimited_identifier() {
     let result = parse("MATCH (`n`:Person) RETURN n");
     assert!(!result.diagnostics.is_empty(), "expected diagnostics");
 
-    let diag_text = diagnostics_text(&result.diagnostics);
+    let diag_text = format_diagnostics(&result.diagnostics);
     assert!(
         diag_text.contains("Element variable declaration requires a regular identifier"),
         "unexpected diagnostics: {diag_text}"
@@ -740,7 +733,7 @@ fn parse_property_map_rejects_reserved_unquoted_property_name() {
     let result = parse("MATCH (n {RETURN: 1}) RETURN n");
     assert!(!result.diagnostics.is_empty(), "expected diagnostics");
 
-    let diag_text = diagnostics_text(&result.diagnostics);
+    let diag_text = format_diagnostics(&result.diagnostics);
     assert!(
         diag_text.contains("Expected property name in property specification"),
         "unexpected diagnostics: {diag_text}"
