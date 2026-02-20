@@ -1,14 +1,15 @@
 //! Main semantic validator coordinating validation passes.
 
-mod scope_analysis;
-mod type_inference;
-mod variable_validation;
-mod pattern_validation;
+mod callable_validation;
 mod context_validation;
-mod type_checking;
 mod expression_validation;
+mod pattern_validation;
 mod reference_validation;
 mod schema_validation;
+mod scope_analysis;
+mod type_checking;
+mod type_inference;
+mod variable_validation;
 
 use std::collections::HashMap;
 
@@ -67,6 +68,13 @@ pub struct ValidationConfig {
     ///
     /// See `SemanticValidator::with_schema_catalog()` for implementation status.
     pub advanced_schema_validation: bool,
+
+    /// Enable callable validation (Milestone 4).
+    ///
+    /// When enabled, the validator will validate function and procedure calls
+    /// against their signatures, including arity checking and parameter validation.
+    /// Requires a callable catalog and validator to be configured.
+    pub callable_validation: bool,
 }
 
 impl Default for ValidationConfig {
@@ -78,6 +86,7 @@ impl Default for ValidationConfig {
             warn_on_shadowing: true,
             warn_on_disconnected_patterns: true,
             advanced_schema_validation: false,
+            callable_validation: false,
         }
     }
 }
@@ -101,6 +110,12 @@ pub struct SemanticValidator<'s, 'c> {
 
     /// Optional variable type context provider (Milestone 3).
     pub(super) variable_context_provider: Option<&'s dyn crate::semantic::schema_catalog::VariableTypeContextProvider>,
+
+    /// Optional callable catalog for function/procedure validation (Milestone 4).
+    pub(super) callable_catalog: Option<&'c dyn crate::semantic::callable::CallableCatalog>,
+
+    /// Optional callable validator for call site validation (Milestone 4).
+    pub(super) callable_validator: Option<&'c dyn crate::semantic::callable::CallableValidator>,
 }
 
 impl<'s, 'c> SemanticValidator<'s, 'c> {
@@ -113,6 +128,8 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
             schema_catalog: None,
             graph_context_resolver: None,
             variable_context_provider: None,
+            callable_catalog: None,
+            callable_validator: None,
         }
     }
 
@@ -125,6 +142,8 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
             schema_catalog: None,
             graph_context_resolver: None,
             variable_context_provider: None,
+            callable_catalog: None,
+            callable_validator: None,
         }
     }
 
@@ -211,6 +230,67 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
         self
     }
 
+    /// Sets the callable catalog for function/procedure validation (Milestone 4).
+    ///
+    /// # Implementation Status
+    ///
+    /// The callable catalog infrastructure is fully implemented and ready for use.
+    /// When `callable_validation` is enabled, the validator will:
+    /// - Validate function arity (argument count)
+    /// - Check aggregate function signatures
+    /// - Report errors for undefined callables
+    /// - Support built-in and custom callable resolution
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use gql_parser::semantic::{SemanticValidator, callable::BuiltinCallableCatalog};
+    ///
+    /// let catalog = BuiltinCallableCatalog::new();
+    /// let validator = SemanticValidator::new()
+    ///     .with_callable_catalog(&catalog)
+    ///     .with_callable_validation(true);
+    /// ```
+    pub fn with_callable_catalog(mut self, catalog: &'c dyn crate::semantic::callable::CallableCatalog) -> Self {
+        self.callable_catalog = Some(catalog);
+        self.config.callable_validation = true;
+        self
+    }
+
+    /// Sets the callable validator for call site validation (Milestone 4).
+    ///
+    /// This is typically used in conjunction with `with_callable_catalog`.
+    /// If not set, no call site validation will be performed.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use gql_parser::semantic::{
+    ///     SemanticValidator,
+    ///     callable::{BuiltinCallableCatalog, DefaultCallableValidator},
+    /// };
+    ///
+    /// let catalog = BuiltinCallableCatalog::new();
+    /// let validator_impl = DefaultCallableValidator::new();
+    ///
+    /// let validator = SemanticValidator::new()
+    ///     .with_callable_catalog(&catalog)
+    ///     .with_callable_validator(&validator_impl);
+    /// ```
+    pub fn with_callable_validator(mut self, validator: &'c dyn crate::semantic::callable::CallableValidator) -> Self {
+        self.callable_validator = Some(validator);
+        self
+    }
+
+    /// Enables callable validation (Milestone 4).
+    ///
+    /// Note: This requires both a callable catalog and validator to be configured.
+    /// If either is missing, callable validation will be skipped.
+    pub fn with_callable_validation(mut self, enabled: bool) -> Self {
+        self.config.callable_validation = enabled;
+        self
+    }
+
     /// Validates an AST and produces an IR or diagnostics.
     ///
     /// # Multi-Pass Validation
@@ -225,6 +305,7 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
     /// 7. Expression Validation - Check expressions
     /// 8. Reference Validation (optional) - Check references
     /// 9. Label/Property Validation (optional) - Check schema references
+    /// 10. Callable Validation (optional) - Check function/procedure calls
     ///
     /// # Error Recovery
     ///
@@ -271,6 +352,11 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
         // Pass 9: Label/Property Validation (optional)
         if self.config.schema_validation {
             schema_validation::run_schema_validation(self, program, &mut diagnostics);
+        }
+
+        // Pass 10: Callable Validation (optional, Milestone 4)
+        if self.config.callable_validation {
+            callable_validation::run_callable_validation(self, program, &mut diagnostics);
         }
 
         // Return IR or diagnostics

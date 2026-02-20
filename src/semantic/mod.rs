@@ -52,6 +52,7 @@
 //! }
 //! ```
 
+pub mod callable;
 pub mod catalog;
 pub mod diag;
 pub mod schema;
