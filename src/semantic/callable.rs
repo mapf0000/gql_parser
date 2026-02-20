@@ -1086,6 +1086,12 @@ impl crate::semantic::metadata_provider::MetadataProvider for BuiltinCallableCat
                 return Some(sig.clone());
             }
         }
+        // Try as procedure
+        if let Ok(sigs) = self.resolve(&name_lower, CallableKind::Procedure, &CallableLookupContext::new()) {
+            if let Some(sig) = sigs.first() {
+                return Some(sig.clone());
+            }
+        }
         None
     }
 }
@@ -1299,6 +1305,12 @@ impl crate::semantic::metadata_provider::MetadataProvider for InMemoryCallableCa
         }
         // Try as aggregate
         if let Ok(sigs) = self.resolve(&name_lower, CallableKind::AggregateFunction, &CallableLookupContext::new()) {
+            if let Some(sig) = sigs.first() {
+                return Some(sig.clone());
+            }
+        }
+        // Try as procedure
+        if let Ok(sigs) = self.resolve(&name_lower, CallableKind::Procedure, &CallableLookupContext::new()) {
             if let Some(sig) = sigs.first() {
                 return Some(sig.clone());
             }

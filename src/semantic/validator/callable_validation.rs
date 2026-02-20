@@ -5,7 +5,9 @@
 
 use crate::ast::expression::{AggregateFunction, Expression, FunctionCall, FunctionName, GeneralSetFunctionType};
 use crate::ast::program::Program;
-use crate::ast::visitor::{walk_expression, walk_program, AstVisitor, VisitResult};
+use crate::ast::procedure::{CallProcedureStatement, ProcedureCall, NamedProcedureCall};
+use crate::ast::query::PrimitiveQueryStatement;
+use crate::ast::visitor::{walk_expression, walk_program, walk_primitive_query_statement, AstVisitor, VisitResult};
 use crate::diag::Diag;
 
 use super::SemanticValidator;
@@ -36,6 +38,61 @@ struct CallableValidationVisitor<'v, 'm> {
 }
 
 impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
+    /// Validates a procedure call against the metadata provider.
+    fn validate_procedure_call(&mut self, call: &NamedProcedureCall) {
+        // Only validate if we have a metadata provider
+        let Some(metadata) = self.validator.metadata_provider else {
+            return; // No metadata provider configured, skip validation
+        };
+
+        // Get procedure name - extract from ProcedureReference
+        use crate::ast::references::ProcedureReference;
+        let name = match &call.procedure {
+            ProcedureReference::CatalogQualified { name, .. } => &name.name,
+            ProcedureReference::ReferenceParameter { name, .. } => name,
+        };
+
+        // Lookup callable signature (procedures are callables with kind=Procedure)
+        let Some(signature) = metadata.lookup_callable(name) else {
+            // Unknown procedure - report error
+            self.diagnostics.push(
+                crate::diag::Diag::new(
+                    crate::diag::DiagSeverity::Error,
+                    format!("Unknown procedure or function '{}'", name),
+                )
+                .with_label(crate::diag::DiagLabel::primary(
+                    call.span.clone(),
+                    "not found in catalog",
+                )),
+            );
+            return;
+        };
+
+        // Validate arity if arguments provided
+        if let Some(arguments) = &call.arguments {
+            let args: Vec<&Expression> = arguments.arguments.iter().map(|a| &a.expression).collect();
+            if let Err(e) = metadata.validate_callable_invocation(&signature, &args) {
+                self.diagnostics.push(
+                    crate::diag::Diag::new(
+                        crate::diag::DiagSeverity::Error,
+                        format!("{}", e),
+                    )
+                    .with_label(crate::diag::DiagLabel::primary(
+                        call.span.clone(),
+                        "invalid call",
+                    )),
+                );
+            }
+        }
+
+        // Validate YIELD clause if present
+        if let Some(_yield_clause) = &call.yield_clause {
+            // YIELD validation would check that yielded fields match procedure output
+            // For now, we skip this as it requires more complex signature metadata
+            // The MetadataProvider trait can be extended to include output field metadata
+        }
+    }
+
     /// Validates a function call against the metadata provider.
     fn validate_function_call(&mut self, call: &FunctionCall) {
         // Only validate if we have a metadata provider
@@ -144,6 +201,21 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
 
 impl<'v, 'm> AstVisitor for CallableValidationVisitor<'v, 'm> {
     type Break = ();
+
+    fn visit_primitive_query_statement(
+        &mut self,
+        statement: &PrimitiveQueryStatement,
+    ) -> VisitResult<()> {
+        // Check if this is a CALL statement
+        if let PrimitiveQueryStatement::Call(call_stmt) = statement {
+            // Validate procedure call
+            if let ProcedureCall::Named(named_call) = &call_stmt.call {
+                self.validate_procedure_call(named_call);
+            }
+        }
+        // Continue walking the statement
+        walk_primitive_query_statement(self, statement)
+    }
 
     fn visit_expression(&mut self, expr: &Expression) -> VisitResult<()> {
         match expr {

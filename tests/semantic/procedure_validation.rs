@@ -31,7 +31,7 @@ fn validate_with_procedures(source: &str, catalog: &impl MetadataProvider)
 
 #[test]
 fn test_builtin_procedure_validates() {
-    let source = "CALL abs(-5)";
+    let source = "CALL abs(-5) RETURN 1";
 
     // Use builtin catalog which has 'abs' function
     let catalog = BuiltinCallableCatalog::new();
@@ -42,7 +42,7 @@ fn test_builtin_procedure_validates() {
 
 #[test]
 fn test_unknown_procedure_fails_with_validation_enabled() {
-    let source = "CALL nonexistent_procedure()";
+    let source = "CALL nonexistent_procedure() RETURN 1";
 
     let catalog = InMemoryCallableCatalog::new();
     let outcome = validate_with_procedures(source, &catalog);
@@ -80,7 +80,7 @@ fn test_procedure_with_correct_arity_validates() {
         nullability: Nullability::NullOnNullInput,
     });
 
-    let source = "CALL my_proc(1, 2)";
+    let source = "CALL my_proc(1, 2) RETURN 1";
     let outcome = validate_with_procedures(source, &catalog);
 
     assert!(outcome.is_success(), "Diagnostics: {:?}", outcome.diagnostics);
@@ -106,7 +106,7 @@ fn test_procedure_with_wrong_arity_fails() {
         nullability: Nullability::NullOnNullInput,
     });
 
-    let source = "CALL my_proc(1, 2, 3)";
+    let source = "CALL my_proc(1, 2, 3) RETURN 1";
     let outcome = validate_with_procedures(source, &catalog);
 
     // Should fail - wrong number of arguments
@@ -118,7 +118,7 @@ fn test_procedure_with_wrong_arity_fails() {
 
 #[test]
 fn test_optional_call_validates() {
-    let source = "OPTIONAL CALL abs(5)";
+    let source = "OPTIONAL CALL abs(5) RETURN 1";
 
     let catalog = BuiltinCallableCatalog::new();
     let outcome = validate_with_procedures(source, &catalog);
@@ -141,7 +141,7 @@ fn test_yield_valid_field_validates() {
         nullability: Nullability::NullOnNullInput,
     });
 
-    let source = "CALL my_proc() YIELD result";
+    let source = "CALL my_proc() YIELD result RETURN 1";
     let outcome = validate_with_procedures(source, &catalog);
 
     assert!(outcome.is_success(), "Diagnostics: {:?}", outcome.diagnostics);
@@ -160,7 +160,7 @@ fn test_yield_invalid_field_fails() {
         nullability: Nullability::NullOnNullInput,
     });
 
-    let source = "CALL my_proc() YIELD nonexistent";
+    let source = "CALL my_proc() YIELD nonexistent RETURN 1";
     let outcome = validate_with_procedures(source, &catalog);
 
     // Should fail or warn - field doesn't exist
