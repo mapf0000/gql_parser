@@ -6,57 +6,37 @@
 //!
 //! # Architecture
 //!
-//! The callable catalog system is designed to be:
-//! - **Generic**: Works with built-in and external (UDF/stored procedure) callables
-//! - **Composable**: Built-ins and external callables can be composed
-//! - **Mockable**: Test doubles provided for isolated testing
-//! - **Send + Sync**: Thread-safe for multi-threaded validation
+//! Built-in functions are resolved directly via `lookup_builtin_callable()` with zero
+//! trait overhead. External callables (UDFs, stored procedures) are accessed through
+//! the `MetadataProvider` trait.
 //!
 //! # Public API
 //!
-//! - [`CallableCatalog`]: Main trait for resolving callable signatures
+//! - [`lookup_builtin_callable`]: Direct lookup for built-in GQL functions (zero-cost)
+//! - [`resolve_builtin_signatures`]: Get all overloaded signatures for a built-in
+//! - [`list_builtin_callables`]: List all built-in functions by kind
 //! - [`CallableValidator`]: Trait for validating function calls against signatures
-//! - [`BuiltinCallableCatalog`]: Implementation for built-in GQL functions
-//! - [`CompositeCallableCatalog`]: Combines built-in and external catalogs
-//! - [`InMemoryCallableCatalog`]: Test double for custom callables
+//! - [`DefaultCallableValidator`]: Default arity and signature validation
 //!
 //! # Example
 //!
 //! ```ignore
 //! use gql_parser::semantic::callable::{
-//!     CallableCatalog, BuiltinCallableCatalog, InMemoryCallableCatalog,
-//!     CompositeCallableCatalog, CallableKind, CallableSignature, ParameterSignature,
+//!     lookup_builtin_callable, CallableKind, CallableSignature,
+//!     ParameterSignature, Volatility, Nullability,
 //! };
 //!
-//! // Create a catalog with built-ins and custom functions
-//! let builtins = BuiltinCallableCatalog::new();
-//! let mut custom = InMemoryCallableCatalog::new();
+//! // Look up built-in function (zero-cost, O(1) match statement)
+//! let sig = lookup_builtin_callable("abs", CallableKind::Function);
+//! assert!(sig.is_some());
 //!
-//! // Register a custom function
-//! custom.register(CallableSignature {
-//!     name: "my_func".into(),
-//!     kind: CallableKind::Function,
-//!     parameters: vec![
-//!         ParameterSignature::required("x", "INT"),
-//!         ParameterSignature::required("y", "INT"),
-//!     ],
-//!     return_type: Some("INT".into()),
-//!     volatility: Volatility::Immutable,
-//!     nullability: Nullability::NullOnNullInput,
-//! });
-//!
-//! let catalog = CompositeCallableCatalog::new(builtins, custom);
-//!
-//! // Resolve function signature
-//! let context = CallableLookupContext::default();
-//! let signatures = catalog.resolve("abs", CallableKind::Function, &context)?;
+//! // For UDFs, use MetadataProvider trait
+//! // See metadata_provider module for examples
 //! ```
 
 use crate::ast::Span;
 use crate::diag::{Diag, DiagLabel, DiagSeverity};
 use smol_str::SmolStr;
-use std::collections::HashMap;
-use std::sync::Arc;
 
 // ============================================================================
 // Core Types
@@ -198,47 +178,6 @@ pub enum Nullability {
     CalledOnNullInput,
 }
 
-/// Context for callable lookup with additional resolution hints.
-#[derive(Debug, Clone, Default)]
-pub struct CallableLookupContext {
-    /// Optional schema context for qualified lookups.
-    pub schema: Option<SmolStr>,
-
-    /// Optional graph context.
-    pub graph: Option<SmolStr>,
-
-    /// Whether to include built-in callables.
-    pub include_builtins: bool,
-}
-
-impl CallableLookupContext {
-    /// Creates a new lookup context with default settings.
-    pub fn new() -> Self {
-        Self {
-            schema: None,
-            graph: None,
-            include_builtins: true,
-        }
-    }
-
-    /// Sets the schema context.
-    pub fn with_schema(mut self, schema: impl Into<SmolStr>) -> Self {
-        self.schema = Some(schema.into());
-        self
-    }
-
-    /// Sets the graph context.
-    pub fn with_graph(mut self, graph: impl Into<SmolStr>) -> Self {
-        self.graph = Some(graph.into());
-        self
-    }
-
-    /// Sets whether to include built-in callables.
-    pub fn with_builtins(mut self, include: bool) -> Self {
-        self.include_builtins = include;
-        self
-    }
-}
 
 // ============================================================================
 // Signature Types
@@ -371,36 +310,6 @@ impl ParameterSignature {
     }
 }
 
-// ============================================================================
-// CallableCatalog Trait
-// ============================================================================
-
-/// Trait for resolving callable signatures.
-///
-/// Implementations must be thread-safe (`Send + Sync`) to support
-/// multi-threaded validation.
-pub trait CallableCatalog: Send + Sync {
-    /// Resolves a callable by name and kind.
-    ///
-    /// Returns all matching signatures (may be multiple for overloaded functions).
-    /// Returns empty vector if not found.
-    fn resolve(
-        &self,
-        name: &str,
-        kind: CallableKind,
-        ctx: &CallableLookupContext,
-    ) -> Result<Vec<CallableSignature>, CatalogError>;
-
-    /// Checks if a callable exists.
-    fn exists(&self, name: &str, kind: CallableKind, ctx: &CallableLookupContext) -> bool {
-        self.resolve(name, kind, ctx)
-            .map(|sigs| !sigs.is_empty())
-            .unwrap_or(false)
-    }
-
-    /// Lists all available callables of a given kind.
-    fn list(&self, kind: CallableKind, ctx: &CallableLookupContext) -> Vec<SmolStr>;
-}
 
 // ============================================================================
 // CallableValidator Trait
@@ -919,227 +828,8 @@ pub fn list_builtin_callables(kind: CallableKind) -> Vec<SmolStr> {
 }
 
 // ============================================================================
-// CompositeCallableCatalog
-// ============================================================================
-
-/// Composite catalog that combines built-in and external callables.
-///
-/// This allows users to compose their own catalog with built-ins:
-/// ```ignore
-/// let catalog = CompositeCallableCatalog::new(
-///     BuiltinCallableCatalog::new(),
-///     my_external_catalog,
-/// );
-/// ```
-pub struct CompositeCallableCatalog<B, E>
-where
-    B: CallableCatalog,
-    E: CallableCatalog,
-{
-    builtins: B,
-    external: E,
-}
-
-impl<B, E> CompositeCallableCatalog<B, E>
-where
-    B: CallableCatalog,
-    E: CallableCatalog,
-{
-    /// Creates a new composite catalog.
-    pub fn new(builtins: B, external: E) -> Self {
-        Self { builtins, external }
-    }
-
-    /// Returns a reference to the built-in catalog.
-    pub fn builtins(&self) -> &B {
-        &self.builtins
-    }
-
-    /// Returns a reference to the external catalog.
-    pub fn external(&self) -> &E {
-        &self.external
-    }
-}
-
-impl<B, E> CallableCatalog for CompositeCallableCatalog<B, E>
-where
-    B: CallableCatalog,
-    E: CallableCatalog,
-{
-    fn resolve(
-        &self,
-        name: &str,
-        kind: CallableKind,
-        ctx: &CallableLookupContext,
-    ) -> Result<Vec<CallableSignature>, CatalogError> {
-        let mut sigs = Vec::new();
-
-        // Try external catalog first (allows overriding built-ins)
-        if let Ok(external_sigs) = self.external.resolve(name, kind, ctx) {
-            sigs.extend(external_sigs);
-        }
-
-        // Then try built-ins if requested
-        if ctx.include_builtins {
-            if let Ok(builtin_sigs) = self.builtins.resolve(name, kind, ctx) {
-                sigs.extend(builtin_sigs);
-            }
-        }
-
-        Ok(sigs)
-    }
-
-    fn list(&self, kind: CallableKind, ctx: &CallableLookupContext) -> Vec<SmolStr> {
-        let mut names = self.external.list(kind, ctx);
-        if ctx.include_builtins {
-            names.extend(self.builtins.list(kind, ctx));
-        }
-        names.sort();
-        names.dedup();
-        names
-    }
-}
-
-// ============================================================================
-// InMemoryCallableCatalog
-// ============================================================================
-
-/// In-memory callable catalog for testing and custom callables.
-///
-/// This is a test double that allows registering custom callable signatures
-/// with deterministic overload ordering.
-#[derive(Debug, Clone, Default)]
-pub struct InMemoryCallableCatalog {
-    signatures: HashMap<(SmolStr, CallableKind), Vec<CallableSignature>>,
-}
-
-impl InMemoryCallableCatalog {
-    /// Creates a new empty in-memory catalog.
-    pub fn new() -> Self {
-        Self {
-            signatures: HashMap::new(),
-        }
-    }
-
-    /// Registers a callable signature.
-    pub fn register(&mut self, sig: CallableSignature) {
-        // Normalize name to lowercase for case-insensitive lookup
-        let name_lower = SmolStr::new(sig.name.to_lowercase());
-        let key = (name_lower, sig.kind);
-        self.signatures.entry(key).or_default().push(sig);
-    }
-
-    /// Removes all signatures for a callable.
-    pub fn unregister(&mut self, name: &str, kind: CallableKind) {
-        let name = SmolStr::new(name.to_lowercase());
-        self.signatures.remove(&(name, kind));
-    }
-
-    /// Clears all registered signatures.
-    pub fn clear(&mut self) {
-        self.signatures.clear();
-    }
-
-    /// Returns the number of registered signatures.
-    pub fn len(&self) -> usize {
-        self.signatures.values().map(|v| v.len()).sum()
-    }
-
-    /// Returns whether the catalog is empty.
-    pub fn is_empty(&self) -> bool {
-        self.signatures.is_empty()
-    }
-}
-
-impl CallableCatalog for InMemoryCallableCatalog {
-    fn resolve(
-        &self,
-        name: &str,
-        kind: CallableKind,
-        _ctx: &CallableLookupContext,
-    ) -> Result<Vec<CallableSignature>, CatalogError> {
-        let name_lower = SmolStr::new(name.to_lowercase());
-        let key = (name_lower, kind);
-        Ok(self.signatures.get(&key).cloned().unwrap_or_default())
-    }
-
-    fn list(&self, kind: CallableKind, _ctx: &CallableLookupContext) -> Vec<SmolStr> {
-        let mut names: Vec<_> = self
-            .signatures
-            .keys()
-            .filter(|(_, k)| *k == kind)
-            .map(|(name, _)| name.clone())
-            .collect();
-        names.sort();
-        names.dedup();
-        names
-    }
-}
-
-// ============================================================================
 // MetadataProvider implementation for InMemoryCallableCatalog
 // ============================================================================
-
-impl crate::semantic::metadata_provider::MetadataProvider for InMemoryCallableCatalog {
-    fn get_schema_snapshot(
-        &self,
-        _graph: &crate::semantic::schema_catalog::GraphRef,
-        _schema: Option<&crate::semantic::schema_catalog::SchemaRef>,
-    ) -> Result<Arc<dyn crate::semantic::schema_catalog::SchemaSnapshot>, crate::semantic::schema_catalog::CatalogError> {
-        // In-memory catalog doesn't provide schema information
-        Err(crate::semantic::schema_catalog::CatalogError::GraphNotFound {
-            graph: "no_graph".into(),
-        })
-    }
-
-    fn resolve_active_graph(
-        &self,
-        _session: &crate::semantic::schema_catalog::SessionContext,
-    ) -> Result<crate::semantic::schema_catalog::GraphRef, crate::semantic::schema_catalog::CatalogError> {
-        // In-memory catalog doesn't manage session state
-        Err(crate::semantic::schema_catalog::CatalogError::GraphNotFound {
-            graph: "no_graph".into(),
-        })
-    }
-
-    fn resolve_active_schema(
-        &self,
-        _graph: &crate::semantic::schema_catalog::GraphRef,
-    ) -> Result<crate::semantic::schema_catalog::SchemaRef, crate::semantic::schema_catalog::CatalogError> {
-        // In-memory catalog doesn't manage schemas
-        Err(crate::semantic::schema_catalog::CatalogError::SchemaNotFound {
-            schema: "no_schema".into(),
-        })
-    }
-
-    fn validate_graph_exists(&self, _name: &str) -> Result<(), crate::semantic::schema_catalog::CatalogError> {
-        // In-memory catalog doesn't validate graphs
-        Ok(())
-    }
-
-    fn lookup_callable(&self, name: &str) -> Option<CallableSignature> {
-        let name_lower = SmolStr::new(name.to_lowercase());
-        // Try as function first
-        if let Ok(sigs) = self.resolve(&name_lower, CallableKind::Function, &CallableLookupContext::new()) {
-            if let Some(sig) = sigs.first() {
-                return Some(sig.clone());
-            }
-        }
-        // Try as aggregate
-        if let Ok(sigs) = self.resolve(&name_lower, CallableKind::AggregateFunction, &CallableLookupContext::new()) {
-            if let Some(sig) = sigs.first() {
-                return Some(sig.clone());
-            }
-        }
-        // Try as procedure
-        if let Ok(sigs) = self.resolve(&name_lower, CallableKind::Procedure, &CallableLookupContext::new()) {
-            if let Some(sig) = sigs.first() {
-                return Some(sig.clone());
-            }
-        }
-        None
-    }
-}
 
 // ============================================================================
 // DefaultCallableValidator
@@ -1241,31 +931,6 @@ impl CallableValidator for DefaultCallableValidator {
     }
 }
 
-// ============================================================================
-// Arc Implementations
-// ============================================================================
-
-impl CallableCatalog for Arc<dyn CallableCatalog> {
-    fn resolve(
-        &self,
-        name: &str,
-        kind: CallableKind,
-        ctx: &CallableLookupContext,
-    ) -> Result<Vec<CallableSignature>, CatalogError> {
-        (**self).resolve(name, kind, ctx)
-    }
-
-    fn list(&self, kind: CallableKind, ctx: &CallableLookupContext) -> Vec<SmolStr> {
-        (**self).list(kind, ctx)
-    }
-}
-
-impl CallableValidator for Arc<dyn CallableValidator> {
-    fn validate_call(&self, call: &CallSite, sigs: &[CallableSignature]) -> Vec<Diag> {
-        (**self).validate_call(call, sigs)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1338,61 +1003,6 @@ mod tests {
         let aggregates = list_builtin_callables(CallableKind::AggregateFunction);
         assert!(aggregates.contains(&"count".into()));
         assert!(aggregates.contains(&"sum".into()));
-    }
-
-    #[test]
-    fn test_inmemory_catalog() {
-        let mut catalog = InMemoryCallableCatalog::new();
-        let ctx = CallableLookupContext::new();
-
-        // Register a custom function
-        catalog.register(CallableSignature::new(
-            "my_func",
-            CallableKind::Function,
-            vec![
-                ParameterSignature::required("x", "INT"),
-                ParameterSignature::required("y", "INT"),
-            ],
-            Some("INT"),
-        ));
-
-        // Resolve it
-        let sigs = catalog
-            .resolve("my_func", CallableKind::Function, &ctx)
-            .unwrap();
-        assert_eq!(sigs.len(), 1);
-        assert_eq!(sigs[0].name, "my_func");
-        assert_eq!(sigs[0].min_arity(), 2);
-
-        // Unregister
-        catalog.unregister("my_func", CallableKind::Function);
-        let sigs = catalog
-            .resolve("my_func", CallableKind::Function, &ctx)
-            .unwrap();
-        assert!(sigs.is_empty());
-    }
-
-    #[test]
-    fn test_composite_catalog() {
-        // Create custom catalog with user-defined functions
-        let mut custom = InMemoryCallableCatalog::new();
-
-        custom.register(CallableSignature::new(
-            "custom_func",
-            CallableKind::Function,
-            vec![ParameterSignature::required("x", "STRING")],
-            Some("INT"),
-        ));
-
-        let ctx = CallableLookupContext::new();
-
-        // Can resolve built-in (would come from metadata provider default)
-        let sig = lookup_builtin_callable("abs", CallableKind::Function);
-        assert!(sig.is_some());
-
-        // Can resolve custom
-        let sigs = custom.resolve("custom_func", CallableKind::Function, &ctx).unwrap();
-        assert_eq!(sigs.len(), 1);
     }
 
     #[test]

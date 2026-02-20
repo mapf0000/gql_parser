@@ -233,6 +233,9 @@ fn validate_query_statement_in_mutation(
                             statement_id,
                             diagnostics,
                         );
+
+                        // ISO GQL: Check for illegal aggregation in WHERE clause
+                        check_where_clause_aggregation(&where_clause.condition, diagnostics);
                     }
                 }
                 MatchStatement::Optional(_) => {
@@ -353,9 +356,16 @@ fn validate_primitive_data_modifying_statement(
     let scope_to_check = statement_scope_id(symbol_table, scope_metadata, statement_id);
 
     match statement {
-        PrimitiveDataModifyingStatement::Insert(_) => {
-            // INSERT statements define new variables, they don't reference existing ones
-            // (except in property value expressions, which would be validated separately)
+        PrimitiveDataModifyingStatement::Insert(insert_stmt) => {
+            // INSERT statements define new variables, but they can reference existing variables
+            // in property value expressions. Node variables themselves can be implicitly created.
+            validate_insert_statement(
+                &insert_stmt.pattern,
+                symbol_table,
+                scope_metadata,
+                statement_id,
+                diagnostics,
+            );
         }
         PrimitiveDataModifyingStatement::Set(set_stmt) => {
             // Validate SET items - check that element variables are in scope
@@ -545,6 +555,9 @@ fn validate_primitive_statement_variables(
                             statement_id,
                             diagnostics,
                         );
+
+                        // ISO GQL: Check for illegal aggregation in WHERE clause
+                        check_where_clause_aggregation(&where_clause.condition, diagnostics);
                     }
                 }
                 MatchStatement::Optional(optional) => match &optional.operand {
@@ -557,6 +570,9 @@ fn validate_primitive_statement_variables(
                                 statement_id,
                                 diagnostics,
                             );
+
+                            // ISO GQL: Check for illegal aggregation in WHERE clause
+                            check_where_clause_aggregation(&where_clause.condition, diagnostics);
                         }
                     }
                     crate::ast::query::OptionalOperand::Block { statements }
@@ -876,6 +892,9 @@ fn validate_match_statement_variables(
                     statement_id,
                     diagnostics,
                 );
+
+                // ISO GQL: Check for illegal aggregation in WHERE clause
+                check_where_clause_aggregation(&where_clause.condition, diagnostics);
             }
         }
         MatchStatement::Optional(optional) => match &optional.operand {
@@ -888,6 +907,9 @@ fn validate_match_statement_variables(
                         statement_id,
                         diagnostics,
                     );
+
+                    // ISO GQL: Check for illegal aggregation in WHERE clause
+                    check_where_clause_aggregation(&where_clause.condition, diagnostics);
                 }
             }
             crate::ast::query::OptionalOperand::Block { statements }
@@ -1420,6 +1442,69 @@ fn validate_expression_variables(
     }
 }
 
+/// Validates variable references in an INSERT statement.
+/// This includes:
+/// - Property value expressions in node/edge patterns (must reference existing variables)
+/// Note: Node variables themselves can be new or reference existing nodes (implicit creation allowed)
+fn validate_insert_statement(
+    pattern: &crate::ast::mutation::InsertGraphPattern,
+    symbol_table: &SymbolTable,
+    scope_metadata: &super::ScopeMetadata,
+    statement_id: usize,
+    diagnostics: &mut Vec<Diag>,
+) {
+    use crate::ast::mutation::InsertElementPattern;
+
+    // Validate property value expressions in INSERT patterns.
+    // Property expressions must reference variables that are in scope.
+    // Node variables themselves can be newly created (implicit creation is allowed in INSERT).
+
+    for path in &pattern.paths {
+        for element in &path.elements {
+            match element {
+                InsertElementPattern::Node(node_pattern) => {
+                    // Validate property value expressions
+                    if let Some(filler) = &node_pattern.filler {
+                        if let Some(props) = &filler.properties {
+                            for prop_pair in &props.properties {
+                                validate_expression_variables(
+                                    &prop_pair.value,
+                                    symbol_table,
+                                    scope_metadata,
+                                    statement_id,
+                                    diagnostics,
+                                );
+                            }
+                        }
+                    }
+                }
+                InsertElementPattern::Edge(edge_pattern) => {
+                    // Validate property value expressions in edges
+                    let filler_opt = match edge_pattern {
+                        crate::ast::mutation::InsertEdgePattern::PointingLeft(edge) => &edge.filler,
+                        crate::ast::mutation::InsertEdgePattern::PointingRight(edge) => &edge.filler,
+                        crate::ast::mutation::InsertEdgePattern::Undirected(edge) => &edge.filler,
+                    };
+
+                    if let Some(filler) = filler_opt {
+                        if let Some(props) = &filler.properties {
+                            for prop_pair in &props.properties {
+                                validate_expression_variables(
+                                    &prop_pair.value,
+                                    symbol_table,
+                                    scope_metadata,
+                                    statement_id,
+                                    diagnostics,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Checks if an expression contains aggregation functions.
 fn expression_contains_aggregation(expr: &crate::ast::expression::Expression) -> bool {
     use crate::ast::expression::Expression;
@@ -1439,6 +1524,23 @@ fn expression_contains_aggregation(expr: &crate::ast::expression::Expression) ->
             expression_contains_aggregation(left) || expression_contains_aggregation(right)
         }
         _ => false,
+    }
+}
+
+/// Checks for illegal aggregation in WHERE clause per ISO GQL standard.
+/// WHERE clauses cannot contain aggregation functions - use HAVING instead.
+fn check_where_clause_aggregation(
+    where_expr: &crate::ast::expression::Expression,
+    diagnostics: &mut Vec<Diag>,
+) {
+    if expression_contains_aggregation(where_expr) {
+        use crate::semantic::diag::SemanticDiagBuilder;
+        let diag = SemanticDiagBuilder::aggregation_error(
+            "Aggregation functions not allowed in WHERE clause (use HAVING instead)",
+            where_expr.span().clone(),
+        )
+        .build();
+        diagnostics.push(diag);
     }
 }
 

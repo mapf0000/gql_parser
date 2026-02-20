@@ -5,10 +5,10 @@
 //! their signatures.
 //!
 //! Key features demonstrated:
-//! - Built-in function lookup with standard GQL functions
-//! - Custom function registration with InMemoryCallableCatalog
+//! - Built-in function lookup with standard GQL functions (zero-cost direct lookup)
+//! - Custom function registration with InMemoryMetadataProvider
 //! - Arity validation for function calls
-//! - Integration with SemanticValidator via MetadataProvider
+//! - Integration with SemanticValidator
 //!
 //! Run with: cargo run --example callable_catalog_usage
 
@@ -37,7 +37,6 @@ fn main() {
     }
     println!("  ... and {} more", function_names.len().saturating_sub(10));
 
-    // List all aggregate functions
     println!("\nBuilt-in Aggregate Functions:");
     let agg_names = list_builtin_callables(CallableKind::AggregateFunction);
     for name in &agg_names {
@@ -309,16 +308,12 @@ fn main() {
         }
     }
 
-    // =========================================================================
-    // Summary
-    // =========================================================================
     println!("\n\n=== Summary ===");
     println!("The callable catalog system provides:");
     println!("  ✓ Built-in functions are always available (zero-cost direct lookup)");
-    println!("  ✓ Support for custom function and procedure registration");
-    println!("  ✓ MetadataProvider trait for external UDFs and metadata");
+    println!("  ✓ Support for custom function and procedure registration via MetadataProvider");
     println!("  ✓ Arity validation (required, optional, and variadic parameters)");
-    println!("  ✓ Thread-safe trait design (Send + Sync)");
+    println!("  ✓ Thread-safe design (Send + Sync)");
     println!("  ✓ Integration with semantic validation pipeline");
     println!("\nMilestone 4 is complete!");
 }

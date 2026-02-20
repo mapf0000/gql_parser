@@ -150,7 +150,9 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
                     // Simple validation: check if field name matches return type
                     // In a more sophisticated implementation, return_type could be
                     // a comma-separated list or a structured type
-                    if field_name.as_str() != return_type.as_str() {
+                    // Note: Use case-insensitive comparison because keywords used as identifiers
+                    // (like 'node', 'result', etc.) are normalized to uppercase by the parser
+                    if !field_name.eq_ignore_ascii_case(return_type.as_str()) {
                         self.diagnostics.push(
                             crate::diag::Diag::new(
                                 crate::diag::DiagSeverity::Error,

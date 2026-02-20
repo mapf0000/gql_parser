@@ -128,6 +128,24 @@ fn validate_select_aggregation(
         }
     };
 
+    // ISO GQL: Check that GROUP BY expressions don't contain aggregation functions
+    // This check applies regardless of whether SELECT has aggregation
+    if let Some(group_by) = &select.group_by {
+        let group_by_expressions = collect_group_by_expressions(group_by);
+
+        for gb_expr in &group_by_expressions {
+            if expression_contains_aggregation(gb_expr) {
+                diagnostics.push(
+                    SemanticDiagBuilder::aggregation_error(
+                        "Aggregation functions not allowed in GROUP BY clause",
+                        gb_expr.span().clone(),
+                    )
+                    .build()
+                );
+            }
+        }
+    }
+
     // If we have aggregation mixed with non-aggregated expressions
     if has_aggregation && !non_aggregated_expressions.is_empty() {
         // Check if there's a GROUP BY clause

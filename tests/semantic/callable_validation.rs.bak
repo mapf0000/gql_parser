@@ -317,6 +317,23 @@ fn test_signature_arity_helpers() {
 }
 
 #[test]
+fn test_callable_lookup_context_builder() {
+    let ctx = CallableLookupContext::new();
+    assert!(ctx.include_builtins);
+    assert!(ctx.schema.is_none());
+    assert!(ctx.graph.is_none());
+
+    let ctx = CallableLookupContext::new()
+        .with_schema("my_schema")
+        .with_graph("my_graph")
+        .with_builtins(false);
+
+    assert!(!ctx.include_builtins);
+    assert_eq!(ctx.schema, Some("my_schema".into()));
+    assert_eq!(ctx.graph, Some("my_graph".into()));
+}
+
+#[test]
 fn test_parameter_signature_constructors() {
     let param = ParameterSignature::required("x", "INT");
     assert!(!param.optional);
@@ -363,3 +380,29 @@ fn test_builtin_catalog_case_insensitive() {
     assert_eq!(sigs_lower.len(), sigs_mixed.len());
 }
 
+#[test]
+fn test_inmemory_catalog_case_insensitive() {
+    let mut catalog = InMemoryCallableCatalog::new();
+    let ctx = CallableLookupContext::new();
+
+    catalog.register(CallableSignature::new(
+        "MyFunc",
+        CallableKind::Function,
+        vec![],
+        Some("INT"),
+    ));
+
+    // Should resolve regardless of case
+    assert!(!catalog
+        .resolve("myfunc", CallableKind::Function, &ctx)
+        .unwrap()
+        .is_empty());
+    assert!(!catalog
+        .resolve("MYFUNC", CallableKind::Function, &ctx)
+        .unwrap()
+        .is_empty());
+    assert!(!catalog
+        .resolve("MyFunc", CallableKind::Function, &ctx)
+        .unwrap()
+        .is_empty());
+}
