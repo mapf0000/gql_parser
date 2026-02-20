@@ -157,10 +157,10 @@ fn demo_type_mismatch() {
 fn demo_schema_validation() {
     println!("--- Example 5: Schema Validation ---");
 
-    use gql_parser::semantic::schema::MockSchema;
+    use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
 
-    // Create a schema with Person and KNOWS labels
-    let schema = MockSchema::example();
+    // Create metadata provider with schema snapshot
+    let metadata = InMemoryMetadataProvider::example();
 
     // Valid label
     let valid_source = "MATCH (n:Person) RETURN n";
@@ -168,7 +168,7 @@ fn demo_schema_validation() {
 
     let parse_result = parse(valid_source);
     if let Some(ast) = parse_result.ast {
-        let validator = SemanticValidator::new().with_schema(&schema);
+        let validator = SemanticValidator::new().with_metadata_provider(&metadata);
 
         let outcome = validator.validate(&ast);
 
@@ -198,7 +198,7 @@ fn demo_schema_validation() {
 
     let parse_result = parse(invalid_source);
     if let Some(ast) = parse_result.ast {
-        let validator = SemanticValidator::new().with_schema(&schema);
+        let validator = SemanticValidator::new().with_metadata_provider(&metadata);
 
         let outcome = validator.validate(&ast);
 

@@ -10,6 +10,7 @@ use crate::ast::query::{
 };
 use crate::ast::*;
 use crate::diag::Diag;
+use crate::semantic::schema_catalog::SessionContext;
 
 /// Run schema validation pass.
 pub(super) fn run_schema_validation(
@@ -22,10 +23,36 @@ pub(super) fn run_schema_validation(
     // - Properties exist in schema
     // - Property types match schema
 
-    // Only perform validation if schema is provided
-    let Some(schema) = validator.schema else {
-        // Schema not available, skip validation
+    // Only perform validation if metadata provider is configured
+    let Some(metadata) = validator.metadata_provider else {
+        // Metadata provider not available, skip validation
         return;
+    };
+
+    // Get schema snapshot
+    let session = SessionContext::new();
+    let graph = match metadata.resolve_active_graph(&session) {
+        Ok(g) => g,
+        Err(_) => {
+            // Can't resolve graph, skip schema validation
+            return;
+        }
+    };
+
+    let schema = match metadata.resolve_active_schema(&graph) {
+        Ok(s) => s,
+        Err(_) => {
+            // Can't resolve schema, skip validation
+            return;
+        }
+    };
+
+    let snapshot = match metadata.get_schema_snapshot(&graph, Some(&schema)) {
+        Ok(snap) => snap,
+        Err(_) => {
+            // Can't get snapshot, skip validation
+            return;
+        }
     };
 
     for statement in &program.statements {
@@ -34,7 +61,7 @@ pub(super) fn run_schema_validation(
             // - Node labels: (n:Person) -> check if 'Person' exists in schema
             // - Edge labels: -[e:KNOWS]-> -> check if 'KNOWS' exists in schema
             // - Properties: n.name -> check if 'name' exists for nodes with label 'Person'
-            validate_query_schema(&query_stmt.query, schema, diagnostics);
+            validate_query_schema(&query_stmt.query, &*snapshot, diagnostics);
         }
     }
 }
@@ -42,19 +69,19 @@ pub(super) fn run_schema_validation(
 /// Validates schema references in a query.
 fn validate_query_schema(
     query: &Query,
-    schema: &dyn crate::semantic::schema::Schema,
+    snapshot: &dyn crate::semantic::schema_catalog::SchemaSnapshot,
     diagnostics: &mut Vec<Diag>,
 ) {
     match query {
         Query::Linear(linear_query) => {
-            validate_linear_query_schema(linear_query, schema, diagnostics);
+            validate_linear_query_schema(linear_query, snapshot, diagnostics);
         }
         Query::Composite(composite) => {
-            validate_query_schema(&composite.left, schema, diagnostics);
-            validate_query_schema(&composite.right, schema, diagnostics);
+            validate_query_schema(&composite.left, snapshot, diagnostics);
+            validate_query_schema(&composite.right, snapshot, diagnostics);
         }
         Query::Parenthesized(query, _) => {
-            validate_query_schema(query, schema, diagnostics);
+            validate_query_schema(query, snapshot, diagnostics);
         }
     }
 }
@@ -62,7 +89,7 @@ fn validate_query_schema(
 /// Validates schema references in a linear query.
 fn validate_linear_query_schema(
     linear_query: &LinearQuery,
-    schema: &dyn crate::semantic::schema::Schema,
+    snapshot: &dyn crate::semantic::schema_catalog::SchemaSnapshot,
     diagnostics: &mut Vec<Diag>,
 ) {
     let primitive_statements = match linear_query {
@@ -77,7 +104,7 @@ fn validate_linear_query_schema(
                 MatchStatement::Simple(simple) => {
                     // Simple match has a GraphPattern with paths
                     for path in &simple.pattern.paths.patterns {
-                        validate_path_pattern_schema(path, schema, diagnostics);
+                        validate_path_pattern_schema(path, snapshot, diagnostics);
                     }
                 }
                 MatchStatement::Optional(optional) => {
@@ -85,7 +112,7 @@ fn validate_linear_query_schema(
                     match &optional.operand {
                         crate::ast::query::OptionalOperand::Match { pattern } => {
                             for path in &pattern.paths.patterns {
-                                validate_path_pattern_schema(path, schema, diagnostics);
+                                validate_path_pattern_schema(path, snapshot, diagnostics);
                             }
                         }
                         crate::ast::query::OptionalOperand::Block { statements }
@@ -95,14 +122,14 @@ fn validate_linear_query_schema(
                                 match stmt {
                                     MatchStatement::Simple(simple) => {
                                         for path in &simple.pattern.paths.patterns {
-                                            validate_path_pattern_schema(path, schema, diagnostics);
+                                            validate_path_pattern_schema(path, snapshot, diagnostics);
                                         }
                                     }
                                     MatchStatement::Optional(nested_optional) => {
                                         // Recursively validate nested optional matches
                                         validate_optional_match_schema(
                                             nested_optional,
-                                            schema,
+                                            snapshot,
                                             diagnostics,
                                         );
                                     }
@@ -119,13 +146,13 @@ fn validate_linear_query_schema(
 /// Validates schema references in an optional match (recursive helper).
 fn validate_optional_match_schema(
     optional: &crate::ast::query::OptionalMatchStatement,
-    schema: &dyn crate::semantic::schema::Schema,
+    snapshot: &dyn crate::semantic::schema_catalog::SchemaSnapshot,
     diagnostics: &mut Vec<Diag>,
 ) {
     match &optional.operand {
         crate::ast::query::OptionalOperand::Match { pattern } => {
             for path in &pattern.paths.patterns {
-                validate_path_pattern_schema(path, schema, diagnostics);
+                validate_path_pattern_schema(path, snapshot, diagnostics);
             }
         }
         crate::ast::query::OptionalOperand::Block { statements }
@@ -134,11 +161,11 @@ fn validate_optional_match_schema(
                 match stmt {
                     MatchStatement::Simple(simple) => {
                         for path in &simple.pattern.paths.patterns {
-                            validate_path_pattern_schema(path, schema, diagnostics);
+                            validate_path_pattern_schema(path, snapshot, diagnostics);
                         }
                     }
                     MatchStatement::Optional(nested) => {
-                        validate_optional_match_schema(nested, schema, diagnostics);
+                        validate_optional_match_schema(nested, snapshot, diagnostics);
                     }
                 }
             }
@@ -149,35 +176,35 @@ fn validate_optional_match_schema(
 /// Validates labels in a path pattern against the schema.
 fn validate_path_pattern_schema(
     path: &PathPattern,
-    schema: &dyn crate::semantic::schema::Schema,
+    snapshot: &dyn crate::semantic::schema_catalog::SchemaSnapshot,
     diagnostics: &mut Vec<Diag>,
 ) {
     // PathPattern has an expression field, which is a PathPatternExpression
     // We need to walk the expression to find elements
-    validate_path_expression_schema(&path.expression, schema, diagnostics);
+    validate_path_expression_schema(&path.expression, snapshot, diagnostics);
 }
 
 /// Validates labels in a path expression against the schema.
 fn validate_path_expression_schema(
     expr: &PathPatternExpression,
-    schema: &dyn crate::semantic::schema::Schema,
+    snapshot: &dyn crate::semantic::schema_catalog::SchemaSnapshot,
     diagnostics: &mut Vec<Diag>,
 ) {
     // PathPatternExpression is an enum with Term, Union, and Alternation variants
     match expr {
         PathPatternExpression::Term(term) => {
             // Validate a single term
-            validate_path_term_schema(term, schema, diagnostics);
+            validate_path_term_schema(term, snapshot, diagnostics);
         }
         PathPatternExpression::Union { left, right, .. } => {
             // Validate both sides of union
-            validate_path_expression_schema(left, schema, diagnostics);
-            validate_path_expression_schema(right, schema, diagnostics);
+            validate_path_expression_schema(left, snapshot, diagnostics);
+            validate_path_expression_schema(right, snapshot, diagnostics);
         }
         PathPatternExpression::Alternation { alternatives, .. } => {
             // Validate all alternatives
             for alt in alternatives {
-                validate_path_expression_schema(alt, schema, diagnostics);
+                validate_path_expression_schema(alt, snapshot, diagnostics);
             }
         }
     }
@@ -186,7 +213,7 @@ fn validate_path_expression_schema(
 /// Validates labels in a path term against the schema.
 fn validate_path_term_schema(
     term: &PathTerm,
-    schema: &dyn crate::semantic::schema::Schema,
+    snapshot: &dyn crate::semantic::schema_catalog::SchemaSnapshot,
     diagnostics: &mut Vec<Diag>,
 ) {
     use crate::semantic::diag::SemanticDiagBuilder;
@@ -201,7 +228,7 @@ fn validate_path_term_schema(
                     // Check node labels using label_expression field
                     if let Some(label_expr) = &node.label_expression {
                         for label_name in extract_label_names(label_expr) {
-                            if schema.validate_label(&label_name, true).is_err() {
+                            if snapshot.node_type(&label_name).is_none() {
                                 diagnostics.push(
                                     SemanticDiagBuilder::unknown_reference(
                                         "label",
@@ -220,7 +247,7 @@ fn validate_path_term_schema(
                         && let Some(label_expr) = &full.filler.label_expression
                     {
                         for label_name in extract_label_names(label_expr) {
-                            if schema.validate_label(&label_name, false).is_err() {
+                            if snapshot.edge_type(&label_name).is_none() {
                                 diagnostics.push(
                                     SemanticDiagBuilder::unknown_reference(
                                         "edge label",

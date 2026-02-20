@@ -1032,6 +1032,65 @@ impl CallableCatalog for BuiltinCallableCatalog {
 }
 
 // ============================================================================
+// MetadataProvider implementation for BuiltinCallableCatalog
+// ============================================================================
+
+impl crate::semantic::metadata_provider::MetadataProvider for BuiltinCallableCatalog {
+    fn get_schema_snapshot(
+        &self,
+        _graph: &crate::semantic::schema_catalog::GraphRef,
+        _schema: Option<&crate::semantic::schema_catalog::SchemaRef>,
+    ) -> Result<Arc<dyn crate::semantic::schema_catalog::SchemaSnapshot>, crate::semantic::schema_catalog::CatalogError> {
+        // Built-in catalog doesn't provide schema information
+        Err(crate::semantic::schema_catalog::CatalogError::GraphNotFound {
+            graph: "no_graph".into(),
+        })
+    }
+
+    fn resolve_active_graph(
+        &self,
+        _session: &crate::semantic::schema_catalog::SessionContext,
+    ) -> Result<crate::semantic::schema_catalog::GraphRef, crate::semantic::schema_catalog::CatalogError> {
+        // Built-in catalog doesn't manage session state
+        Err(crate::semantic::schema_catalog::CatalogError::GraphNotFound {
+            graph: "no_graph".into(),
+        })
+    }
+
+    fn resolve_active_schema(
+        &self,
+        _graph: &crate::semantic::schema_catalog::GraphRef,
+    ) -> Result<crate::semantic::schema_catalog::SchemaRef, crate::semantic::schema_catalog::CatalogError> {
+        // Built-in catalog doesn't manage schemas
+        Err(crate::semantic::schema_catalog::CatalogError::SchemaNotFound {
+            schema: "no_schema".into(),
+        })
+    }
+
+    fn validate_graph_exists(&self, _name: &str) -> Result<(), crate::semantic::schema_catalog::CatalogError> {
+        // Built-in catalog doesn't validate graphs
+        Ok(())
+    }
+
+    fn lookup_callable(&self, name: &str) -> Option<CallableSignature> {
+        let name_lower = SmolStr::new(name.to_lowercase());
+        // Try as function first
+        if let Ok(sigs) = self.resolve(&name_lower, CallableKind::Function, &CallableLookupContext::new()) {
+            if let Some(sig) = sigs.first() {
+                return Some(sig.clone());
+            }
+        }
+        // Try as aggregate
+        if let Ok(sigs) = self.resolve(&name_lower, CallableKind::AggregateFunction, &CallableLookupContext::new()) {
+            if let Some(sig) = sigs.first() {
+                return Some(sig.clone());
+            }
+        }
+        None
+    }
+}
+
+// ============================================================================
 // CompositeCallableCatalog
 // ============================================================================
 
@@ -1186,6 +1245,65 @@ impl CallableCatalog for InMemoryCallableCatalog {
         names.sort();
         names.dedup();
         names
+    }
+}
+
+// ============================================================================
+// MetadataProvider implementation for InMemoryCallableCatalog
+// ============================================================================
+
+impl crate::semantic::metadata_provider::MetadataProvider for InMemoryCallableCatalog {
+    fn get_schema_snapshot(
+        &self,
+        _graph: &crate::semantic::schema_catalog::GraphRef,
+        _schema: Option<&crate::semantic::schema_catalog::SchemaRef>,
+    ) -> Result<Arc<dyn crate::semantic::schema_catalog::SchemaSnapshot>, crate::semantic::schema_catalog::CatalogError> {
+        // In-memory catalog doesn't provide schema information
+        Err(crate::semantic::schema_catalog::CatalogError::GraphNotFound {
+            graph: "no_graph".into(),
+        })
+    }
+
+    fn resolve_active_graph(
+        &self,
+        _session: &crate::semantic::schema_catalog::SessionContext,
+    ) -> Result<crate::semantic::schema_catalog::GraphRef, crate::semantic::schema_catalog::CatalogError> {
+        // In-memory catalog doesn't manage session state
+        Err(crate::semantic::schema_catalog::CatalogError::GraphNotFound {
+            graph: "no_graph".into(),
+        })
+    }
+
+    fn resolve_active_schema(
+        &self,
+        _graph: &crate::semantic::schema_catalog::GraphRef,
+    ) -> Result<crate::semantic::schema_catalog::SchemaRef, crate::semantic::schema_catalog::CatalogError> {
+        // In-memory catalog doesn't manage schemas
+        Err(crate::semantic::schema_catalog::CatalogError::SchemaNotFound {
+            schema: "no_schema".into(),
+        })
+    }
+
+    fn validate_graph_exists(&self, _name: &str) -> Result<(), crate::semantic::schema_catalog::CatalogError> {
+        // In-memory catalog doesn't validate graphs
+        Ok(())
+    }
+
+    fn lookup_callable(&self, name: &str) -> Option<CallableSignature> {
+        let name_lower = SmolStr::new(name.to_lowercase());
+        // Try as function first
+        if let Ok(sigs) = self.resolve(&name_lower, CallableKind::Function, &CallableLookupContext::new()) {
+            if let Some(sig) = sigs.first() {
+                return Some(sig.clone());
+            }
+        }
+        // Try as aggregate
+        if let Ok(sigs) = self.resolve(&name_lower, CallableKind::AggregateFunction, &CallableLookupContext::new()) {
+            if let Some(sig) = sigs.first() {
+                return Some(sig.clone());
+            }
+        }
+        None
     }
 }
 

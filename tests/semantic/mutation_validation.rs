@@ -20,7 +20,7 @@ fn validate_mutation_with_schema(source: &str) -> ValidationOutcome {
     assert!(parse_result.ast.is_some(), "Failed to parse: {}", source);
 
     let config = ValidationConfig {
-        schema_validation: true,
+        metadata_validation: true,
         ..Default::default()
     };
     let validator = SemanticValidator::with_config(config);

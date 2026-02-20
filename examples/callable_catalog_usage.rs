@@ -321,11 +321,9 @@ fn main() {
     println!("------------------------------------------");
 
     let catalog_instance = BuiltinCallableCatalog::new();
-    let validator_instance = DefaultCallableValidator::new();
 
     let _semantic_validator = SemanticValidator::new()
-        .with_callable_catalog(&catalog_instance)
-        .with_callable_validator(&validator_instance);
+        .with_metadata_provider(&catalog_instance);
 
     println!("\n✓ Semantic validator configured with callable catalog");
 

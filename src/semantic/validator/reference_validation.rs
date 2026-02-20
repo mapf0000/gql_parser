@@ -5,20 +5,20 @@
 use crate::ast::{Program, Query, Statement};
 use crate::diag::Diag;
 
-/// Pass 8: Reference Validation - Validates that references to catalog entities exist.
+/// Pass 8: Reference Validation - Validates that references to metadata entities exist.
 pub(super) fn run_reference_validation(
     validator: &super::SemanticValidator,
     program: &Program,
     diagnostics: &mut Vec<Diag>,
 ) {
     // This pass checks:
-    // - Graph names referenced in USE GRAPH clauses exist in catalog
-    // - Other catalog references are valid
-    // Note: This pass is skipped if no catalog is available
+    // - Graph names referenced in USE GRAPH clauses exist
+    // - Other metadata references are valid
+    // Note: This pass is skipped if no metadata provider is available
 
-    // Only perform validation if catalog is provided
-    let Some(catalog) = validator.catalog else {
-        // Catalog not available, skip validation
+    // Only perform validation if metadata provider is configured
+    let Some(metadata) = validator.metadata_provider else {
+        // Metadata provider not available, skip validation
         return;
     };
 
@@ -32,21 +32,21 @@ pub(super) fn run_reference_validation(
             }
             Statement::Query(query_stmt) => {
                 // Validate references in queries (e.g., USE GRAPH)
-                validate_query_references(&query_stmt.query, catalog, diagnostics);
+                validate_query_references(&query_stmt.query, metadata, diagnostics);
             }
             Statement::Mutation(mutation_stmt) => {
                 // Validate references in mutations (e.g., USE GRAPH in focused mutations)
-                validate_mutation_references(&mutation_stmt.statement, catalog, diagnostics);
+                validate_mutation_references(&mutation_stmt.statement, metadata, diagnostics);
             }
             _ => {}
         }
     }
 }
 
-/// Validates catalog references in a query.
+/// Validates metadata references in a query.
 fn validate_query_references(
     query: &Query,
-    catalog: &dyn crate::semantic::catalog::Catalog,
+    metadata: &dyn crate::semantic::metadata_provider::MetadataProvider,
     diagnostics: &mut Vec<Diag>,
 ) {
     match query {
@@ -56,11 +56,11 @@ fn validate_query_references(
                 // Extract graph name from USE GRAPH expression (if it's a simple reference)
                 if let crate::ast::expression::Expression::VariableReference(name, span) =
                     &focused.use_graph.graph
-                    && catalog.validate_graph(name).is_err()
+                    && metadata.validate_graph_exists(name).is_err()
                 {
                     use crate::semantic::diag::SemanticDiagBuilder;
                     let diag = SemanticDiagBuilder::unknown_reference("graph", name, span.clone())
-                        .with_note("Graph not found in catalog")
+                        .with_note("Graph not found in metadata")
                         .build();
                     diagnostics.push(diag);
                 }
@@ -69,19 +69,19 @@ fn validate_query_references(
             }
         }
         Query::Composite(composite) => {
-            validate_query_references(&composite.left, catalog, diagnostics);
-            validate_query_references(&composite.right, catalog, diagnostics);
+            validate_query_references(&composite.left, metadata, diagnostics);
+            validate_query_references(&composite.right, metadata, diagnostics);
         }
         Query::Parenthesized(query, _) => {
-            validate_query_references(query, catalog, diagnostics);
+            validate_query_references(query, metadata, diagnostics);
         }
     }
 }
 
-/// Validates catalog references in a mutation.
+/// Validates metadata references in a mutation.
 fn validate_mutation_references(
     mutation: &crate::ast::mutation::LinearDataModifyingStatement,
-    catalog: &dyn crate::semantic::catalog::Catalog,
+    metadata: &dyn crate::semantic::metadata_provider::MetadataProvider,
     diagnostics: &mut Vec<Diag>,
 ) {
     use crate::ast::mutation::LinearDataModifyingStatement;
@@ -91,11 +91,11 @@ fn validate_mutation_references(
         // Extract graph name from USE GRAPH expression (if it's a simple reference)
         if let crate::ast::expression::Expression::VariableReference(name, span) =
             &focused.use_graph_clause.graph
-            && catalog.validate_graph(name).is_err()
+            && metadata.validate_graph_exists(name).is_err()
         {
             use crate::semantic::diag::SemanticDiagBuilder;
             let diag = SemanticDiagBuilder::unknown_reference("graph", name, span.clone())
-                .with_note("Graph not found in catalog")
+                .with_note("Graph not found in metadata")
                 .build();
             diagnostics.push(diag);
         }

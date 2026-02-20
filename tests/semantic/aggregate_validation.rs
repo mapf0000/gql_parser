@@ -17,8 +17,8 @@ fn test_aggregate_function_validation_count_star() {
     let catalog = BuiltinCallableCatalog::new();
     let validator_impl = DefaultCallableValidator::new();
     let validator = SemanticValidator::new()
-        .with_callable_catalog(&catalog)
-        .with_callable_validator(&validator_impl);
+        .with_metadata_provider(&catalog)
+        ;
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
@@ -41,8 +41,8 @@ fn test_aggregate_function_validation_sum() {
     let catalog = BuiltinCallableCatalog::new();
     let validator_impl = DefaultCallableValidator::new();
     let validator = SemanticValidator::new()
-        .with_callable_catalog(&catalog)
-        .with_callable_validator(&validator_impl);
+        .with_metadata_provider(&catalog)
+        ;
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
@@ -64,8 +64,8 @@ fn test_aggregate_function_validation_avg() {
     let catalog = BuiltinCallableCatalog::new();
     let validator_impl = DefaultCallableValidator::new();
     let validator = SemanticValidator::new()
-        .with_callable_catalog(&catalog)
-        .with_callable_validator(&validator_impl);
+        .with_metadata_provider(&catalog)
+        ;
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
@@ -87,8 +87,8 @@ fn test_aggregate_function_validation_max() {
     let catalog = BuiltinCallableCatalog::new();
     let validator_impl = DefaultCallableValidator::new();
     let validator = SemanticValidator::new()
-        .with_callable_catalog(&catalog)
-        .with_callable_validator(&validator_impl);
+        .with_metadata_provider(&catalog)
+        ;
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
@@ -110,8 +110,8 @@ fn test_aggregate_function_validation_min() {
     let catalog = BuiltinCallableCatalog::new();
     let validator_impl = DefaultCallableValidator::new();
     let validator = SemanticValidator::new()
-        .with_callable_catalog(&catalog)
-        .with_callable_validator(&validator_impl);
+        .with_metadata_provider(&catalog)
+        ;
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
@@ -133,8 +133,8 @@ fn test_aggregate_function_validation_collect() {
     let catalog = BuiltinCallableCatalog::new();
     let validator_impl = DefaultCallableValidator::new();
     let validator = SemanticValidator::new()
-        .with_callable_catalog(&catalog)
-        .with_callable_validator(&validator_impl);
+        .with_metadata_provider(&catalog)
+        ;
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);

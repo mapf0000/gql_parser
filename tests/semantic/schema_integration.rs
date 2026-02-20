@@ -185,12 +185,9 @@ fn test_validator_with_schema_catalog() {
     let resolver = MockGraphContextResolver::new("test_graph", "default_schema");
     let provider = MockVariableTypeContextProvider::new();
 
-    // Create validator
+    // Create validator with metadata provider
     let validator = SemanticValidator::new()
-        .with_schema_catalog(&catalog)
-        .with_graph_context_resolver(&resolver)
-        .with_variable_context_provider(&provider)
-        .with_advanced_schema_validation(true);
+        .with_metadata_provider(&catalog);
 
     // Parse a simple query
     let query = "MATCH (p:Person) RETURN p.name";

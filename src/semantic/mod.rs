@@ -6,8 +6,10 @@
 //! - Pattern connectivity validation
 //! - Context validation (clause usage in appropriate contexts)
 //! - Aggregation and grouping validation
-//! - Reference validation (optional, catalog-dependent)
-//! - Label and property validation (optional, schema-dependent)
+//! - Metadata-dependent validation (optional):
+//!   - Reference validation (USE GRAPH clauses)
+//!   - Label and property validation (schema)
+//!   - Callable validation (functions/procedures)
 //!
 //! The semantic validator takes an AST and produces either an IR (Intermediate
 //! Representation) enriched with semantic information, or a list of semantic
@@ -24,8 +26,7 @@
 //! 5. **Context Validation** - Validate clause usage in appropriate contexts
 //! 6. **Type Checking** - Validate type compatibility
 //! 7. **Expression Validation** - Validate null handling, CASE, subqueries
-//! 8. **Reference Validation** (optional) - Validate references with catalog
-//! 9. **Label/Property Validation** (optional) - Validate with schema
+//! 8. **Metadata Validation** (optional) - Validate with metadata provider
 //!
 //! # Example
 //!
@@ -53,11 +54,11 @@
 //! ```
 
 pub mod callable;
-pub mod catalog;
 pub mod diag;
-pub mod schema;
+pub mod metadata_provider;
 pub mod schema_catalog;
 pub mod type_metadata;
 pub mod validator;
 
+pub use metadata_provider::{MetadataProvider, InMemoryMetadataProvider};
 pub use validator::{SemanticValidator, ValidationConfig};

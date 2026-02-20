@@ -1,12 +1,12 @@
 //! Type inference pass - infers types for expressions and builds the type table.
 
-use crate::ast::expression::{BinaryOperator, Literal, UnaryOperator};
+use crate::ast::expression::{BinaryOperator, FunctionName, Literal, UnaryOperator};
 use crate::ast::program::{Program, Statement};
 use crate::ast::query::{LinearQuery, PrimitiveQueryStatement, Query};
 use crate::diag::Diag;
 use crate::ir::type_table::Type;
 use crate::ir::{SymbolTable, TypeTable};
-use crate::semantic::type_metadata::{CallableInvocation, TypeRef};
+use crate::semantic::schema_catalog::TypeRef;
 
 /// Pass 2: Type Inference - Infers types for all expressions in the program.
 ///
@@ -364,15 +364,15 @@ fn infer_expression_type(
             return infer_expression_type(validator, inner, type_table);
         }
 
-        // Property reference - query from type metadata catalog
+        // Property reference - query from metadata provider
         crate::ast::expression::Expression::PropertyReference(object, prop_name, _) => {
             let object_type = infer_expression_type(validator, object, type_table);
 
-            // Try to query property type from catalog
-            if let Some(catalog) = validator.type_metadata {
+            // Try to query property type from metadata provider
+            if let Some(metadata) = validator.metadata_provider {
                 if let Some(owner_ref) = type_to_type_ref(&object_type) {
-                    if let Some(prop_type) = catalog.property_type(&owner_ref, prop_name.as_str()) {
-                        return prop_type;
+                    if let Some(prop_type) = metadata.get_property_metadata(&owner_ref, prop_name.as_str()) {
+                        return map_value_type_to_type(&prop_type);
                     }
                 }
             }
@@ -393,26 +393,18 @@ fn infer_expression_type(
             fallback_type(validator)
         }
 
-        // Function calls - query from type metadata catalog
+        // Function calls - query from metadata provider
         crate::ast::expression::Expression::FunctionCall(func_call) => {
             // Infer argument types
-            let arg_types: Vec<Option<Type>> = func_call
-                .arguments
-                .iter()
-                .map(|arg| Some(infer_expression_type(validator, arg, type_table)))
-                .collect();
+            for arg in &func_call.arguments {
+                infer_expression_type(validator, arg, type_table);
+            }
 
-            // Try to query return type from catalog
-            if let Some(catalog) = validator.type_metadata {
-                let name_str = func_call.name.to_string();
-                let invocation = CallableInvocation {
-                    name: &name_str,
-                    arg_types,
-                    is_aggregate: false,
-                };
-
-                if let Some(return_type) = catalog.callable_return_type(&invocation) {
-                    return return_type;
+            // Try to query return type from metadata provider
+            if let Some(metadata) = validator.metadata_provider {
+                let name_str = function_name_to_string(&func_call.name);
+                if let Some(return_type) = metadata.get_callable_return_type_metadata(name_str) {
+                    return map_value_type_to_type(&return_type);
                 }
             }
 
@@ -567,15 +559,11 @@ fn infer_expression_type(
     inferred_type
 }
 
-/// Returns the appropriate fallback type based on the inference policy.
-fn fallback_type(validator: &super::SemanticValidator) -> Type {
-    if validator.inference_policy.allow_any_fallback {
-        Type::Any
-    } else {
-        // In strict mode, we still need to return something
-        // The diagnostic will be reported elsewhere
-        Type::Any
-    }
+/// Returns the appropriate fallback type.
+fn fallback_type(_validator: &super::SemanticValidator) -> Type {
+    // For now, always return Type::Any as the fallback
+    // In the future, this could be controlled by validation config
+    Type::Any
 }
 
 /// Converts a Type to a TypeRef for catalog lookups.
@@ -677,5 +665,84 @@ fn map_value_type_to_type(value_type: &crate::ast::types::ValueType) -> Type {
             Type::List(Box::new(map_value_type_to_type(&list_type.element_type)))
         }
         ValueType::Record(_) => Type::Any,
+    }
+}
+
+/// Helper function to convert FunctionName enum to string.
+fn function_name_to_string(name: &FunctionName) -> &str {
+    match name {
+        // Numeric functions
+        FunctionName::Abs => "abs",
+        FunctionName::Mod => "mod",
+        FunctionName::Floor => "floor",
+        FunctionName::Ceil => "ceil",
+        FunctionName::Sqrt => "sqrt",
+        FunctionName::Power => "power",
+        FunctionName::Exp => "exp",
+        FunctionName::Ln => "ln",
+        FunctionName::Log => "log",
+        FunctionName::Log10 => "log10",
+
+        // Trigonometric functions
+        FunctionName::Sin => "sin",
+        FunctionName::Cos => "cos",
+        FunctionName::Tan => "tan",
+        FunctionName::Cot => "cot",
+        FunctionName::Sinh => "sinh",
+        FunctionName::Cosh => "cosh",
+        FunctionName::Tanh => "tanh",
+        FunctionName::Asin => "asin",
+        FunctionName::Acos => "acos",
+        FunctionName::Atan => "atan",
+        FunctionName::Atan2 => "atan2",
+        FunctionName::Degrees => "degrees",
+        FunctionName::Radians => "radians",
+
+        // String functions
+        FunctionName::Upper => "upper",
+        FunctionName::Lower => "lower",
+        FunctionName::Trim(_) => "trim",
+        FunctionName::BTrim => "btrim",
+        FunctionName::LTrim => "ltrim",
+        FunctionName::RTrim => "rtrim",
+        FunctionName::Left => "left",
+        FunctionName::Right => "right",
+        FunctionName::Normalize => "normalize",
+        FunctionName::CharLength => "char_length",
+        FunctionName::ByteLength => "byte_length",
+        FunctionName::Substring => "substring",
+
+        // Temporal functions
+        FunctionName::CurrentDate => "current_date",
+        FunctionName::CurrentTime => "current_time",
+        FunctionName::CurrentTimestamp => "current_timestamp",
+        FunctionName::Date => "date",
+        FunctionName::Time => "time",
+        FunctionName::Datetime => "datetime",
+        FunctionName::ZonedTime => "zoned_time",
+        FunctionName::ZonedDatetime => "zoned_datetime",
+        FunctionName::LocalTime => "local_time",
+        FunctionName::LocalDatetime => "local_datetime",
+        FunctionName::Duration => "duration",
+        FunctionName::DurationBetween => "duration_between",
+
+        // List functions
+        FunctionName::TrimList => "trim_list",
+        FunctionName::Elements => "elements",
+
+        // Cardinality functions
+        FunctionName::Cardinality => "cardinality",
+        FunctionName::Size => "size",
+        FunctionName::PathLength => "path_length",
+
+        // Graph functions
+        FunctionName::ElementId => "element_id",
+
+        // Conditional functions
+        FunctionName::Coalesce => "coalesce",
+        FunctionName::NullIf => "nullif",
+
+        // Custom function
+        FunctionName::Custom(name) => name,
     }
 }

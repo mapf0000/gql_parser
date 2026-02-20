@@ -92,13 +92,9 @@ fn demo_custom_config() {
 
     let config = ValidationConfig {
         strict_mode: true,
-        schema_validation: false,  // No schema available
-        catalog_validation: false, // No catalog available
         warn_on_shadowing: true,
         warn_on_disconnected_patterns: true,
-        advanced_schema_validation: false,
-        enhanced_type_inference: false,
-        callable_validation: false,
+        metadata_validation: false,  // No metadata provider available
     };
 
     let validator = SemanticValidator::with_config(config);
@@ -135,8 +131,7 @@ fn demo_builder_pattern() {
     // Build validator with chained methods
     let validator = SemanticValidator::new()
         .with_strict_mode(false)
-        .with_schema_validation(false)
-        .with_catalog_validation(false);
+        .with_metadata_validation(false);
 
     let source = "MATCH (n:Person)-[:KNOWS]->(m:Person) RETURN n, m";
 

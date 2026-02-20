@@ -411,8 +411,8 @@ fn test_semantic_validator_with_callable_catalog() {
     let validator_impl = DefaultCallableValidator::new();
 
     let _validator = SemanticValidator::new()
-        .with_callable_catalog(&catalog)
-        .with_callable_validator(&validator_impl);
+        .with_metadata_provider(&catalog)
+        ;
 
     // Just verify it compiles and can be constructed
 }
@@ -420,7 +420,7 @@ fn test_semantic_validator_with_callable_catalog() {
 #[test]
 fn test_callable_validation_config_defaults() {
     let config = ValidationConfig::default();
-    assert!(!config.callable_validation);
+    assert!(!config.metadata_validation);
 }
 
 #[test]

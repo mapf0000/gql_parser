@@ -265,15 +265,11 @@ fn main() {
     println!("\n\nPart 8: Semantic Validator Configuration");
     println!("----------------------------------------");
 
-    let _validator = SemanticValidator::new()
-        .with_type_metadata(&catalog)
-        .with_context_provider(&provider)
-        .with_inference_policy(InferencePolicy::strict());
-
-    println!("\n✓ Semantic validator configured with type inference enhancements:");
-    println!("  - Type metadata catalog: enabled");
-    println!("  - Context provider: enabled");
-    println!("  - Inference policy: strict (no Any fallback)");
+    // For type inference, you would implement MetadataProvider for your catalog
+    // and provide property type information via get_property_metadata()
+    println!("\n✓ Type inference is now integrated via MetadataProvider trait");
+    println!("  - Implement MetadataProvider::get_property_metadata() for property types");
+    println!("  - Implement MetadataProvider::get_callable_return_type_metadata() for callable types");
 
     // =========================================================================
     // Part 9: Integration with Semantic Validator
@@ -281,12 +277,15 @@ fn main() {
     println!("\n\nPart 9: Integration with SemanticValidator");
     println!("------------------------------------------");
 
-    let _validator = SemanticValidator::new()
-        .with_type_metadata(&catalog)
-        .with_context_provider(&provider)
-        .with_inference_policy(InferencePolicy::default());
+    // Use InMemoryMetadataProvider or custom MetadataProvider implementation
+    use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
+    let metadata = InMemoryMetadataProvider::example();
 
-    println!("\n✓ Semantic validator configured with type inference enhancements");
+    let _validator = SemanticValidator::new()
+        .with_metadata_provider(&metadata);
+
+    println!("\n✓ Semantic validator configured with metadata provider");
+    println!("  See MetadataProvider trait for property/callable type information");
     println!("  The validator can now:");
     println!("    - Use property types from the catalog for better inference");
     println!("    - Resolve callable return types");

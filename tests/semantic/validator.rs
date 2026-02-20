@@ -30,13 +30,9 @@ fn test_validator_basic() {
 fn test_validator_with_config() {
     let config = ValidationConfig {
         strict_mode: true,
-        schema_validation: true,
-        catalog_validation: true,
+        metadata_validation: true,
         warn_on_shadowing: true,
         warn_on_disconnected_patterns: true,
-        advanced_schema_validation: false,
-        enhanced_type_inference: false,
-        callable_validation: false,
     };
 
     let validator = SemanticValidator::with_config(config);
@@ -1297,7 +1293,7 @@ fn test_edge_case_mixed_aggregates_and_literals() {
 
 #[test]
 fn test_schema_validation_valid_label() {
-    use gql_parser::semantic::schema::MockSchema;
+    use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
 
     // Valid node label in schema
     let source = "MATCH (n:Person) RETURN n";
@@ -1309,8 +1305,8 @@ fn test_schema_validation_valid_label() {
     );
 
     if let Some(program) = parse_result.ast {
-        let schema = MockSchema::example();
-        let validator = SemanticValidator::new().with_schema(&schema);
+        let metadata = InMemoryMetadataProvider::example();
+        let validator = SemanticValidator::new().with_metadata_provider(&metadata);
         let result = validator.validate(&program);
 
         // Should pass - Person is in the schema
@@ -1323,7 +1319,7 @@ fn test_schema_validation_valid_label() {
 
 #[test]
 fn test_schema_validation_invalid_label() {
-    use gql_parser::semantic::schema::MockSchema;
+    use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
 
     // Invalid node label not in schema
     let source = "MATCH (n:Alien) RETURN n";
@@ -1335,8 +1331,8 @@ fn test_schema_validation_invalid_label() {
     );
 
     if let Some(program) = parse_result.ast {
-        let schema = MockSchema::example();
-        let validator = SemanticValidator::new().with_schema(&schema);
+        let metadata = InMemoryMetadataProvider::example();
+        let validator = SemanticValidator::new().with_metadata_provider(&metadata);
         let result = validator.validate(&program);
 
         // Should fail - Alien is not in the schema
@@ -1349,7 +1345,7 @@ fn test_schema_validation_invalid_label() {
 
 #[test]
 fn test_schema_validation_valid_edge_label() {
-    use gql_parser::semantic::schema::MockSchema;
+    use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
 
     // Valid edge label in schema
     let source = "MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a, b";
@@ -1361,8 +1357,8 @@ fn test_schema_validation_valid_edge_label() {
     );
 
     if let Some(program) = parse_result.ast {
-        let schema = MockSchema::example();
-        let validator = SemanticValidator::new().with_schema(&schema);
+        let metadata = InMemoryMetadataProvider::example();
+        let validator = SemanticValidator::new().with_metadata_provider(&metadata);
         let result = validator.validate(&program);
 
         // Should pass - KNOWS is in the schema
@@ -1375,7 +1371,7 @@ fn test_schema_validation_valid_edge_label() {
 
 #[test]
 fn test_schema_validation_invalid_edge_label() {
-    use gql_parser::semantic::schema::MockSchema;
+    use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
 
     // Invalid edge label not in schema
     let source = "MATCH (a:Person)-[:HATES]->(b:Person) RETURN a, b";
@@ -1387,8 +1383,8 @@ fn test_schema_validation_invalid_edge_label() {
     );
 
     if let Some(program) = parse_result.ast {
-        let schema = MockSchema::example();
-        let validator = SemanticValidator::new().with_schema(&schema);
+        let metadata = InMemoryMetadataProvider::example();
+        let validator = SemanticValidator::new().with_metadata_provider(&metadata);
         let result = validator.validate(&program);
 
         // Should fail - HATES is not in the schema
@@ -1421,7 +1417,7 @@ fn test_schema_validation_without_schema() {
 
 #[test]
 fn test_schema_validation_multiple_labels() {
-    use gql_parser::semantic::schema::MockSchema;
+    use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
 
     // Multiple labels - mix of valid and invalid
     let source = "MATCH (a:Person), (b:Alien) RETURN a, b";
@@ -1433,8 +1429,8 @@ fn test_schema_validation_multiple_labels() {
     );
 
     if let Some(program) = parse_result.ast {
-        let schema = MockSchema::example();
-        let validator = SemanticValidator::new().with_schema(&schema);
+        let metadata = InMemoryMetadataProvider::example();
+        let validator = SemanticValidator::new().with_metadata_provider(&metadata);
         let result = validator.validate(&program);
 
         // Should fail - Alien is not in schema (also fails on disconnected pattern)
@@ -1472,15 +1468,17 @@ fn test_catalog_validation_without_catalog() {
 
 #[test]
 fn test_catalog_mock_creation() {
-    use gql_parser::semantic::catalog::{Catalog, MockCatalog};
+    use gql_parser::semantic::metadata_provider::{InMemoryMetadataProvider, MetadataProvider};
 
-    // Test mock catalog creation
-    let catalog = MockCatalog::example();
+    // Test metadata provider creation
+    let metadata = InMemoryMetadataProvider::example();
 
-    // Verify example catalog has expected entries
-    assert!(catalog.get_graph("social").is_some());
-    assert!(catalog.get_schema("social_schema").is_some());
-    assert!(catalog.get_procedure("shortest_path").is_some());
+    // Verify example provider has expected entries (schema snapshot for default graph)
+    use gql_parser::semantic::schema_catalog::GraphRef;
+    let graph = GraphRef {
+        name: "default".into(),
+    };
+    assert!(metadata.get_schema_snapshot(&graph, None).is_ok());
 }
 
 // ==================== Warning Visibility Tests ====================
@@ -1533,13 +1531,9 @@ fn test_warning_visibility_shadowing() {
     // Variable shadowing should succeed with warning when enabled
     let config = ValidationConfig {
         strict_mode: false,
-        schema_validation: false,
-        catalog_validation: false,
+        metadata_validation: false,
         warn_on_shadowing: true,
         warn_on_disconnected_patterns: false,
-        advanced_schema_validation: false,
-        enhanced_type_inference: false,
-        callable_validation: false,
     };
 
     let source = "MATCH (n:Person) LET n = n.name RETURN n";
@@ -1633,13 +1627,9 @@ fn test_no_warnings_when_disabled() {
     // Warnings disabled - should not get warnings
     let config = ValidationConfig {
         strict_mode: false,
-        schema_validation: false,
-        catalog_validation: false,
+        metadata_validation: false,
         warn_on_shadowing: false,
         warn_on_disconnected_patterns: false,
-        advanced_schema_validation: false,
-        enhanced_type_inference: false,
-        callable_validation: false,
     };
 
     let source = "MATCH (a:Person), (b:Company) RETURN a, b";

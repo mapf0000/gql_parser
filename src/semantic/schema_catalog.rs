@@ -594,6 +594,53 @@ impl SchemaCatalog for InMemorySchemaCatalog {
     }
 }
 
+// Backward compatibility: InMemorySchemaCatalog implements MetadataProvider
+impl crate::semantic::metadata_provider::MetadataProvider for InMemorySchemaCatalog {
+    fn get_schema_snapshot(
+        &self,
+        graph: &GraphRef,
+        schema: Option<&SchemaRef>,
+    ) -> Result<Arc<dyn SchemaSnapshot>, CatalogError> {
+        let request = SchemaSnapshotRequest {
+            graph: graph.clone(),
+            schema: schema.cloned(),
+        };
+        self.snapshot(request)
+    }
+
+    fn resolve_active_graph(&self, session: &SessionContext) -> Result<GraphRef, CatalogError> {
+        if let Some(name) = &session.active_graph {
+            Ok(GraphRef { name: name.clone() })
+        } else {
+            // Return first available graph or default
+            self.snapshots.keys().next()
+                .map(|name| GraphRef { name: name.clone() })
+                .ok_or(CatalogError::GraphNotFound { graph: "default".into() })
+        }
+    }
+
+    fn resolve_active_schema(&self, _graph: &GraphRef) -> Result<SchemaRef, CatalogError> {
+        Ok(SchemaRef {
+            name: "public".into(),
+        })
+    }
+
+    fn validate_graph_exists(&self, name: &str) -> Result<(), CatalogError> {
+        if self.snapshots.contains_key(name) {
+            Ok(())
+        } else {
+            Err(CatalogError::GraphNotFound {
+                graph: name.into(),
+            })
+        }
+    }
+
+    fn lookup_callable(&self, _name: &str) -> Option<crate::semantic::callable::CallableSignature> {
+        None
+    }
+}
+
+
 /// In-memory schema snapshot for testing.
 ///
 /// This implementation stores schema metadata in memory.

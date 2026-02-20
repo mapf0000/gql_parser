@@ -29,7 +29,7 @@ fn test_property_type_inference_with_catalog() {
     );
 
     // Validate with the catalog
-    let validator = SemanticValidator::new().with_type_metadata(&catalog);
+    let validator = SemanticValidator::new().with_metadata_provider(&catalog);
 
     let outcome = validator.validate(&ast);
 
@@ -81,7 +81,7 @@ fn test_function_return_type_inference_with_catalog() {
     let mut catalog = MockTypeMetadataCatalog::new();
     catalog.register_callable_return("my_custom_function", Type::String);
 
-    let validator = SemanticValidator::new().with_type_metadata(&catalog);
+    let validator = SemanticValidator::new().with_metadata_provider(&catalog);
 
     let outcome = validator.validate(&ast);
 
@@ -197,7 +197,7 @@ fn test_comprehensive_type_any_reduction() {
     assert!(parse_result.ast.is_some());
     let ast = parse_result.ast.unwrap();
 
-    let validator = SemanticValidator::new().with_type_metadata(&catalog);
+    let validator = SemanticValidator::new().with_metadata_provider(&catalog);
 
     let outcome = validator.validate(&ast);
 
@@ -234,7 +234,7 @@ fn test_inference_policy_strict_mode() {
     // Don't register unknown_property
 
     let validator = SemanticValidator::new()
-        .with_type_metadata(&catalog)
+        .with_metadata_provider(&catalog)
         .with_inference_policy(InferencePolicy::strict());
 
     let outcome = validator.validate(&ast);
@@ -268,7 +268,7 @@ fn test_max_min_type_preservation() {
     assert!(parse_result.ast.is_some());
     let ast = parse_result.ast.unwrap();
 
-    let validator = SemanticValidator::new().with_type_metadata(&catalog);
+    let validator = SemanticValidator::new().with_metadata_provider(&catalog);
 
     let outcome = validator.validate(&ast);
 
@@ -291,7 +291,7 @@ fn test_sum_type_preservation() {
     assert!(parse_result.ast.is_some());
     let ast = parse_result.ast.unwrap();
 
-    let validator = SemanticValidator::new().with_type_metadata(&catalog);
+    let validator = SemanticValidator::new().with_metadata_provider(&catalog);
 
     let outcome = validator.validate(&ast);
 

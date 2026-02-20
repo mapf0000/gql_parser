@@ -320,22 +320,20 @@ fn test_mock_type_check_context_provider() {
 
 #[test]
 fn test_semantic_validator_with_type_metadata() {
-    let catalog = MockTypeMetadataCatalog::new();
-    let provider = MockTypeCheckContextProvider::new();
-    let policy = InferencePolicy::default();
+    use gql_parser::semantic::metadata_provider::InMemoryMetadataProvider;
+
+    let metadata = InMemoryMetadataProvider::example();
 
     let _validator = SemanticValidator::new()
-        .with_type_metadata(&catalog)
-        .with_context_provider(&provider)
-        .with_inference_policy(policy);
+        .with_metadata_provider(&metadata);
 
     // Just verify it compiles and can be constructed
 }
 
 #[test]
-fn test_validation_config_enhanced_type_inference() {
+fn test_validation_config_metadata_validation() {
     let config = ValidationConfig::default();
-    assert!(!config.enhanced_type_inference);
+    assert!(!config.metadata_validation);
 
     // Just verify the validator was created
     let _validator = SemanticValidator::new();

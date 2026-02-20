@@ -46,109 +46,48 @@ pub struct ValidationConfig {
     /// Enable strict mode (more stringent validation).
     pub strict_mode: bool,
 
-    /// Enable schema-dependent validation.
-    pub schema_validation: bool,
-
-    /// Enable catalog-dependent validation.
-    pub catalog_validation: bool,
-
     /// Enable variable shadowing warnings.
     pub warn_on_shadowing: bool,
 
     /// Enable disconnected pattern warnings.
     pub warn_on_disconnected_patterns: bool,
 
-    /// Enable advanced schema catalog validation (Milestone 3).
+    /// Enable metadata-dependent validation (schema, callables, types).
     ///
-    /// When enabled, the validator will accept schema catalog, graph context
-    /// resolver, and variable type context provider dependencies. However,
-    /// the actual validation logic that uses these dependencies is not yet
-    /// implemented. This flag currently only controls whether the dependencies
-    /// are stored and made available for future validation passes.
-    ///
-    /// See `SemanticValidator::with_schema_catalog()` for implementation status.
-    pub advanced_schema_validation: bool,
-
-    /// Enable callable validation (Milestone 4).
-    ///
-    /// When enabled, the validator will validate function and procedure calls
-    /// against their signatures, including arity checking and parameter validation.
-    /// Requires a callable catalog and validator to be configured.
-    pub callable_validation: bool,
-
-    /// Enable enhanced type inference (Milestone 5).
-    ///
-    /// When enabled, the validator will use type metadata catalogs for improved
-    /// type inference quality, reducing Type::Any fallbacks in complex expressions.
-    pub enhanced_type_inference: bool,
+    /// When enabled with a MetadataProvider, the validator performs:
+    /// - Schema validation (node/edge labels, properties)
+    /// - Callable validation (function/procedure signatures)
+    /// - Enhanced type inference (property types, callable return types)
+    /// - Graph reference validation (USE GRAPH clauses)
+    pub metadata_validation: bool,
 }
 
 impl Default for ValidationConfig {
     fn default() -> Self {
         Self {
             strict_mode: false,
-            schema_validation: false,
-            catalog_validation: false,
             warn_on_shadowing: true,
             warn_on_disconnected_patterns: true,
-            advanced_schema_validation: false,
-            callable_validation: false,
-            enhanced_type_inference: false,
+            metadata_validation: false,
         }
     }
 }
 
 /// Main semantic validator coordinating all validation passes.
-pub struct SemanticValidator<'s, 'c> {
+pub struct SemanticValidator<'m> {
     /// Validation configuration.
     pub(super) config: ValidationConfig,
 
-    /// Optional schema for schema-dependent validation (legacy).
-    pub(super) schema: Option<&'s dyn crate::semantic::schema::Schema>,
-
-    /// Optional catalog for catalog-dependent validation (legacy).
-    pub(super) catalog: Option<&'c dyn crate::semantic::catalog::Catalog>,
-
-    /// Optional schema catalog for advanced schema validation (Milestone 3).
-    pub(super) schema_catalog: Option<&'s dyn crate::semantic::schema_catalog::SchemaCatalog>,
-
-    /// Optional graph context resolver (Milestone 3).
-    pub(super) graph_context_resolver: Option<&'s dyn crate::semantic::schema_catalog::GraphContextResolver>,
-
-    /// Optional variable type context provider (Milestone 3).
-    pub(super) variable_context_provider: Option<&'s dyn crate::semantic::schema_catalog::VariableTypeContextProvider>,
-
-    /// Optional callable catalog for function/procedure validation (Milestone 4).
-    pub(super) callable_catalog: Option<&'c dyn crate::semantic::callable::CallableCatalog>,
-
-    /// Optional callable validator for call site validation (Milestone 4).
-    pub(super) callable_validator: Option<&'c dyn crate::semantic::callable::CallableValidator>,
-
-    /// Optional type metadata catalog for enhanced type inference (Milestone 5).
-    pub(super) type_metadata: Option<&'c dyn crate::semantic::type_metadata::TypeMetadataCatalog>,
-
-    /// Optional type check context provider (Milestone 5).
-    pub(super) context_provider: Option<&'c dyn crate::semantic::type_metadata::TypeCheckContextProvider>,
-
-    /// Inference policy for type inference (Milestone 5).
-    pub(super) inference_policy: crate::semantic::type_metadata::InferencePolicy,
+    /// Optional metadata provider for enhanced validation.
+    pub(super) metadata_provider: Option<&'m dyn crate::semantic::metadata_provider::MetadataProvider>,
 }
 
-impl<'s, 'c> SemanticValidator<'s, 'c> {
+impl<'m> SemanticValidator<'m> {
     /// Creates a new semantic validator with default configuration.
     pub fn new() -> Self {
         Self {
             config: ValidationConfig::default(),
-            schema: None,
-            catalog: None,
-            schema_catalog: None,
-            graph_context_resolver: None,
-            variable_context_provider: None,
-            callable_catalog: None,
-            callable_validator: None,
-            type_metadata: None,
-            context_provider: None,
-            inference_policy: crate::semantic::type_metadata::InferencePolicy::default(),
+            metadata_provider: None,
         }
     }
 
@@ -156,75 +95,33 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
     pub fn with_config(config: ValidationConfig) -> Self {
         Self {
             config,
-            schema: None,
-            catalog: None,
-            schema_catalog: None,
-            graph_context_resolver: None,
-            variable_context_provider: None,
-            callable_catalog: None,
-            callable_validator: None,
-            type_metadata: None,
-            context_provider: None,
-            inference_policy: crate::semantic::type_metadata::InferencePolicy::default(),
+            metadata_provider: None,
         }
     }
 
-    /// Sets the schema for schema-dependent validation (legacy).
-    pub fn with_schema(mut self, schema: &'s dyn crate::semantic::schema::Schema) -> Self {
-        self.schema = Some(schema);
-        self.config.schema_validation = true;
-        self
-    }
-
-    /// Sets the catalog for catalog-dependent validation (legacy).
-    pub fn with_catalog(mut self, catalog: &'c dyn crate::semantic::catalog::Catalog) -> Self {
-        self.catalog = Some(catalog);
-        self.config.catalog_validation = true;
-        self
-    }
-
-    /// Sets the schema catalog for advanced schema validation (Milestone 3).
+    /// Injects a metadata provider for enhanced validation.
     ///
-    /// # Implementation Status
+    /// When a metadata provider is configured, the validator performs:
+    /// - Schema validation (node/edge labels, properties)
+    /// - Callable validation (function/procedure signatures)
+    /// - Enhanced type inference (property types, callable return types)
+    /// - Graph reference validation (USE GRAPH clauses)
     ///
-    /// The schema catalog infrastructure is fully implemented and ready for use.
-    /// However, the actual validation passes that utilize the schema catalog
-    /// are not yet implemented. When `advanced_schema_validation` is enabled,
-    /// the validator will store the catalog reference but will not perform
-    /// any additional validation beyond the standard checks.
+    /// # Example
     ///
-    /// Future validation passes will include:
-    /// - Property existence validation against schema
-    /// - Type compatibility checking with schema metadata
-    /// - Constraint enforcement (PRIMARY KEY, UNIQUE, FOREIGN KEY, etc.)
-    /// - Schema-aware type inference improvements
-    pub fn with_schema_catalog(mut self, catalog: &'s dyn crate::semantic::schema_catalog::SchemaCatalog) -> Self {
-        self.schema_catalog = Some(catalog);
-        self.config.advanced_schema_validation = true;
-        self
-    }
-
-    /// Sets the graph context resolver (Milestone 3).
+    /// ```ignore
+    /// use gql_parser::semantic::{SemanticValidator, metadata_provider::InMemoryMetadataProvider};
     ///
-    /// # Implementation Status
-    ///
-    /// Infrastructure complete. The resolver is stored but not yet used
-    /// in validation passes. Future implementation will use this to determine
-    /// the active graph/schema context for validation.
-    pub fn with_graph_context_resolver(mut self, resolver: &'s dyn crate::semantic::schema_catalog::GraphContextResolver) -> Self {
-        self.graph_context_resolver = Some(resolver);
-        self
-    }
-
-    /// Sets the variable type context provider (Milestone 3).
-    ///
-    /// # Implementation Status
-    ///
-    /// Infrastructure complete. The provider is stored but not yet used
-    /// in validation passes. Future implementation will use this for
-    /// enhanced type inference and scope analysis.
-    pub fn with_variable_context_provider(mut self, provider: &'s dyn crate::semantic::schema_catalog::VariableTypeContextProvider) -> Self {
-        self.variable_context_provider = Some(provider);
+    /// let metadata = InMemoryMetadataProvider::example();
+    /// let validator = SemanticValidator::new()
+    ///     .with_metadata_provider(&metadata);
+    /// ```
+    pub fn with_metadata_provider<M: crate::semantic::metadata_provider::MetadataProvider>(
+        mut self,
+        provider: &'m M,
+    ) -> Self {
+        self.metadata_provider = Some(provider);
+        self.config.metadata_validation = true;
         self
     }
 
@@ -234,141 +131,9 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
         self
     }
 
-    /// Enables schema-dependent validation.
-    pub fn with_schema_validation(mut self, enabled: bool) -> Self {
-        self.config.schema_validation = enabled;
-        self
-    }
-
-    /// Enables catalog-dependent validation.
-    pub fn with_catalog_validation(mut self, enabled: bool) -> Self {
-        self.config.catalog_validation = enabled;
-        self
-    }
-
-    /// Enables advanced schema validation (Milestone 3).
-    pub fn with_advanced_schema_validation(mut self, enabled: bool) -> Self {
-        self.config.advanced_schema_validation = enabled;
-        self
-    }
-
-    /// Sets the callable catalog for function/procedure validation (Milestone 4).
-    ///
-    /// # Implementation Status
-    ///
-    /// The callable catalog infrastructure is fully implemented and ready for use.
-    /// When `callable_validation` is enabled, the validator will:
-    /// - Validate function arity (argument count)
-    /// - Check aggregate function signatures
-    /// - Report errors for undefined callables
-    /// - Support built-in and custom callable resolution
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// use gql_parser::semantic::{SemanticValidator, callable::BuiltinCallableCatalog};
-    ///
-    /// let catalog = BuiltinCallableCatalog::new();
-    /// let validator = SemanticValidator::new()
-    ///     .with_callable_catalog(&catalog)
-    ///     .with_callable_validation(true);
-    /// ```
-    pub fn with_callable_catalog(mut self, catalog: &'c dyn crate::semantic::callable::CallableCatalog) -> Self {
-        self.callable_catalog = Some(catalog);
-        self.config.callable_validation = true;
-        self
-    }
-
-    /// Sets the callable validator for call site validation (Milestone 4).
-    ///
-    /// This is typically used in conjunction with `with_callable_catalog`.
-    /// If not set, no call site validation will be performed.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// use gql_parser::semantic::{
-    ///     SemanticValidator,
-    ///     callable::{BuiltinCallableCatalog, DefaultCallableValidator},
-    /// };
-    ///
-    /// let catalog = BuiltinCallableCatalog::new();
-    /// let validator_impl = DefaultCallableValidator::new();
-    ///
-    /// let validator = SemanticValidator::new()
-    ///     .with_callable_catalog(&catalog)
-    ///     .with_callable_validator(&validator_impl);
-    /// ```
-    pub fn with_callable_validator(mut self, validator: &'c dyn crate::semantic::callable::CallableValidator) -> Self {
-        self.callable_validator = Some(validator);
-        self
-    }
-
-    /// Enables callable validation (Milestone 4).
-    ///
-    /// Note: This requires both a callable catalog and validator to be configured.
-    /// If either is missing, callable validation will be skipped.
-    pub fn with_callable_validation(mut self, enabled: bool) -> Self {
-        self.config.callable_validation = enabled;
-        self
-    }
-
-    /// Sets the type metadata catalog for enhanced type inference (Milestone 5).
-    ///
-    /// # Implementation Status
-    ///
-    /// The type metadata catalog infrastructure is fully implemented. When enabled,
-    /// the validator can use property type information and callable return types
-    /// to improve type inference quality and reduce Type::Any fallbacks.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// use gql_parser::semantic::{SemanticValidator, type_metadata::MockTypeMetadataCatalog};
-    ///
-    /// let mut catalog = MockTypeMetadataCatalog::new();
-    /// // Register property types...
-    ///
-    /// let validator = SemanticValidator::new()
-    ///     .with_type_metadata(&catalog);
-    /// ```
-    pub fn with_type_metadata(mut self, catalog: &'c dyn crate::semantic::type_metadata::TypeMetadataCatalog) -> Self {
-        self.type_metadata = Some(catalog);
-        self.config.enhanced_type_inference = true;
-        self
-    }
-
-    /// Sets the type check context provider (Milestone 5).
-    ///
-    /// This provider supplies type contexts for statements, enabling downstream
-    /// type checkers to consume inferred types uniformly.
-    pub fn with_context_provider(mut self, provider: &'c dyn crate::semantic::type_metadata::TypeCheckContextProvider) -> Self {
-        self.context_provider = Some(provider);
-        self
-    }
-
-    /// Sets the inference policy (Milestone 5).
-    ///
-    /// The inference policy controls fallback behavior for type inference,
-    /// such as whether to allow Type::Any and how to handle unknown callables.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// use gql_parser::semantic::{SemanticValidator, type_metadata::InferencePolicy};
-    ///
-    /// let policy = InferencePolicy::strict();
-    /// let validator = SemanticValidator::new()
-    ///     .with_inference_policy(policy);
-    /// ```
-    pub fn with_inference_policy(mut self, policy: crate::semantic::type_metadata::InferencePolicy) -> Self {
-        self.inference_policy = policy;
-        self
-    }
-
-    /// Enables enhanced type inference (Milestone 5).
-    pub fn with_enhanced_type_inference(mut self, enabled: bool) -> Self {
-        self.config.enhanced_type_inference = enabled;
+    /// Enables or disables metadata-dependent validation.
+    pub fn with_metadata_validation(mut self, enabled: bool) -> Self {
+        self.config.metadata_validation = enabled;
         self
     }
 
@@ -384,9 +149,7 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
     /// 5. Context Validation - Check clause usage
     /// 6. Type Checking - Check type compatibility
     /// 7. Expression Validation - Check expressions
-    /// 8. Reference Validation (optional) - Check references
-    /// 9. Label/Property Validation (optional) - Check schema references
-    /// 10. Callable Validation (optional) - Check function/procedure calls
+    /// 8. Metadata Validation (optional) - Check references, labels, callables
     ///
     /// # Error Recovery
     ///
@@ -425,18 +188,15 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
         // Pass 7: Expression Validation
         expression_validation::run_expression_validation(self, program, &type_table, &mut diagnostics);
 
-        // Pass 8: Reference Validation (optional)
-        if self.config.catalog_validation {
+        // Pass 8: Metadata Validation (optional) - includes references, schema, callables
+        if self.config.metadata_validation {
+            // Reference validation (USE GRAPH)
             reference_validation::run_reference_validation(self, program, &mut diagnostics);
-        }
 
-        // Pass 9: Label/Property Validation (optional)
-        if self.config.schema_validation {
+            // Schema validation (labels, properties)
             schema_validation::run_schema_validation(self, program, &mut diagnostics);
-        }
 
-        // Pass 10: Callable Validation (optional, Milestone 4)
-        if self.config.callable_validation {
+            // Callable validation (functions, procedures)
             callable_validation::run_callable_validation(self, program, &mut diagnostics);
         }
 
@@ -456,7 +216,7 @@ impl<'s, 'c> SemanticValidator<'s, 'c> {
     }
 }
 
-impl<'s, 'c> Default for SemanticValidator<'s, 'c> {
+impl<'m> Default for SemanticValidator<'m> {
     fn default() -> Self {
         Self::new()
     }

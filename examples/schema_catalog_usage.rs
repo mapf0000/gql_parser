@@ -140,12 +140,9 @@ fn example_3_validator_integration() {
     // Create variable type context provider
     let type_provider = MockVariableTypeContextProvider::new();
 
-    // Create validator with advanced schema validation
+    // Create validator with metadata provider
     let validator = SemanticValidator::new()
-        .with_schema_catalog(&catalog)
-        .with_graph_context_resolver(&resolver)
-        .with_variable_context_provider(&type_provider)
-        .with_advanced_schema_validation(true);
+        .with_metadata_provider(&catalog);
 
     // Parse and validate a query
     let query = "MATCH (p:Person) RETURN p.name, p.age";

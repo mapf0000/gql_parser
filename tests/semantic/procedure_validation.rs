@@ -5,6 +5,7 @@
 
 use gql_parser::parse;
 use gql_parser::semantic::validator::{SemanticValidator, ValidationConfig};
+use gql_parser::semantic::metadata_provider::MetadataProvider;
 use gql_parser::ir::ValidationOutcome;
 use gql_parser::semantic::callable::{
     CallableCatalog, CallableSignature, CallableKind,
@@ -13,17 +14,16 @@ use gql_parser::semantic::callable::{
 };
 use smol_str::SmolStr;
 
-fn validate_with_procedures(source: &str, catalog: impl CallableCatalog + 'static)
+fn validate_with_procedures(source: &str, catalog: &impl MetadataProvider)
     -> ValidationOutcome
 {
     let parse_result = parse(source);
     assert!(parse_result.ast.is_some(), "Failed to parse: {}", source);
 
     let config = ValidationConfig {
-        callable_validation: true,
         ..Default::default()
     };
-    let validator = SemanticValidator::with_config(config).with_callable_catalog(&catalog);
+    let validator = SemanticValidator::with_config(config).with_metadata_provider(catalog);
     validator.validate(parse_result.ast.as_ref().unwrap())
 }
 
@@ -35,7 +35,7 @@ fn test_builtin_procedure_validates() {
 
     // Use builtin catalog which has 'abs' function
     let catalog = BuiltinCallableCatalog::new();
-    let outcome = validate_with_procedures(source, catalog);
+    let outcome = validate_with_procedures(source, &catalog);
 
     assert!(outcome.is_success(), "Diagnostics: {:?}", outcome.diagnostics);
 }
@@ -45,7 +45,7 @@ fn test_unknown_procedure_fails_with_validation_enabled() {
     let source = "CALL nonexistent_procedure()";
 
     let catalog = InMemoryCallableCatalog::new();
-    let outcome = validate_with_procedures(source, catalog);
+    let outcome = validate_with_procedures(source, &catalog);
 
     // Should fail - procedure doesn't exist
     assert!(!outcome.is_success() ||
@@ -81,7 +81,7 @@ fn test_procedure_with_correct_arity_validates() {
     });
 
     let source = "CALL my_proc(1, 2)";
-    let outcome = validate_with_procedures(source, catalog);
+    let outcome = validate_with_procedures(source, &catalog);
 
     assert!(outcome.is_success(), "Diagnostics: {:?}", outcome.diagnostics);
 }
@@ -107,7 +107,7 @@ fn test_procedure_with_wrong_arity_fails() {
     });
 
     let source = "CALL my_proc(1, 2, 3)";
-    let outcome = validate_with_procedures(source, catalog);
+    let outcome = validate_with_procedures(source, &catalog);
 
     // Should fail - wrong number of arguments
     assert!(!outcome.is_success() ||
@@ -121,7 +121,7 @@ fn test_optional_call_validates() {
     let source = "OPTIONAL CALL abs(5)";
 
     let catalog = BuiltinCallableCatalog::new();
-    let outcome = validate_with_procedures(source, catalog);
+    let outcome = validate_with_procedures(source, &catalog);
 
     assert!(outcome.is_success(), "Diagnostics: {:?}", outcome.diagnostics);
 }
@@ -142,7 +142,7 @@ fn test_yield_valid_field_validates() {
     });
 
     let source = "CALL my_proc() YIELD result";
-    let outcome = validate_with_procedures(source, catalog);
+    let outcome = validate_with_procedures(source, &catalog);
 
     assert!(outcome.is_success(), "Diagnostics: {:?}", outcome.diagnostics);
 }
@@ -161,7 +161,7 @@ fn test_yield_invalid_field_fails() {
     });
 
     let source = "CALL my_proc() YIELD nonexistent";
-    let outcome = validate_with_procedures(source, catalog);
+    let outcome = validate_with_procedures(source, &catalog);
 
     // Should fail or warn - field doesn't exist
     assert!(!outcome.is_success() ||
