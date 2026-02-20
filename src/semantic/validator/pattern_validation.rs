@@ -186,7 +186,7 @@ fn extract_connectivity_from_expression(
         }
         PathPatternExpression::Alternation { alternatives, .. } => {
             for alt in alternatives {
-                extract_connectivity_from_term(validator, alt, adjacency, all_variables);
+                extract_connectivity_from_expression(validator, alt, adjacency, all_variables);
             }
         }
     }
@@ -293,13 +293,17 @@ fn validate_mutation_patterns(
 
     for statement in statements {
         match statement {
-            SimpleDataAccessingStatement::Modifying(
-                SimpleDataModifyingStatement::Primitive(primitive),
-            ) => {
+            SimpleDataAccessingStatement::Modifying(SimpleDataModifyingStatement::Primitive(
+                primitive,
+            )) => {
                 match primitive {
                     PrimitiveDataModifyingStatement::Insert(insert) => {
                         // Validate INSERT patterns are connected
-                        validate_insert_pattern_connectivity(validator, &insert.pattern, diagnostics);
+                        validate_insert_pattern_connectivity(
+                            validator,
+                            &insert.pattern,
+                            diagnostics,
+                        );
                     }
                     PrimitiveDataModifyingStatement::Set(_)
                     | PrimitiveDataModifyingStatement::Remove(_)

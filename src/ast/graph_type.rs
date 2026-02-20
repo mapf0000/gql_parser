@@ -107,6 +107,84 @@ pub enum ElementTypeSpecification {
     Edge(Box<EdgeTypeSpecification>),
 }
 
+/// Type inheritance clause for node/edge type specifications.
+///
+/// Syntax examples:
+/// - `INHERITS Person`
+/// - `EXTENDS Person, NamedEntity`
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeInheritanceClause {
+    /// Parent types declared by the inheritance clause.
+    pub parents: Vec<InheritedTypeReference>,
+    /// Source span.
+    pub span: Span,
+}
+
+/// Parent type reference used in an inheritance clause.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InheritedTypeReference {
+    /// Parent type name.
+    pub name: SmolStr,
+    /// Source span.
+    pub span: Span,
+}
+
+/// Graph-type constraint clause.
+///
+/// Constraints are captured in parsed form and preserve any raw argument payload
+/// for downstream validation/normalization.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GraphTypeConstraint {
+    /// `... CONSTRAINT KEY (...)`
+    Key {
+        arguments: Vec<GraphTypeConstraintArgument>,
+        span: Span,
+    },
+    /// `... CONSTRAINT UNIQUE (...)`
+    Unique {
+        arguments: Vec<GraphTypeConstraintArgument>,
+        span: Span,
+    },
+    /// `... CONSTRAINT MANDATORY (...)`
+    Mandatory {
+        arguments: Vec<GraphTypeConstraintArgument>,
+        span: Span,
+    },
+    /// `... CONSTRAINT CHECK (...)`
+    Check {
+        arguments: Vec<GraphTypeConstraintArgument>,
+        span: Span,
+    },
+    /// `... CONSTRAINT <custom>(...)`
+    Custom {
+        name: SmolStr,
+        arguments: Vec<GraphTypeConstraintArgument>,
+        span: Span,
+    },
+}
+
+impl GraphTypeConstraint {
+    /// Returns the source span of this constraint clause.
+    pub fn span(&self) -> Span {
+        match self {
+            GraphTypeConstraint::Key { span, .. }
+            | GraphTypeConstraint::Unique { span, .. }
+            | GraphTypeConstraint::Mandatory { span, .. }
+            | GraphTypeConstraint::Check { span, .. }
+            | GraphTypeConstraint::Custom { span, .. } => span.clone(),
+        }
+    }
+}
+
+/// Raw argument payload for a graph-type constraint.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct GraphTypeConstraintArgument {
+    /// Normalized token text for the argument segment.
+    pub raw: SmolStr,
+    /// Source span.
+    pub span: Span,
+}
+
 // ============================================================================
 // Node Type Specifications
 // ============================================================================
@@ -123,6 +201,10 @@ pub enum ElementTypeSpecification {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct NodeTypeSpecification {
+    /// Whether `ABSTRACT` modifier is present.
+    pub is_abstract: bool,
+    /// Optional inheritance clause.
+    pub inheritance: Option<TypeInheritanceClause>,
     /// The node type pattern
     pub pattern: NodeTypePattern,
     /// Source span
@@ -189,6 +271,8 @@ pub struct NodeTypeFiller {
     pub key_label_set: Option<NodeTypeKeyLabelSet>,
     /// Optional implied content for defaults
     pub implied_content: Option<NodeTypeImpliedContent>,
+    /// Explicit graph-type constraints.
+    pub constraints: Vec<GraphTypeConstraint>,
     /// Source span
     pub span: Span,
 }
@@ -257,6 +341,10 @@ pub struct NodeTypeImpliedContent {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct EdgeTypeSpecification {
+    /// Whether `ABSTRACT` modifier is present.
+    pub is_abstract: bool,
+    /// Optional inheritance clause.
+    pub inheritance: Option<TypeInheritanceClause>,
     /// The edge type pattern
     pub pattern: EdgeTypePattern,
     /// Source span
@@ -365,6 +453,8 @@ pub struct ArcTypeUndirected {
 pub struct EdgeTypeFiller {
     /// The edge type phrase
     pub phrase: EdgeTypePhrase,
+    /// Explicit graph-type constraints.
+    pub constraints: Vec<GraphTypeConstraint>,
     /// Source span
     pub span: Span,
 }

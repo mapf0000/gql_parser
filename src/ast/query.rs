@@ -576,7 +576,7 @@ pub enum PathPatternExpression {
     },
     /// Path alternation - multiple alternative patterns.
     Alternation {
-        alternatives: Vec<PathTerm>,
+        alternatives: Vec<PathPatternExpression>,
         span: Span,
     },
     /// Single path term.

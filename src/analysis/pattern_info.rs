@@ -4,12 +4,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use smol_str::SmolStr;
 
+use crate::ast::Expression;
 use crate::ast::query::{
     EdgePattern, ElementPattern, GraphPattern, LabelExpression, PathFactor, PathPattern,
     PathPatternExpression, PathPatternPrefix, PathPrimary, PathSearch, PathTerm,
     ShortestPathSearch, SimplifiedPathPatternExpression,
 };
-use crate::ast::Expression;
 
 /// Coarse-grained complexity classification for pattern label expressions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
@@ -107,8 +107,8 @@ impl PatternAnalyzer {
                 self.analyze_path_expression(right, vars_in_path);
             }
             PathPatternExpression::Alternation { alternatives, .. } => {
-                for term in alternatives {
-                    self.analyze_path_term(term, vars_in_path);
+                for alternative in alternatives {
+                    self.analyze_path_expression(alternative, vars_in_path);
                 }
             }
             PathPatternExpression::Term(term) => {
@@ -316,7 +316,10 @@ fn collect_path_pattern_expression_roots<'a>(
     collect_path_expression_roots(&path_pattern.expression, roots);
 }
 
-fn collect_prefix_expression_roots<'a>(prefix: &'a PathPatternPrefix, roots: &mut Vec<&'a Expression>) {
+fn collect_prefix_expression_roots<'a>(
+    prefix: &'a PathPatternPrefix,
+    roots: &mut Vec<&'a Expression>,
+) {
     if let PathPatternPrefix::PathSearch(
         PathSearch::Shortest(ShortestPathSearch::CountedShortest { count, .. })
         | PathSearch::Shortest(ShortestPathSearch::CountedShortestGroups { count, .. }),
@@ -336,8 +339,8 @@ fn collect_path_expression_roots<'a>(
             collect_path_expression_roots(right, roots);
         }
         PathPatternExpression::Alternation { alternatives, .. } => {
-            for term in alternatives {
-                collect_path_term_expression_roots(term, roots);
+            for alternative in alternatives {
+                collect_path_expression_roots(alternative, roots);
             }
         }
         PathPatternExpression::Term(term) => {
@@ -352,7 +355,10 @@ fn collect_path_term_expression_roots<'a>(term: &'a PathTerm, roots: &mut Vec<&'
     }
 }
 
-fn collect_path_factor_expression_roots<'a>(factor: &'a PathFactor, roots: &mut Vec<&'a Expression>) {
+fn collect_path_factor_expression_roots<'a>(
+    factor: &'a PathFactor,
+    roots: &mut Vec<&'a Expression>,
+) {
     match &factor.primary {
         PathPrimary::ElementPattern(element) => collect_element_expression_roots(element, roots),
         PathPrimary::ParenthesizedExpression(expression) => {
@@ -441,7 +447,10 @@ mod tests {
         assert_eq!(info.edge_count, 2);
         assert_eq!(info.connected_component_count, 1);
         assert!(info.is_fully_connected);
-        assert_eq!(info.label_expression_complexity, LabelExpressionComplexity::Simple);
+        assert_eq!(
+            info.label_expression_complexity,
+            LabelExpressionComplexity::Simple
+        );
     }
 
     #[test]

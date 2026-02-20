@@ -6,7 +6,10 @@ use crate::diag::Diag;
 use crate::lexer::token::TokenKind;
 use smol_str::SmolStr;
 
-use super::{element::edge_pattern_span, PatternParser, SimplifiedClosing, SimplifiedOpening};
+use super::{
+    PatternParser, PatternSyncContext, SimplifiedClosing, SimplifiedOpening,
+    element::edge_pattern_span, is_path_pattern_delimiter,
+};
 
 impl<'a> PatternParser<'a> {
     pub(super) fn parse_path_pattern(&mut self) -> Option<PathPattern> {
@@ -211,65 +214,67 @@ impl<'a> PatternParser<'a> {
     }
 
     fn parse_path_pattern_expression(&mut self) -> Option<PathPatternExpression> {
+        let first = self.parse_path_union_expression()?;
+
+        if !self.is_multiset_alternation_operator() {
+            return Some(first);
+        }
+
+        let mut alternatives = vec![first];
+        while self.is_multiset_alternation_operator() {
+            self.pos += 3;
+            let Some(next) = self.parse_path_union_expression() else {
+                self.diags.push(
+                    Diag::error("Expected path expression after '|+|'").with_primary_label(
+                        self.current_span_or(self.pos),
+                        "expected expression here",
+                    ),
+                );
+                break;
+            };
+            alternatives.push(next);
+        }
+
+        let start = alternatives
+            .first()
+            .map(|expr| expr.span().start)
+            .unwrap_or(0);
+        let end = alternatives
+            .last()
+            .map(|expr| expr.span().end)
+            .unwrap_or(start);
+        Some(PathPatternExpression::Alternation {
+            alternatives,
+            span: start..end,
+        })
+    }
+
+    fn parse_path_union_expression(&mut self) -> Option<PathPatternExpression> {
         let first_term = self.parse_path_term()?;
+        let mut expr = PathPatternExpression::Term(first_term);
 
-        if self.is_multiset_alternation_operator() {
-            let mut alternatives = vec![first_term];
+        while matches!(self.current_kind(), Some(TokenKind::Pipe))
+            && !self.is_multiset_alternation_operator()
+        {
+            self.pos += 1;
+            let Some(right_term) = self.parse_path_term() else {
+                self.diags.push(
+                    Diag::error("Expected path term after '|'")
+                        .with_primary_label(self.current_span_or(self.pos), "expected term here"),
+                );
+                break;
+            };
 
-            while self.is_multiset_alternation_operator() {
-                self.pos += 3;
-                let Some(term) = self.parse_path_term() else {
-                    self.diags.push(
-                        Diag::error("Expected path term after '|+|'").with_primary_label(
-                            self.current_span_or(self.pos),
-                            "expected term here",
-                        ),
-                    );
-                    break;
-                };
-                alternatives.push(term);
-            }
-
-            if alternatives.len() == 1 {
-                return Some(PathPatternExpression::Term(alternatives.remove(0)));
-            }
-
-            let start = alternatives.first().map(|t| t.span.start).unwrap_or(0);
-            let end = alternatives.last().map(|t| t.span.end).unwrap_or(start);
-            return Some(PathPatternExpression::Alternation {
-                alternatives,
-                span: start..end,
-            });
+            let right = PathPatternExpression::Term(right_term);
+            let span = expr.span().start..right.span().end;
+            expr = PathPatternExpression::Union {
+                left: Box::new(expr),
+                right: Box::new(right),
+                span,
+            };
         }
 
-        if matches!(self.current_kind(), Some(TokenKind::Pipe)) {
-            let mut expr = PathPatternExpression::Term(first_term);
-
-            while matches!(self.current_kind(), Some(TokenKind::Pipe)) {
-                self.pos += 1;
-                let Some(right_term) = self.parse_path_term() else {
-                    self.diags.push(
-                        Diag::error("Expected path term after '|'").with_primary_label(
-                            self.current_span_or(self.pos),
-                            "expected term here",
-                        ),
-                    );
-                    break;
-                };
-
-                let right = PathPatternExpression::Term(right_term);
-                let span = expr.span().start..right.span().end;
-                expr = PathPatternExpression::Union {
-                    left: Box::new(expr),
-                    right: Box::new(right),
-                    span,
-                };
-            }
-
-            return Some(expr);
-        }
-
-        Some(PathPatternExpression::Term(first_term))
+        Some(expr)
     }
 
     fn parse_path_term(&mut self) -> Option<PathTerm> {
@@ -308,6 +313,9 @@ impl<'a> PatternParser<'a> {
         };
 
         let quantifier = self.parse_graph_pattern_quantifier();
+        if quantifier.is_some() {
+            self.consume_chained_quantifiers(start);
+        }
         let end = quantifier.as_ref().map_or_else(
             || match &primary {
                 PathPrimary::ElementPattern(element) => match element.as_ref() {
@@ -335,6 +343,15 @@ impl<'a> PatternParser<'a> {
         }
 
         if matches!(self.current_kind(), Some(TokenKind::LParen)) {
+            if matches!(
+                self.tokens.get(self.pos + 1).map(|token| &token.kind),
+                Some(TokenKind::LParen)
+            ) && let Some(expr) =
+                self.try_parse(|p| p.parse_parenthesized_path_pattern_expression())
+            {
+                return Some(PathPrimary::ParenthesizedExpression(Box::new(expr)));
+            }
+
             if let Some(node) = self.try_parse(|p| p.parse_node_pattern()) {
                 return Some(PathPrimary::ElementPattern(Box::new(ElementPattern::Node(
                     Box::new(node),
@@ -508,62 +525,62 @@ impl<'a> PatternParser<'a> {
     }
 
     fn parse_simplified_contents(&mut self) -> Option<SimplifiedPathPatternExpression> {
+        let first = self.parse_simplified_union()?;
+
+        if !self.is_multiset_alternation_operator() {
+            return Some(first);
+        }
+
+        let mut alternatives = vec![first];
+        while self.is_multiset_alternation_operator() {
+            self.pos += 3;
+            let Some(next) = self.parse_simplified_union() else {
+                self.diags.push(
+                    Diag::error("Expected simplified expression after '|+|'").with_primary_label(
+                        self.current_span_or(self.pos),
+                        "expected expression here",
+                    ),
+                );
+                break;
+            };
+            alternatives.push(next);
+        }
+
+        let start = simplified_expression_span(alternatives.first()?).start;
+        let end = simplified_expression_span(alternatives.last()?).end;
+        Some(SimplifiedPathPatternExpression::MultisetAlternation(
+            SimplifiedMultisetAlternation {
+                alternatives,
+                span: start..end,
+            },
+        ))
+    }
+
+    fn parse_simplified_union(&mut self) -> Option<SimplifiedPathPatternExpression> {
         let first = self.parse_simplified_term()?;
+        let mut expr = first;
 
-        if self.is_multiset_alternation_operator() {
-            let mut alternatives = vec![first];
-
-            while self.is_multiset_alternation_operator() {
-                self.pos += 3;
-                let Some(term) = self.parse_simplified_term() else {
-                    self.diags.push(
-                        Diag::error("Expected simplified term after '|+|'").with_primary_label(
-                            self.current_span_or(self.pos),
-                            "expected term here",
-                        ),
-                    );
-                    break;
-                };
-                alternatives.push(term);
-            }
-
-            let start = simplified_expression_span(alternatives.first()?).start;
-            let end = simplified_expression_span(alternatives.last()?).end;
-            return Some(SimplifiedPathPatternExpression::MultisetAlternation(
-                SimplifiedMultisetAlternation {
-                    alternatives,
-                    span: start..end,
-                },
-            ));
+        while matches!(self.current_kind(), Some(TokenKind::Pipe))
+            && !self.is_multiset_alternation_operator()
+        {
+            self.pos += 1;
+            let Some(right) = self.parse_simplified_term() else {
+                self.diags.push(
+                    Diag::error("Expected simplified term after '|'")
+                        .with_primary_label(self.current_span_or(self.pos), "expected term here"),
+                );
+                break;
+            };
+            let span =
+                simplified_expression_span(&expr).start..simplified_expression_span(&right).end;
+            expr = SimplifiedPathPatternExpression::Union(SimplifiedPathUnion {
+                left: Box::new(expr),
+                right: Box::new(right),
+                span,
+            });
         }
 
-        if matches!(self.current_kind(), Some(TokenKind::Pipe)) {
-            let mut expr = first;
-
-            while matches!(self.current_kind(), Some(TokenKind::Pipe)) {
-                self.pos += 1;
-                let Some(right) = self.parse_simplified_term() else {
-                    self.diags.push(
-                        Diag::error("Expected simplified term after '|'").with_primary_label(
-                            self.current_span_or(self.pos),
-                            "expected term here",
-                        ),
-                    );
-                    break;
-                };
-                let span =
-                    simplified_expression_span(&expr).start..simplified_expression_span(&right).end;
-                expr = SimplifiedPathPatternExpression::Union(SimplifiedPathUnion {
-                    left: Box::new(expr),
-                    right: Box::new(right),
-                    span,
-                });
-            }
-
-            return Some(expr);
-        }
-
-        Some(first)
+        Some(expr)
     }
 
     fn parse_simplified_term(&mut self) -> Option<SimplifiedPathPatternExpression> {
@@ -637,6 +654,7 @@ impl<'a> PatternParser<'a> {
 
         if matches!(self.current_kind(), Some(TokenKind::Question)) {
             self.pos += 1;
+            self.consume_chained_quantifiers(start);
             let end = self.last_consumed_end(start);
             return Some(SimplifiedPathPatternExpression::Questioned(
                 SimplifiedQuestioned {
@@ -647,6 +665,7 @@ impl<'a> PatternParser<'a> {
         }
 
         if let Some(quantifier) = self.parse_graph_pattern_quantifier() {
+            self.consume_chained_quantifiers(start);
             let end = quantifier.span().end;
             return Some(SimplifiedPathPatternExpression::Quantified(
                 SimplifiedQuantified {
@@ -837,6 +856,31 @@ impl<'a> PatternParser<'a> {
         }
     }
 
+    fn is_quantifier_start(&self) -> bool {
+        matches!(
+            self.current_kind(),
+            Some(TokenKind::Star | TokenKind::Plus | TokenKind::Question | TokenKind::LBrace)
+        )
+    }
+
+    fn consume_chained_quantifiers(&mut self, fallback_start: usize) {
+        let mut reported = false;
+        while self.is_quantifier_start() {
+            let span = self.current_span_or(fallback_start);
+            let consumed = self.parse_graph_pattern_quantifier();
+            if consumed.is_none() {
+                self.pos += 1;
+            }
+            if !reported {
+                self.diags.push(
+                    Diag::error("Chained path quantifiers are not allowed")
+                        .with_primary_label(span, "remove the extra quantifier"),
+                );
+                reported = true;
+            }
+        }
+    }
+
     fn parse_brace_quantifier(&mut self) -> Option<GraphPatternQuantifier> {
         let start = self.current_start().unwrap_or(self.pos);
         self.pos += 1;
@@ -960,7 +1004,7 @@ impl<'a> PatternParser<'a> {
     }
 
     fn skip_to_path_pattern_boundary(&mut self) {
-        self.skip_to_token(is_path_pattern_delimiter);
+        self.skip_to_sync(PatternSyncContext::PathPatternBoundary);
     }
 }
 
@@ -1048,42 +1092,6 @@ fn is_edge_pattern_start(kind: &TokenKind) -> bool {
             | TokenKind::Tilde
             | TokenKind::LeftTilde
             | TokenKind::RightTilde
-    )
-}
-
-fn is_path_pattern_delimiter(kind: &TokenKind) -> bool {
-    matches!(
-        kind,
-        TokenKind::Comma | TokenKind::Keep | TokenKind::Where | TokenKind::Yield
-    ) || is_query_boundary(kind)
-}
-
-fn is_query_boundary(kind: &TokenKind) -> bool {
-    matches!(
-        kind,
-        TokenKind::Semicolon
-            | TokenKind::Eof
-            | TokenKind::Use
-            | TokenKind::Match
-            | TokenKind::Optional
-            | TokenKind::Filter
-            | TokenKind::Let
-            | TokenKind::For
-            | TokenKind::Order
-            | TokenKind::Limit
-            | TokenKind::Offset
-            | TokenKind::Skip
-            | TokenKind::Return
-            | TokenKind::Select
-            | TokenKind::Finish
-            | TokenKind::Union
-            | TokenKind::Except
-            | TokenKind::Intersect
-            | TokenKind::Otherwise
-            | TokenKind::Group
-            | TokenKind::Having
-            | TokenKind::RBrace
-            | TokenKind::RParen
     )
 }
 

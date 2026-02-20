@@ -328,6 +328,27 @@ fn parse_path_expression_union_and_multiset_alternation() {
 }
 
 #[test]
+fn parse_path_expression_mixed_union_and_multiset_alternation_has_stable_precedence() {
+    let mixed = parse_first_simple_match_pattern("MATCH (a)|(b)|+|(c)|(d) RETURN a");
+
+    let PathPatternExpression::Alternation { alternatives, .. } =
+        &mixed.paths.patterns[0].expression
+    else {
+        panic!("expected top-level alternation");
+    };
+
+    assert_eq!(alternatives.len(), 2);
+    assert!(matches!(
+        alternatives[0],
+        PathPatternExpression::Union { .. }
+    ));
+    assert!(matches!(
+        alternatives[1],
+        PathPatternExpression::Union { .. }
+    ));
+}
+
+#[test]
 fn parse_node_pattern_with_property_predicate() {
     let node = extract_node_pattern("MATCH (n:Person {age: 42}) RETURN n");
 
@@ -539,6 +560,50 @@ fn parse_simplified_path_variants() {
         inner,
         SimplifiedPathPatternExpression::Negation(..)
     ));
+}
+
+#[test]
+fn parse_simplified_mixed_union_and_multiset_alternation_has_stable_precedence() {
+    let (_, inner) = extract_simplified_inner("MATCH -/a|b|+|c|d/- RETURN 1");
+    let SimplifiedPathPatternExpression::MultisetAlternation(alternation) = inner else {
+        panic!("expected top-level simplified multiset alternation");
+    };
+
+    assert_eq!(alternation.alternatives.len(), 2);
+    assert!(matches!(
+        alternation.alternatives[0],
+        SimplifiedPathPatternExpression::Union(..)
+    ));
+    assert!(matches!(
+        alternation.alternatives[1],
+        SimplifiedPathPatternExpression::Union(..)
+    ));
+}
+
+#[test]
+fn parse_deeply_nested_quantifiers_on_parenthesized_patterns() {
+    let factor = first_factor_from_match("MATCH (((n){1,2}){2,3}){3,4} RETURN n");
+    assert!(matches!(
+        factor.quantifier,
+        Some(GraphPatternQuantifier::General {
+            min: Some(3),
+            max: Some(4),
+            ..
+        })
+    ));
+}
+
+#[test]
+fn parse_reports_single_chained_quantifier_diagnostic() {
+    let result = parse("MATCH (n)?? RETURN n");
+    assert!(result.ast.is_some(), "expected recoverable AST");
+    assert!(!result.diagnostics.is_empty(), "expected diagnostics");
+
+    let diag_text = diagnostics_text(&result.diagnostics);
+    assert!(
+        diag_text.contains("Chained path quantifiers are not allowed"),
+        "unexpected diagnostics: {diag_text}"
+    );
 }
 
 #[test]

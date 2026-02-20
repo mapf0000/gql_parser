@@ -176,7 +176,7 @@ impl<'a> TypeParser<'a> {
         } else {
             let start = self.stream.position();
             let mut graph_type_parser = GraphTypeParser::new(&self.stream.tokens()[start..]);
-            let spec = Box::new(graph_type_parser.parse_node_type_specification()?);
+            let spec = Box::new(graph_type_parser.parse_node_type_specification(false)?);
             let consumed = graph_type_parser.current_position();
             if consumed == 0 {
                 return Err(self.error_here("expected node type specification"));
@@ -247,7 +247,7 @@ impl<'a> TypeParser<'a> {
         } else {
             let start = self.stream.position();
             let mut graph_type_parser = GraphTypeParser::new(&self.stream.tokens()[start..]);
-            let spec = Box::new(graph_type_parser.parse_edge_type_specification()?);
+            let spec = Box::new(graph_type_parser.parse_edge_type_specification(false)?);
             let consumed = graph_type_parser.current_position();
             if consumed == 0 {
                 return Err(self.error_here("expected edge type specification"));

@@ -8,9 +8,10 @@
 //! - CALL catalog-modifying procedure statements
 
 use crate::ast::Span;
+use crate::ast::graph_type::NestedGraphTypeSpecification;
 use crate::ast::procedure::{CallProcedureStatement, NestedProcedureSpecification};
-use crate::ast::references::{GraphReference, GraphTypeReference, SchemaReference};
 use crate::ast::references::ProcedureReference;
+use crate::ast::references::{GraphReference, GraphTypeReference, SchemaReference};
 
 // ============================================================================
 // Schema Statements
@@ -114,8 +115,11 @@ pub enum GraphTypeSource {
         graph_type: GraphTypeReference,
         span: Span,
     },
-    // Detailed type specifications deferred to Sprint 12
+    /// LIKE <graph_reference>
+    LikeGraph { graph: GraphReference, span: Span },
+    /// Embedded nested graph type specification.
     Detailed {
+        specification: NestedGraphTypeSpecification,
         span: Span,
     },
 }

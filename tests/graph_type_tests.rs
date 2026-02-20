@@ -149,3 +149,151 @@ fn test_edge_phrase_pattern_preserves_endpoint_aliases() {
     assert_eq!(left_name, "Person");
     assert_eq!(right_name, "Company");
 }
+
+#[test]
+fn test_graph_type_parser_supports_abstract_inheritance_and_constraints() {
+    use gql_parser::ast::graph_type::{ElementTypeSpecification, GraphTypeConstraint};
+    use gql_parser::parse;
+
+    let source = r#"
+        CREATE GRAPH TYPE social AS {
+            ABSTRACT NODE TYPE Employee INHERITS Person
+                LABEL Employee { id :: INT NOT NULL, name :: STRING }
+                CONSTRAINT UNIQUE (id)
+        }
+    "#;
+
+    let result = parse(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let program = result.ast.expect("expected AST");
+    assert_eq!(program.statements.len(), 1);
+
+    let gql_parser::ast::Statement::Catalog(stmt) = &program.statements[0] else {
+        panic!("expected catalog statement");
+    };
+    let gql_parser::ast::CatalogStatementKind::CreateGraphType(create_graph_type) = &stmt.kind
+    else {
+        panic!("expected CREATE GRAPH TYPE statement");
+    };
+
+    let source = create_graph_type
+        .source
+        .as_ref()
+        .expect("expected graph type source");
+
+    let gql_parser::ast::GraphTypeSource::Detailed { specification, .. } = source else {
+        panic!("expected detailed graph type source");
+    };
+
+    let first = specification
+        .body
+        .element_types
+        .types
+        .first()
+        .expect("expected one element type");
+
+    let ElementTypeSpecification::Node(node) = first else {
+        panic!("expected node specification");
+    };
+
+    assert!(node.is_abstract, "expected ABSTRACT modifier");
+    let inheritance = node
+        .inheritance
+        .as_ref()
+        .expect("expected inheritance clause");
+    assert_eq!(inheritance.parents.len(), 1);
+    assert_eq!(inheritance.parents[0].name, "Person");
+
+    let filler = node
+        .pattern
+        .phrase
+        .filler
+        .as_ref()
+        .expect("expected node filler");
+    assert_eq!(filler.constraints.len(), 1);
+    assert!(matches!(
+        filler.constraints[0],
+        GraphTypeConstraint::Unique { .. }
+    ));
+}
+
+#[test]
+fn test_graph_type_parser_supports_edge_constraints_and_inheritance() {
+    use gql_parser::ast::graph_type::{ElementTypeSpecification, GraphTypeConstraint};
+    use gql_parser::parse;
+
+    let source = r#"
+        CREATE GRAPH TYPE social AS {
+            ABSTRACT DIRECTED EDGE TYPE KNOWS EXTENDS RELATED
+                CONSTRAINT CHECK (weight > 0)
+                CONNECTING (Person TO Person)
+        }
+    "#;
+
+    let result = parse(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let program = result.ast.expect("expected AST");
+    assert_eq!(program.statements.len(), 1);
+
+    let gql_parser::ast::Statement::Catalog(stmt) = &program.statements[0] else {
+        panic!("expected catalog statement");
+    };
+    let gql_parser::ast::CatalogStatementKind::CreateGraphType(create_graph_type) = &stmt.kind
+    else {
+        panic!("expected CREATE GRAPH TYPE statement");
+    };
+    let gql_parser::ast::GraphTypeSource::Detailed { specification, .. } = create_graph_type
+        .source
+        .as_ref()
+        .expect("expected graph type source")
+    else {
+        panic!("expected detailed source");
+    };
+
+    let first = specification
+        .body
+        .element_types
+        .types
+        .first()
+        .expect("expected one element type");
+
+    let ElementTypeSpecification::Edge(edge) = first else {
+        panic!("expected edge specification");
+    };
+
+    assert!(edge.is_abstract, "expected ABSTRACT modifier");
+    let inheritance = edge
+        .inheritance
+        .as_ref()
+        .expect("expected inheritance clause");
+    assert_eq!(inheritance.parents.len(), 1);
+    assert_eq!(inheritance.parents[0].name, "RELATED");
+
+    let gql_parser::ast::graph_type::EdgeTypePattern::Directed(directed) = &edge.pattern else {
+        panic!("expected directed edge pattern");
+    };
+    let filler = match &directed.arc {
+        gql_parser::ast::graph_type::DirectedArcType::PointingRight(right) => right
+            .filler
+            .as_ref()
+            .expect("expected arc filler in directed edge"),
+        gql_parser::ast::graph_type::DirectedArcType::PointingLeft(_) => {
+            panic!("unexpected left-pointing arc")
+        }
+    };
+    assert_eq!(filler.constraints.len(), 1);
+    assert!(matches!(
+        filler.constraints[0],
+        GraphTypeConstraint::Check { .. }
+    ));
+}

@@ -5,10 +5,10 @@
 // - Edge labels: -[e:KNOWS]-> -> check if 'KNOWS' exists in schema
 // - Properties: n.name -> check if 'name' exists for nodes with label 'Person'
 
-use crate::ast::*;
 use crate::ast::query::{
     EdgePattern, ElementPattern, PathPattern, PathPatternExpression, PathPrimary, PathTerm,
 };
+use crate::ast::*;
 use crate::diag::Diag;
 
 /// Run schema validation pass.
@@ -89,19 +89,13 @@ fn validate_linear_query_schema(
                             }
                         }
                         crate::ast::query::OptionalOperand::Block { statements }
-                        | crate::ast::query::OptionalOperand::ParenthesizedBlock {
-                            statements,
-                        } => {
+                        | crate::ast::query::OptionalOperand::ParenthesizedBlock { statements } => {
                             // Validate nested MATCH statements recursively
                             for stmt in statements {
                                 match stmt {
                                     MatchStatement::Simple(simple) => {
                                         for path in &simple.pattern.paths.patterns {
-                                            validate_path_pattern_schema(
-                                                path,
-                                                schema,
-                                                diagnostics,
-                                            );
+                                            validate_path_pattern_schema(path, schema, diagnostics);
                                         }
                                     }
                                     MatchStatement::Optional(nested_optional) => {
@@ -183,7 +177,7 @@ fn validate_path_expression_schema(
         PathPatternExpression::Alternation { alternatives, .. } => {
             // Validate all alternatives
             for alt in alternatives {
-                validate_path_term_schema(alt, schema, diagnostics);
+                validate_path_expression_schema(alt, schema, diagnostics);
             }
         }
     }

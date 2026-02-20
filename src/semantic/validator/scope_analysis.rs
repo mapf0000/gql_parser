@@ -327,8 +327,8 @@ fn extract_expression_variables(
             extract_expression_variables(validator, right, symbol_table, diagnostics);
         }
         PathPatternExpression::Alternation { alternatives, .. } => {
-            for term in alternatives {
-                extract_term_variables(validator, term, symbol_table, diagnostics);
+            for alternative in alternatives {
+                extract_expression_variables(validator, alternative, symbol_table, diagnostics);
             }
         }
     }

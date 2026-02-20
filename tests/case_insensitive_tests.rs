@@ -535,6 +535,7 @@ fn built_in_function_keywords_case_insensitive() {
         "UPPER",
         "LOWER",
         "TRIM",
+        "TRIM_LIST",
         "NORMALIZE",
     ];
 

@@ -9,11 +9,12 @@ use crate::ast::{
     EdgeTypeFiller, EdgeTypeLabelSet, EdgeTypePattern, EdgeTypePatternDirected,
     EdgeTypePatternUndirected, EdgeTypePhrase, EdgeTypePhraseContent, EdgeTypePropertyTypes,
     EdgeTypeSpec, ElementTypeList, ElementTypeSpecification, EndpointPair, EndpointPairPhrase,
-    GraphTypeSpecificationBody, LabelName, LabelSetPhrase, LabelSetSpecification,
-    LocalNodeTypeAlias, NestedGraphTypeSpec, NodeTypeFiller, NodeTypeKeyLabelSet, NodeTypeLabelSet,
-    NodeTypePattern, NodeTypePhrase, NodeTypePropertyTypes, NodeTypeReference, NodeTypeSpec,
-    PropertyName, PropertyType, PropertyTypeList, PropertyTypesSpecification, PropertyValueType,
-    Span,
+    GraphTypeConstraint, GraphTypeConstraintArgument, GraphTypeSpecificationBody,
+    InheritedTypeReference, LabelName, LabelSetPhrase, LabelSetSpecification, LocalNodeTypeAlias,
+    NestedGraphTypeSpec, NodeTypeFiller, NodeTypeKeyLabelSet, NodeTypeLabelSet, NodeTypePattern,
+    NodeTypePhrase, NodeTypePropertyTypes, NodeTypeReference, NodeTypeSpec, PropertyName,
+    PropertyType, PropertyTypeList, PropertyTypesSpecification, PropertyValueType, Span,
+    TypeInheritanceClause,
 };
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
@@ -116,9 +117,11 @@ impl<'a> GraphTypeParser<'a> {
     ///
     /// Dispatches to node type or edge type parser based on lookahead.
     fn parse_element_type_specification(&mut self) -> ParseResult<ElementTypeSpecification> {
+        let is_abstract = self.consume_word("ABSTRACT");
+
         // Check for node type keywords
         if self.stream.check(&TokenKind::Node) || self.stream.check(&TokenKind::Vertex) {
-            let node_type = self.parse_node_type_specification()?;
+            let node_type = self.parse_node_type_specification(is_abstract)?;
             return Ok(ElementTypeSpecification::Node(Box::new(node_type)));
         }
 
@@ -128,16 +131,16 @@ impl<'a> GraphTypeParser<'a> {
             || self.stream.check(&TokenKind::Directed)
             || self.stream.check(&TokenKind::Undirected)
         {
-            let edge_type = self.parse_edge_type_specification()?;
+            let edge_type = self.parse_edge_type_specification(is_abstract)?;
             return Ok(ElementTypeSpecification::Edge(Box::new(edge_type)));
         }
 
         if self.stream.check(&TokenKind::LParen) {
             if self.is_edge_pattern_after_left_endpoint() {
-                let edge_type = self.parse_edge_type_specification()?;
+                let edge_type = self.parse_edge_type_specification(is_abstract)?;
                 return Ok(ElementTypeSpecification::Edge(Box::new(edge_type)));
             }
-            let node_type = self.parse_node_type_specification()?;
+            let node_type = self.parse_node_type_specification(is_abstract)?;
             return Ok(ElementTypeSpecification::Node(Box::new(node_type)));
         }
 
@@ -151,17 +154,27 @@ impl<'a> GraphTypeParser<'a> {
     /// Parses a node type specification.
     ///
     /// Syntax: `node_type_pattern`
-    pub fn parse_node_type_specification(&mut self) -> ParseResult<NodeTypeSpec> {
+    pub fn parse_node_type_specification(
+        &mut self,
+        is_abstract: bool,
+    ) -> ParseResult<NodeTypeSpec> {
         let saved = self.stream.position();
-        if let Ok(pattern) = self.parse_node_type_pattern() {
+        if let Ok((pattern, inheritance)) = self.parse_node_type_pattern() {
             let span = pattern.span.clone();
-            return Ok(NodeTypeSpec { pattern, span });
+            return Ok(NodeTypeSpec {
+                is_abstract,
+                inheritance,
+                pattern,
+                span,
+            });
         }
 
         self.stream.set_position(saved);
-        let phrase = self.parse_node_type_phrase()?;
+        let (phrase, inheritance) = self.parse_node_type_phrase()?;
         let span = phrase.span.clone();
         Ok(NodeTypeSpec {
+            is_abstract,
+            inheritance,
             pattern: NodeTypePattern {
                 phrase,
                 span: span.clone(),
@@ -171,8 +184,11 @@ impl<'a> GraphTypeParser<'a> {
     }
 
     /// Parses a node type pattern.
-    fn parse_node_type_pattern(&mut self) -> ParseResult<NodeTypePattern> {
+    fn parse_node_type_pattern(
+        &mut self,
+    ) -> ParseResult<(NodeTypePattern, Option<TypeInheritanceClause>)> {
         let start_span = self.stream.current().span.clone();
+        let mut inheritance = None;
 
         // Optional leading node synonym/type/name prefix.
         if self.stream.consume(&TokenKind::Node) || self.stream.consume(&TokenKind::Vertex) {
@@ -180,6 +196,7 @@ impl<'a> GraphTypeParser<'a> {
             if self.is_regular_identifier_start() {
                 let _ = self.parse_regular_identifier("node type name")?;
             }
+            inheritance = self.parse_inheritance_clause_opt()?;
         }
 
         self.stream.expect(TokenKind::LParen)?;
@@ -189,6 +206,9 @@ impl<'a> GraphTypeParser<'a> {
         } else {
             None
         };
+        if inheritance.is_none() {
+            inheritance = self.parse_inheritance_clause_opt()?;
+        }
         let filler = if self.is_node_type_filler_start() {
             Some(self.parse_node_type_filler()?)
         } else {
@@ -207,16 +227,21 @@ impl<'a> GraphTypeParser<'a> {
             span: merge_spans(&start_span, &phrase_end),
         };
 
-        Ok(NodeTypePattern {
-            span: merge_spans(&start_span, &end_span),
-            phrase,
-        })
+        Ok((
+            NodeTypePattern {
+                span: merge_spans(&start_span, &end_span),
+                phrase,
+            },
+            inheritance,
+        ))
     }
 
     /// Parses a node type phrase.
     ///
     /// Syntax: `[NODE [TYPE]] [node_type_filler] [AS alias]`
-    fn parse_node_type_phrase(&mut self) -> ParseResult<NodeTypePhrase> {
+    fn parse_node_type_phrase(
+        &mut self,
+    ) -> ParseResult<(NodeTypePhrase, Option<TypeInheritanceClause>)> {
         let start_span = self.stream.current().span.clone();
 
         let has_node_keyword =
@@ -231,6 +256,7 @@ impl<'a> GraphTypeParser<'a> {
             let _ = self.parse_regular_identifier("node type name")?;
             has_phrase_name = true;
         }
+        let inheritance = self.parse_inheritance_clause_opt()?;
         let filler = if self.is_node_type_filler_start() {
             Some(self.parse_node_type_filler()?)
         } else {
@@ -253,11 +279,14 @@ impl<'a> GraphTypeParser<'a> {
             .or_else(|| filler.as_ref().map(|f| f.span.clone()))
             .unwrap_or_else(|| start_span.clone());
 
-        Ok(NodeTypePhrase {
-            filler,
-            alias,
-            span: merge_spans(&start_span, &end_span),
-        })
+        Ok((
+            NodeTypePhrase {
+                filler,
+                alias,
+                span: merge_spans(&start_span, &end_span),
+            },
+            inheritance,
+        ))
     }
 
     /// Checks if current position starts a node type filler.
@@ -270,7 +299,7 @@ impl<'a> GraphTypeParser<'a> {
                 | TokenKind::Colon
                 | TokenKind::LBrace
                 | TokenKind::Key
-        )
+        ) || self.is_constraint_start()
     }
 
     /// Parses a local node type alias.
@@ -292,6 +321,7 @@ impl<'a> GraphTypeParser<'a> {
         let mut property_types = None;
         let mut key_label_set = None;
         let implied_content = None;
+        let mut constraints = Vec::new();
 
         // Parse optional label set
         if self.is_label_set_phrase_start() {
@@ -308,6 +338,10 @@ impl<'a> GraphTypeParser<'a> {
             key_label_set = Some(self.parse_node_type_key_label_set()?);
         }
 
+        while self.is_constraint_start() {
+            constraints.push(self.parse_graph_type_constraint()?);
+        }
+
         // implied_content is left as None - this is an optional future enhancement
         // that is not currently part of the GQL grammar specification
 
@@ -316,6 +350,7 @@ impl<'a> GraphTypeParser<'a> {
             .map(|k| k.span.clone())
             .or_else(|| property_types.as_ref().map(|p| p.span.clone()))
             .or_else(|| label_set.as_ref().map(|l| l.span.clone()))
+            .or_else(|| constraints.last().map(|c| c.span()))
             .unwrap_or_else(|| start_span.clone());
 
         Ok(NodeTypeFiller {
@@ -323,6 +358,7 @@ impl<'a> GraphTypeParser<'a> {
             property_types,
             key_label_set,
             implied_content,
+            constraints,
             span: merge_spans(&start_span, &end_span),
         })
     }
@@ -366,18 +402,28 @@ impl<'a> GraphTypeParser<'a> {
     /// Parses an edge type specification.
     ///
     /// Can be directed or undirected edge pattern.
-    pub fn parse_edge_type_specification(&mut self) -> ParseResult<EdgeTypeSpec> {
-        let pattern = self.parse_edge_type_pattern()?;
+    pub fn parse_edge_type_specification(
+        &mut self,
+        is_abstract: bool,
+    ) -> ParseResult<EdgeTypeSpec> {
+        let (pattern, inheritance) = self.parse_edge_type_pattern()?;
         let span = match &pattern {
             EdgeTypePattern::Directed(d) => d.span.clone(),
             EdgeTypePattern::Undirected(u) => u.span.clone(),
         };
 
-        Ok(EdgeTypeSpec { pattern, span })
+        Ok(EdgeTypeSpec {
+            is_abstract,
+            inheritance,
+            pattern,
+            span,
+        })
     }
 
     /// Parses an edge type pattern (directed or undirected).
-    fn parse_edge_type_pattern(&mut self) -> ParseResult<EdgeTypePattern> {
+    fn parse_edge_type_pattern(
+        &mut self,
+    ) -> ParseResult<(EdgeTypePattern, Option<TypeInheritanceClause>)> {
         // Check for edge type phrase (keywords before pattern)
         if self.stream.check(&TokenKind::Directed)
             || self.stream.check(&TokenKind::Undirected)
@@ -392,7 +438,9 @@ impl<'a> GraphTypeParser<'a> {
     }
 
     /// Parses edge type pattern from phrase keywords.
-    fn parse_edge_type_phrase_pattern(&mut self) -> ParseResult<EdgeTypePattern> {
+    fn parse_edge_type_phrase_pattern(
+        &mut self,
+    ) -> ParseResult<(EdgeTypePattern, Option<TypeInheritanceClause>)> {
         let start_span = self.stream.current().span.clone();
 
         // Parse edge kind
@@ -417,6 +465,7 @@ impl<'a> GraphTypeParser<'a> {
         if self.is_regular_identifier_start() {
             let _ = self.parse_regular_identifier("edge type name")?;
         }
+        let inheritance = self.parse_inheritance_clause_opt()?;
 
         // Parse optional phrase content (labels and properties)
         let filler_content =
@@ -425,6 +474,11 @@ impl<'a> GraphTypeParser<'a> {
             } else {
                 None
             };
+
+        let mut constraints = Vec::new();
+        while self.is_constraint_start() {
+            constraints.push(self.parse_graph_type_constraint()?);
+        }
 
         // Expect CONNECTING keyword
         self.stream.expect(TokenKind::Connecting)?;
@@ -451,6 +505,7 @@ impl<'a> GraphTypeParser<'a> {
         let filler = EdgeTypeFiller {
             span: phrase.span.clone(),
             phrase,
+            constraints,
         };
         match pattern_kind {
             EdgeKind::Undirected => {
@@ -458,34 +513,42 @@ impl<'a> GraphTypeParser<'a> {
                     filler: Some(filler),
                     span: pattern_span.clone(),
                 };
-                Ok(EdgeTypePattern::Undirected(EdgeTypePatternUndirected {
-                    left_endpoint,
-                    arc,
-                    right_endpoint,
-                    span: pattern_span,
-                }))
+                Ok((
+                    EdgeTypePattern::Undirected(EdgeTypePatternUndirected {
+                        left_endpoint,
+                        arc,
+                        right_endpoint,
+                        span: pattern_span,
+                    }),
+                    inheritance,
+                ))
             }
             EdgeKind::Directed | EdgeKind::Inferred => {
                 let arc = DirectedArcType::PointingRight(ArcTypePointingRight {
                     filler: Some(filler),
                     span: pattern_span.clone(),
                 });
-                Ok(EdgeTypePattern::Directed(EdgeTypePatternDirected {
-                    left_endpoint,
-                    arc,
-                    right_endpoint,
-                    span: pattern_span,
-                }))
+                Ok((
+                    EdgeTypePattern::Directed(EdgeTypePatternDirected {
+                        left_endpoint,
+                        arc,
+                        right_endpoint,
+                        span: pattern_span,
+                    }),
+                    inheritance,
+                ))
             }
         }
     }
 
     /// Parses visual edge type pattern: `(node)-[edge]->(node)` or `(node)~[edge]~(node)`
-    fn parse_edge_type_visual_pattern(&mut self) -> ParseResult<EdgeTypePattern> {
+    fn parse_edge_type_visual_pattern(
+        &mut self,
+    ) -> ParseResult<(EdgeTypePattern, Option<TypeInheritanceClause>)> {
         let start_span = self.stream.current().span.clone();
 
         // Parse left endpoint: node_type_pattern
-        let left_endpoint = self.parse_node_type_pattern()?;
+        let (left_endpoint, _) = self.parse_node_type_pattern()?;
 
         // Check for directed or undirected arc
         let is_directed = self.stream.check(&TokenKind::Minus)
@@ -514,15 +577,18 @@ impl<'a> GraphTypeParser<'a> {
                 });
 
                 // Parse right endpoint
-                let right_endpoint = self.parse_node_type_pattern()?;
+                let (right_endpoint, _) = self.parse_node_type_pattern()?;
                 let end_span = right_endpoint.span.clone();
 
-                Ok(EdgeTypePattern::Directed(EdgeTypePatternDirected {
-                    left_endpoint,
-                    arc,
-                    right_endpoint,
-                    span: merge_spans(&start_span, &end_span),
-                }))
+                Ok((
+                    EdgeTypePattern::Directed(EdgeTypePatternDirected {
+                        left_endpoint,
+                        arc,
+                        right_endpoint,
+                        span: merge_spans(&start_span, &end_span),
+                    }),
+                    None,
+                ))
             } else {
                 // -[edge]->
                 self.stream.expect(TokenKind::Minus)?;
@@ -538,15 +604,18 @@ impl<'a> GraphTypeParser<'a> {
                 });
 
                 // Parse right endpoint
-                let right_endpoint = self.parse_node_type_pattern()?;
+                let (right_endpoint, _) = self.parse_node_type_pattern()?;
                 let end_span = right_endpoint.span.clone();
 
-                Ok(EdgeTypePattern::Directed(EdgeTypePatternDirected {
-                    left_endpoint,
-                    arc,
-                    right_endpoint,
-                    span: merge_spans(&start_span, &end_span),
-                }))
+                Ok((
+                    EdgeTypePattern::Directed(EdgeTypePatternDirected {
+                        left_endpoint,
+                        arc,
+                        right_endpoint,
+                        span: merge_spans(&start_span, &end_span),
+                    }),
+                    None,
+                ))
             }
         } else if is_undirected {
             // ~[edge]~
@@ -560,15 +629,18 @@ impl<'a> GraphTypeParser<'a> {
             };
 
             // Parse right endpoint
-            let right_endpoint = self.parse_node_type_pattern()?;
+            let (right_endpoint, _) = self.parse_node_type_pattern()?;
             let end_span = right_endpoint.span.clone();
 
-            Ok(EdgeTypePattern::Undirected(EdgeTypePatternUndirected {
-                left_endpoint,
-                arc,
-                right_endpoint,
-                span: merge_spans(&start_span, &end_span),
-            }))
+            Ok((
+                EdgeTypePattern::Undirected(EdgeTypePatternUndirected {
+                    left_endpoint,
+                    arc,
+                    right_endpoint,
+                    span: merge_spans(&start_span, &end_span),
+                }),
+                None,
+            ))
         } else {
             Err(self.error_here("expected edge pattern: -, <-, or ~".to_string()))
         }
@@ -600,11 +672,13 @@ impl<'a> GraphTypeParser<'a> {
         self.is_label_set_phrase_start()
             || self.stream.check(&TokenKind::LBrace)
             || matches!(self.stream.current().kind, TokenKind::Identifier(_))
+            || self.is_constraint_start()
     }
 
     /// Parses edge type filler.
     fn parse_edge_type_filler(&mut self) -> ParseResult<EdgeTypeFiller> {
         let start_span = self.stream.current().span.clone();
+        let mut constraints = Vec::new();
 
         // For now, we'll create a simple phrase with minimal content
         // A full implementation would parse edge labels/properties more completely
@@ -614,6 +688,16 @@ impl<'a> GraphTypeParser<'a> {
             } else {
                 None
             };
+
+        while self.is_constraint_start() {
+            constraints.push(self.parse_graph_type_constraint()?);
+        }
+
+        let end_span = constraints
+            .last()
+            .map(|constraint| constraint.span())
+            .or_else(|| filler_content.as_ref().map(|content| content.span.clone()))
+            .unwrap_or_else(|| start_span.clone());
 
         // Create a minimal endpoint pair for now
         let endpoint_pair = EndpointPair {
@@ -649,12 +733,13 @@ impl<'a> GraphTypeParser<'a> {
                 endpoint_pair,
                 span: start_span.clone(),
             },
-            span: start_span.clone(),
+            span: merge_spans(&start_span, &end_span),
         };
 
         Ok(EdgeTypeFiller {
+            constraints,
             phrase,
-            span: start_span,
+            span: merge_spans(&start_span, &end_span),
         })
     }
 
@@ -767,7 +852,7 @@ impl<'a> GraphTypeParser<'a> {
                 span,
             }
         } else {
-            self.parse_node_type_pattern()?
+            self.parse_node_type_pattern()?.0
         };
         let span = node_type.span.clone();
 
@@ -963,6 +1048,196 @@ impl<'a> GraphTypeParser<'a> {
         Ok(LabelName { name, span })
     }
 
+    fn parse_inheritance_clause_opt(&mut self) -> ParseResult<Option<TypeInheritanceClause>> {
+        if !self.is_inheritance_start() {
+            return Ok(None);
+        }
+
+        let start_span = self.stream.current().span.clone();
+        self.stream.advance();
+
+        let mut parents = Vec::new();
+        let first = self.parse_type_reference_identifier("parent type name")?;
+        parents.push(InheritedTypeReference {
+            name: first.0,
+            span: first.1.clone(),
+        });
+
+        while self.stream.consume(&TokenKind::Comma) {
+            let parent = self.parse_type_reference_identifier("parent type name")?;
+            parents.push(InheritedTypeReference {
+                name: parent.0,
+                span: parent.1.clone(),
+            });
+        }
+
+        let end_span = parents
+            .last()
+            .map(|parent| parent.span.clone())
+            .unwrap_or_else(|| start_span.clone());
+
+        Ok(Some(TypeInheritanceClause {
+            parents,
+            span: merge_spans(&start_span, &end_span),
+        }))
+    }
+
+    fn is_inheritance_start(&self) -> bool {
+        self.check_word("INHERITS") || self.check_word("EXTENDS") || self.check_word("UNDER")
+    }
+
+    fn is_constraint_start(&self) -> bool {
+        self.check_word("CONSTRAINT")
+            || self.check_word("UNIQUE")
+            || self.check_word("CHECK")
+            || self.check_word("MANDATORY")
+            || self.check_word("KEY")
+    }
+
+    fn parse_graph_type_constraint(&mut self) -> ParseResult<GraphTypeConstraint> {
+        let start_span = self.stream.current().span.clone();
+
+        if self.consume_word("CONSTRAINT") && !self.is_constraint_start() {
+            return Err(self.error_here("expected constraint name after CONSTRAINT".to_string()));
+        }
+
+        let (raw_name, name_span) = self.parse_type_reference_identifier("constraint name")?;
+        let mut arguments = if self.stream.check(&TokenKind::LParen) {
+            self.parse_constraint_arguments()?
+        } else {
+            Vec::new()
+        };
+
+        // Normalize a standalone KEY constraint with no argument list to a single
+        // synthetic argument if KEY-style label-set syntax follows.
+        if raw_name.eq_ignore_ascii_case("KEY")
+            && arguments.is_empty()
+            && self.is_regular_identifier_start()
+        {
+            let (name, span) = self.parse_regular_identifier("constraint argument")?;
+            arguments.push(GraphTypeConstraintArgument { raw: name, span });
+        }
+
+        let end_span = arguments
+            .last()
+            .map(|argument| argument.span.clone())
+            .unwrap_or(name_span.clone());
+        let span = merge_spans(&start_span, &end_span);
+        let upper = raw_name.to_ascii_uppercase();
+
+        Ok(match upper.as_str() {
+            "KEY" => GraphTypeConstraint::Key { arguments, span },
+            "UNIQUE" => GraphTypeConstraint::Unique { arguments, span },
+            "MANDATORY" => GraphTypeConstraint::Mandatory { arguments, span },
+            "CHECK" => GraphTypeConstraint::Check { arguments, span },
+            _ => GraphTypeConstraint::Custom {
+                name: raw_name,
+                arguments,
+                span,
+            },
+        })
+    }
+
+    fn parse_constraint_arguments(&mut self) -> ParseResult<Vec<GraphTypeConstraintArgument>> {
+        self.stream.expect(TokenKind::LParen)?;
+        let mut arguments = Vec::new();
+        let mut segment_start = self.stream.position();
+        let mut depth = 0usize;
+
+        while !self.stream.check(&TokenKind::Eof) {
+            if depth == 0 && self.stream.check(&TokenKind::RParen) {
+                if segment_start < self.stream.position() {
+                    arguments.push(
+                        self.build_constraint_argument(segment_start, self.stream.position())?,
+                    );
+                }
+                self.stream.advance();
+                return Ok(arguments);
+            }
+
+            let current_kind = self.stream.current().kind.clone();
+            if depth == 0 && matches!(current_kind, TokenKind::Comma) {
+                if segment_start < self.stream.position() {
+                    arguments.push(
+                        self.build_constraint_argument(segment_start, self.stream.position())?,
+                    );
+                }
+                self.stream.advance();
+                segment_start = self.stream.position();
+                continue;
+            }
+
+            match current_kind {
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => depth += 1,
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                    depth = depth.saturating_sub(1);
+                }
+                _ => {}
+            }
+
+            self.stream.advance();
+        }
+
+        Err(self.error_here("expected ')' to close constraint argument list".to_string()))
+    }
+
+    fn build_constraint_argument(
+        &self,
+        start: usize,
+        end: usize,
+    ) -> ParseResult<GraphTypeConstraintArgument> {
+        let tokens = &self.stream.tokens()[start..end];
+        if tokens.is_empty() {
+            return Err(self.error_here("empty constraint argument".to_string()));
+        }
+        let span = merge_spans(&tokens[0].span, &tokens[tokens.len() - 1].span);
+        let raw = tokens
+            .iter()
+            .map(|token| token.kind.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        Ok(GraphTypeConstraintArgument {
+            raw: raw.into(),
+            span,
+        })
+    }
+
+    fn parse_type_reference_identifier(
+        &mut self,
+        expected: &str,
+    ) -> ParseResult<(smol_str::SmolStr, Span)> {
+        let token = self.stream.current().clone();
+        match &token.kind {
+            TokenKind::Identifier(name)
+            | TokenKind::DelimitedIdentifier(name)
+            | TokenKind::ReservedKeyword(name)
+            | TokenKind::PreReservedKeyword(name)
+            | TokenKind::NonReservedKeyword(name) => {
+                self.stream.advance();
+                Ok((name.clone(), token.span))
+            }
+            kind if kind.is_keyword() => {
+                self.stream.advance();
+                Ok((smol_str::SmolStr::new(kind.to_string()), token.span))
+            }
+            _ => Err(self.error_here(format!("expected {expected}"))),
+        }
+    }
+
+    fn check_word(&self, word: &str) -> bool {
+        token_matches_word(&self.stream.current().kind, word)
+    }
+
+    fn consume_word(&mut self, word: &str) -> bool {
+        if self.check_word(word) {
+            self.stream.advance();
+            true
+        } else {
+            false
+        }
+    }
+
     fn parse_regular_identifier(
         &mut self,
         expected: &str,
@@ -1029,5 +1304,16 @@ fn label_set_phrase_span(phrase: &LabelSetPhrase) -> Span {
         LabelSetPhrase::Label(l) => l.span.clone(),
         LabelSetPhrase::Labels(ls) => ls.span.clone(),
         LabelSetPhrase::IsLabelSet(ls) => ls.span.clone(),
+    }
+}
+
+fn token_matches_word(kind: &TokenKind, word: &str) -> bool {
+    match kind {
+        TokenKind::Identifier(name)
+        | TokenKind::DelimitedIdentifier(name)
+        | TokenKind::ReservedKeyword(name)
+        | TokenKind::PreReservedKeyword(name)
+        | TokenKind::NonReservedKeyword(name) => name.eq_ignore_ascii_case(word),
+        _ => kind.to_string().eq_ignore_ascii_case(word),
     }
 }

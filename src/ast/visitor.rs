@@ -467,10 +467,8 @@ pub fn walk_path_pattern_expression<V: AstVisitor + ?Sized>(
             visitor.visit_path_pattern_expression(right)
         }
         PathPatternExpression::Alternation { alternatives, .. } => {
-            for term in alternatives {
-                for factor in &term.factors {
-                    try_visit!(visitor.visit_path_factor(factor));
-                }
+            for alternative in alternatives {
+                try_visit!(visitor.visit_path_pattern_expression(alternative));
             }
             ControlFlow::Continue(())
         }
@@ -1122,10 +1120,8 @@ pub fn walk_path_pattern_expression_mut<V: AstVisitorMut + ?Sized>(
             visitor.visit_path_pattern_expression_mut(right)
         }
         PathPatternExpression::Alternation { alternatives, .. } => {
-            for term in alternatives {
-                for factor in &mut term.factors {
-                    try_visit!(visitor.visit_path_factor_mut(factor));
-                }
+            for alternative in alternatives {
+                try_visit!(visitor.visit_path_pattern_expression_mut(alternative));
             }
             ControlFlow::Continue(())
         }

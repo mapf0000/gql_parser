@@ -232,6 +232,7 @@ const RESERVED_WORDS: &[&str] = &[
     "TIMESTAMP",
     "TRAILING",
     "TRIM",
+    "TRIM_LIST",
     "TYPED",
     "UBIGINT",
     "UINT",

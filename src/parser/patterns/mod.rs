@@ -15,6 +15,13 @@ mod path;
 /// Parse result with optional value and diagnostics.
 type ParseResult<T> = LegacyParseResult<T>;
 
+#[derive(Clone, Copy)]
+pub(super) enum PatternSyncContext {
+    StatementBoundary,
+    WhereOrStatementBoundary,
+    PathPatternBoundary,
+}
+
 /// Parses a graph pattern starting at the given position.
 pub fn parse_graph_pattern(tokens: &[Token], pos: &mut usize) -> ParseResult<GraphPattern> {
     let mut parser = PatternParser::new(tokens, *pos);
@@ -481,11 +488,15 @@ impl<'a> PatternParser<'a> {
     }
 
     fn skip_to_where_or_statement_boundary(&mut self) {
-        self.skip_to_token(|kind| matches!(kind, TokenKind::Where) || is_query_boundary(kind));
+        self.skip_to_sync(PatternSyncContext::WhereOrStatementBoundary);
     }
 
     fn skip_to_statement_boundary(&mut self) {
-        self.skip_to_token(is_query_boundary);
+        self.skip_to_sync(PatternSyncContext::StatementBoundary);
+    }
+
+    pub(super) fn skip_to_sync(&mut self, context: PatternSyncContext) {
+        self.skip_to_token(|kind| is_sync_token(kind, context));
     }
 
     fn skip_to_token<F>(&mut self, mut predicate: F)
@@ -549,7 +560,7 @@ fn identifier_from_kind(kind: &TokenKind) -> Option<SmolStr> {
     }
 }
 
-fn is_query_boundary(kind: &TokenKind) -> bool {
+pub(super) fn is_query_boundary(kind: &TokenKind) -> bool {
     matches!(
         kind,
         TokenKind::Semicolon
@@ -576,6 +587,23 @@ fn is_query_boundary(kind: &TokenKind) -> bool {
             | TokenKind::RBrace
             | TokenKind::RParen
     )
+}
+
+pub(super) fn is_path_pattern_delimiter(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Comma | TokenKind::Keep | TokenKind::Where | TokenKind::Yield
+    ) || is_query_boundary(kind)
+}
+
+fn is_sync_token(kind: &TokenKind, context: PatternSyncContext) -> bool {
+    match context {
+        PatternSyncContext::StatementBoundary => is_query_boundary(kind),
+        PatternSyncContext::WhereOrStatementBoundary => {
+            matches!(kind, TokenKind::Where) || is_query_boundary(kind)
+        }
+        PatternSyncContext::PathPatternBoundary => is_path_pattern_delimiter(kind),
+    }
 }
 
 fn is_elements_keyword(kind: &TokenKind) -> bool {

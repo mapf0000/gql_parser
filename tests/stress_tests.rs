@@ -149,6 +149,55 @@ fn complex_pattern_with_quantifiers_and_labels() {
 }
 
 #[test]
+fn deeply_nested_parenthesized_quantifiers_stress() {
+    let mut pattern = String::from("(n)");
+    for _ in 0..30 {
+        pattern = format!("({}){{1,2}}", pattern);
+    }
+
+    let query = format!("MATCH {} RETURN n", pattern);
+    let result = parse(&query);
+    assert!(
+        result.ast.is_some(),
+        "deeply nested quantified patterns should parse without panicking"
+    );
+}
+
+#[test]
+fn mixed_union_multiset_alternation_stress() {
+    let mut body = String::new();
+    for i in 0..20 {
+        if i > 0 {
+            if i % 2 == 0 {
+                body.push_str("|+|");
+            } else {
+                body.push('|');
+            }
+        }
+        body.push_str(&format!("(n{})", i));
+    }
+
+    let query = format!("MATCH {} RETURN 1", body);
+    let result = parse(&query);
+    assert!(
+        result.ast.is_some(),
+        "mixed union/alternation stress input should be handled"
+    );
+}
+
+#[test]
+fn quantifier_rollback_ambiguity_fuzz_regression() {
+    for depth in 1..=40 {
+        let mut pattern = String::from("(n)");
+        for _ in 0..depth {
+            pattern = format!("({}){{1,2}}", pattern);
+        }
+        let source = format!("MATCH {} RETURN n", pattern);
+        let _ = parse(&source);
+    }
+}
+
+#[test]
 fn large_string_literal_1kb() {
     // Test with 1KB string literal
     let large_string = "x".repeat(1024);

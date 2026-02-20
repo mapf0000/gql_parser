@@ -6,8 +6,8 @@ use crate::ast::{
     CreateSchemaStatement, DropGraphStatement, DropGraphTypeStatement, DropProcedureStatement,
     DropSchemaStatement, Expression, GraphReference, GraphTypeReference, GraphTypeSource,
     GraphTypeSpec, MutationStatement, Program, QueryStatement, RollbackCommand, SchemaReference,
-    SessionCloseCommand, SessionCommand, SessionResetCommand, SessionResetTarget, SessionSetCommand,
-    SessionSetGraphClause, SessionSetParameterClause, SessionSetSchemaClause,
+    SessionCloseCommand, SessionCommand, SessionResetCommand, SessionResetTarget,
+    SessionSetCommand, SessionSetGraphClause, SessionSetParameterClause, SessionSetSchemaClause,
     SessionSetTimeZoneClause, SessionStatement, Span, StartTransactionCommand, Statement,
     TransactionAccessMode, TransactionCharacteristics, TransactionCommand, TransactionMode,
     TransactionStatement,
@@ -16,7 +16,9 @@ use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
 use crate::parser::base::TokenStream;
 use crate::parser::mutation::parse_linear_data_modifying_statement;
-use crate::parser::procedure::{parse_call_procedure_statement, parse_nested_procedure_specification};
+use crate::parser::procedure::{
+    parse_call_procedure_statement, parse_nested_procedure_specification,
+};
 use crate::parser::query::parse_query;
 use crate::parser::references as reference_parser;
 use smol_str::SmolStr;
@@ -69,7 +71,8 @@ pub(crate) fn parse_program_tokens(tokens: &[Token], source_len: usize) -> (Prog
                 cursor += 1;
             }
             SyntaxToken::Other => {
-                diagnostics.push(
+                push_diag_dedup(
+                    &mut diagnostics,
                     Diag::error("unexpected token in statement")
                         .with_primary_label(
                             tokens[cursor].span.clone(),
@@ -84,7 +87,7 @@ pub(crate) fn parse_program_tokens(tokens: &[Token], source_len: usize) -> (Prog
                 let end = find_statement_end(tokens, cursor, class);
                 let statement_tokens = &tokens[cursor..end];
                 let (statement_opt, mut statement_diags) = parse_statement(class, statement_tokens);
-                diagnostics.append(&mut statement_diags);
+                append_diags_dedup(&mut diagnostics, &mut statement_diags);
                 if let Some(statement) = statement_opt {
                     statements.push(statement);
                 }
@@ -152,16 +155,32 @@ fn syntax_to_statement_class(token: SyntaxToken) -> StatementClass {
     }
 }
 
+fn is_statement_separator(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Semicolon | TokenKind::Next | TokenKind::Eof
+    )
+}
+
+fn is_query_or_mutation_sync_start(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Session
+            | TokenKind::Start
+            | TokenKind::Commit
+            | TokenKind::Rollback
+            | TokenKind::Create
+            | TokenKind::Drop
+    )
+}
+
 fn find_statement_end(tokens: &[Token], start: usize, class: StatementClass) -> usize {
     let mut cursor = start + 1;
     let starts_with_use = matches!(tokens.get(start).map(|t| &t.kind), Some(TokenKind::Use));
 
     if matches!(class, StatementClass::Session | StatementClass::Transaction) {
         while cursor < tokens.len() {
-            if matches!(
-                tokens[cursor].kind,
-                TokenKind::Semicolon | TokenKind::Next | TokenKind::Eof
-            ) {
+            if is_statement_separator(&tokens[cursor].kind) {
                 return cursor;
             }
             cursor += 1;
@@ -186,10 +205,7 @@ fn find_statement_end(tokens: &[Token], start: usize, class: StatementClass) -> 
             let at_top_level = paren_depth == 0 && brace_depth == 0 && bracket_depth == 0;
 
             if at_top_level {
-                if matches!(
-                    kind,
-                    TokenKind::Semicolon | TokenKind::Next | TokenKind::Eof
-                ) {
+                if is_statement_separator(kind) {
                     return cursor;
                 }
 
@@ -227,15 +243,7 @@ fn find_statement_end(tokens: &[Token], start: usize, class: StatementClass) -> 
         }
 
         if matches!(class, StatementClass::Query) && starts_with_use {
-            if matches!(
-                kind,
-                TokenKind::Session
-                    | TokenKind::Start
-                    | TokenKind::Commit
-                    | TokenKind::Rollback
-                    | TokenKind::Create
-                    | TokenKind::Drop
-            ) {
+            if is_query_or_mutation_sync_start(kind) {
                 return cursor;
             }
             cursor += 1;
@@ -243,15 +251,7 @@ fn find_statement_end(tokens: &[Token], start: usize, class: StatementClass) -> 
         }
 
         if matches!(class, StatementClass::Mutation) {
-            if matches!(
-                kind,
-                TokenKind::Session
-                    | TokenKind::Start
-                    | TokenKind::Commit
-                    | TokenKind::Rollback
-                    | TokenKind::Create
-                    | TokenKind::Drop
-            ) {
+            if is_query_or_mutation_sync_start(kind) {
                 return cursor;
             }
             cursor += 1;
@@ -1029,30 +1029,9 @@ fn parse_create_catalog_statement(tokens: &[Token]) -> ParseOutcome<CatalogState
 
         let mut source = None;
         if cursor < tokens.len() {
-            let source_start = cursor;
-            if matches!(tokens[cursor].kind, TokenKind::As) {
-                cursor += 1;
-            }
-
-            if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::Copy) {
-                cursor += 1;
-                if cursor >= tokens.len() || !matches!(tokens[cursor].kind, TokenKind::Of) {
-                    return Err(expected_token_diag(tokens, cursor, "OF", "COPY clause"));
-                }
-                cursor += 1;
-                let (copy_ref, next_cursor) =
-                    parse_graph_type_reference_until(tokens, cursor, |_| false, "graph type")?;
-                source = Some(GraphTypeSource::AsCopyOf {
-                    graph_type: copy_ref,
-                    span: span_for_segment(tokens, source_start, next_cursor),
-                });
-                cursor = next_cursor;
-            } else {
-                source = Some(GraphTypeSource::Detailed {
-                    span: span_for_segment(tokens, source_start, tokens.len()),
-                });
-                cursor = tokens.len();
-            }
+            let (parsed_source, next_cursor) = parse_graph_type_source(tokens, cursor)?;
+            source = Some(parsed_source);
+            cursor = next_cursor;
         }
 
         if cursor < tokens.len() {
@@ -1239,6 +1218,89 @@ fn parse_graph_type_spec(
 }
 
 fn parse_inline_graph_type_spec(tokens: &[Token], start: usize) -> ParseOutcome<usize> {
+    let (_spec, next_cursor) = parse_inline_graph_type_spec_with_ast(tokens, start)?;
+    Ok(next_cursor)
+}
+
+fn parse_graph_type_source(
+    tokens: &[Token],
+    mut cursor: usize,
+) -> ParseOutcome<(GraphTypeSource, usize)> {
+    let start = cursor;
+    let has_as = if cursor < tokens.len() && matches!(tokens[cursor].kind, TokenKind::As) {
+        cursor += 1;
+        true
+    } else {
+        false
+    };
+
+    if cursor >= tokens.len() {
+        return Err(expected_token_diag(
+            tokens,
+            cursor,
+            "graph type source",
+            "CREATE GRAPH TYPE",
+        ));
+    }
+
+    if matches!(tokens[cursor].kind, TokenKind::Copy) {
+        cursor += 1;
+        if cursor >= tokens.len() || !matches!(tokens[cursor].kind, TokenKind::Of) {
+            return Err(expected_token_diag(tokens, cursor, "OF", "COPY clause"));
+        }
+        cursor += 1;
+        let (copy_ref, next_cursor) =
+            parse_graph_type_reference_until(tokens, cursor, |_| false, "graph type")?;
+        return Ok((
+            GraphTypeSource::AsCopyOf {
+                graph_type: copy_ref,
+                span: span_for_segment(tokens, start, next_cursor),
+            },
+            next_cursor,
+        ));
+    }
+
+    if matches!(tokens[cursor].kind, TokenKind::Like) {
+        cursor += 1;
+        let (graph, next_cursor) =
+            parse_graph_reference_until(tokens, cursor, |_| false, "graph reference")?;
+        return Ok((
+            GraphTypeSource::LikeGraph {
+                graph,
+                span: span_for_segment(tokens, start, next_cursor),
+            },
+            next_cursor,
+        ));
+    }
+
+    if matches!(tokens[cursor].kind, TokenKind::LBrace) {
+        let (specification, next_cursor) = parse_inline_graph_type_spec_with_ast(tokens, cursor)?;
+        return Ok((
+            GraphTypeSource::Detailed {
+                specification,
+                span: span_for_segment(tokens, start, next_cursor),
+            },
+            next_cursor,
+        ));
+    }
+
+    let context = if has_as {
+        "graph type source after AS"
+    } else {
+        "graph type source"
+    };
+    Err(expected_token_diag(
+        tokens,
+        cursor,
+        "COPY, LIKE, or '{'",
+        context,
+    ))
+}
+
+fn parse_inline_graph_type_spec_with_ast(
+    tokens: &[Token],
+    start: usize,
+) -> ParseOutcome<(crate::ast::NestedGraphTypeSpec, usize)> {
     if start >= tokens.len() || !matches!(tokens[start].kind, TokenKind::LBrace) {
         return Err(expected_token_diag(
             tokens,
@@ -1275,9 +1337,21 @@ fn parse_inline_graph_type_spec(tokens: &[Token], start: usize) -> ParseOutcome<
     }
 
     let mut parser = crate::parser::graph_type::GraphTypeParser::new(&inline_tokens);
-    parser.parse_nested_graph_type_specification()?;
+    let spec = parser.parse_nested_graph_type_specification()?;
+    if !matches!(
+        inline_tokens
+            .get(parser.current_position())
+            .map(|token| &token.kind),
+        Some(TokenKind::Eof)
+    ) {
+        return Err(unexpected_token_diag(
+            &inline_tokens,
+            parser.current_position(),
+            "inline graph type specification",
+        ));
+    }
 
-    Ok(end_idx + 1)
+    Ok((spec, end_idx + 1))
 }
 
 fn parse_as_copy_of_graph(
@@ -1352,11 +1426,13 @@ fn parse_drop_catalog_statement(tokens: &[Token]) -> ParseOutcome<CatalogStateme
             return Err(unexpected_token_diag(tokens, next_cursor, "DROP PROCEDURE"));
         }
 
-        return Ok(CatalogStatementKind::DropProcedure(DropProcedureStatement {
-            if_exists,
-            procedure,
-            span: slice_span(tokens),
-        }));
+        return Ok(CatalogStatementKind::DropProcedure(
+            DropProcedureStatement {
+                if_exists,
+                procedure,
+                span: slice_span(tokens),
+            },
+        ));
     }
 
     let property = if matches!(tokens[cursor].kind, TokenKind::Property) {
@@ -1513,7 +1589,12 @@ fn consume_balanced_group(
     context: &str,
 ) -> ParseOutcome<usize> {
     if start >= tokens.len() || tokens[start].kind != open {
-        return Err(expected_token_diag(tokens, start, &open.to_string(), context));
+        return Err(expected_token_diag(
+            tokens,
+            start,
+            &open.to_string(),
+            context,
+        ));
     }
 
     let mut cursor = start + 1;
@@ -1531,7 +1612,12 @@ fn consume_balanced_group(
         cursor += 1;
     }
 
-    Err(expected_token_diag(tokens, cursor, &close.to_string(), context))
+    Err(expected_token_diag(
+        tokens,
+        cursor,
+        &close.to_string(),
+        context,
+    ))
 }
 
 fn parse_schema_reference_until<F>(
@@ -1683,11 +1769,17 @@ fn consume_if_not_exists(tokens: &[Token], cursor: &mut usize) -> bool {
 
     if stream.check(&TokenKind::If)
         && matches!(
-            stream.tokens().get(stream.position() + 1).map(|token| &token.kind),
+            stream
+                .tokens()
+                .get(stream.position() + 1)
+                .map(|token| &token.kind),
             Some(TokenKind::Not)
         )
         && matches!(
-            stream.tokens().get(stream.position() + 2).map(|token| &token.kind),
+            stream
+                .tokens()
+                .get(stream.position() + 2)
+                .map(|token| &token.kind),
             Some(TokenKind::Exists)
         )
     {
@@ -1709,7 +1801,10 @@ fn consume_if_exists(tokens: &[Token], cursor: &mut usize) -> bool {
 
     if stream.check(&TokenKind::If)
         && matches!(
-            stream.tokens().get(stream.position() + 1).map(|token| &token.kind),
+            stream
+                .tokens()
+                .get(stream.position() + 1)
+                .map(|token| &token.kind),
             Some(TokenKind::Exists)
         )
     {
@@ -1787,6 +1882,31 @@ fn span_for_segment(tokens: &[Token], start: usize, end: usize) -> Span {
     }
 }
 
+fn append_diags_dedup(into: &mut Vec<Diag>, incoming: &mut Vec<Diag>) {
+    for diag in incoming.drain(..) {
+        push_diag_dedup(into, diag);
+    }
+}
+
+fn push_diag_dedup(into: &mut Vec<Diag>, diag: Diag) {
+    let is_duplicate = into
+        .last()
+        .is_some_and(|existing| diag_equivalent(existing, &diag));
+    if !is_duplicate {
+        into.push(diag);
+    }
+}
+
+fn diag_equivalent(left: &Diag, right: &Diag) -> bool {
+    if left.severity != right.severity || left.code != right.code || left.message != right.message {
+        return false;
+    }
+
+    let left_label = left.labels.first().map(|label| (&label.span, &label.role));
+    let right_label = right.labels.first().map(|label| (&label.span, &label.role));
+    left_label == right_label
+}
+
 fn synchronize_top_level(tokens: &[Token], mut cursor: usize) -> usize {
     while cursor < tokens.len() {
         match classify(&tokens[cursor].kind) {
@@ -1839,6 +1959,7 @@ mod tests {
     use crate::ast::query::{
         LinearQuery, PrimitiveQueryStatement, PrimitiveResultStatement, Query,
     };
+    use crate::lexer::token::TokenKind;
     use crate::lexer::tokenize;
 
     fn parse_source(source: &str) -> (Program, Vec<Diag>) {
@@ -1944,6 +2065,38 @@ mod tests {
         assert_eq!(program.statements.len(), 1);
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("unexpected token"));
+    }
+
+    #[test]
+    fn synchronize_top_level_resumes_at_statement_start() {
+        let source = "x x MATCH (n) RETURN n";
+        let lex = tokenize(source);
+        let cursor = synchronize_top_level(&lex.tokens, 1);
+        assert!(matches!(lex.tokens[cursor].kind, TokenKind::Match));
+    }
+
+    #[test]
+    fn synchronize_top_level_skips_semicolon_run() {
+        let source = "x ; ; MATCH (n) RETURN n";
+        let lex = tokenize(source);
+        let cursor = synchronize_top_level(&lex.tokens, 1);
+        assert!(matches!(lex.tokens[cursor].kind, TokenKind::Match));
+    }
+
+    #[test]
+    fn append_diags_dedup_suppresses_adjacent_duplicate_diagnostics() {
+        let mut target = Vec::new();
+        let mut incoming = vec![
+            Diag::error("expected token")
+                .with_primary_label(0..1, "first")
+                .with_code("P999"),
+            Diag::error("expected token")
+                .with_primary_label(0..1, "first")
+                .with_code("P999"),
+        ];
+
+        append_diags_dedup(&mut target, &mut incoming);
+        assert_eq!(target.len(), 1);
     }
 
     #[test]
@@ -2132,7 +2285,10 @@ mod tests {
     fn parse_create_procedure_statement() {
         let source = "CREATE PROCEDURE my_proc AS { RETURN 1 }";
         let (program, diagnostics) = parse_source(source);
-        assert!(diagnostics.is_empty(), "unexpected diagnostics: {diagnostics:?}");
+        assert!(
+            diagnostics.is_empty(),
+            "unexpected diagnostics: {diagnostics:?}"
+        );
         assert_eq!(program.statements.len(), 1);
 
         let Statement::Catalog(stmt) = &program.statements[0] else {
@@ -2153,7 +2309,10 @@ mod tests {
     fn parse_create_or_replace_procedure_with_signature() {
         let source = "CREATE OR REPLACE PROCEDURE my_proc(a, b) { RETURN 1 }";
         let (program, diagnostics) = parse_source(source);
-        assert!(diagnostics.is_empty(), "unexpected diagnostics: {diagnostics:?}");
+        assert!(
+            diagnostics.is_empty(),
+            "unexpected diagnostics: {diagnostics:?}"
+        );
         assert_eq!(program.statements.len(), 1);
 
         let Statement::Catalog(stmt) = &program.statements[0] else {
@@ -2169,7 +2328,10 @@ mod tests {
     fn parse_drop_procedure_statement() {
         let source = "DROP PROCEDURE IF EXISTS my_proc";
         let (program, diagnostics) = parse_source(source);
-        assert!(diagnostics.is_empty(), "unexpected diagnostics: {diagnostics:?}");
+        assert!(
+            diagnostics.is_empty(),
+            "unexpected diagnostics: {diagnostics:?}"
+        );
         assert_eq!(program.statements.len(), 1);
 
         let Statement::Catalog(stmt) = &program.statements[0] else {

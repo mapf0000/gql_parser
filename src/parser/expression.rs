@@ -837,9 +837,9 @@ impl<'a> ExpressionParser<'a> {
 
             while depth > 0 {
                 if self.stream.check(&TokenKind::Eof) {
-                    return Err(self.stream.error_here(
-                        "expected ')' to close window specification after OVER",
-                    ));
+                    return Err(self
+                        .stream
+                        .error_here("expected ')' to close window specification after OVER"));
                 }
 
                 match &self.stream.current().kind {
@@ -870,9 +870,9 @@ impl<'a> ExpressionParser<'a> {
             return Ok(end);
         }
 
-        Err(self.stream.error_here(
-            "expected window specification or window name after OVER",
-        ))
+        Err(self
+            .stream
+            .error_here("expected window specification or window name after OVER"))
     }
 
     fn parse_function_name(&mut self) -> ParseResult<FunctionName> {
@@ -1015,6 +1015,7 @@ impl<'a> ExpressionParser<'a> {
             "DURATION_BETWEEN" => FunctionName::DurationBetween,
 
             "ELEMENTS" => FunctionName::Elements,
+            "TRIM_LIST" => FunctionName::TrimList,
             "CARDINALITY" => FunctionName::Cardinality,
             "SIZE" => FunctionName::Size,
             "PATH_LENGTH" => FunctionName::PathLength,
@@ -1539,6 +1540,59 @@ mod tests {
             parse_expr("CURRENT_DATE()").unwrap(),
             Expression::FunctionCall(FunctionCall {
                 name: FunctionName::CurrentDate,
+                ..
+            })
+        ));
+        assert!(matches!(
+            parse_expr("ZONED_TIME('10:00:00+00:00')").unwrap(),
+            Expression::FunctionCall(FunctionCall {
+                name: FunctionName::ZonedTime,
+                ..
+            })
+        ));
+        assert!(matches!(
+            parse_expr("LOCAL_DATETIME('2024-01-01T10:00:00')").unwrap(),
+            Expression::FunctionCall(FunctionCall {
+                name: FunctionName::LocalDatetime,
+                ..
+            })
+        ));
+        assert!(matches!(
+            parse_expr("DURATION_BETWEEN(DATE('2024-01-01'), DATE('2024-01-02'))").unwrap(),
+            Expression::FunctionCall(FunctionCall {
+                name: FunctionName::DurationBetween,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_specialized_string_and_list_functions() {
+        assert!(matches!(
+            parse_expr("BTRIM(name)").unwrap(),
+            Expression::FunctionCall(FunctionCall {
+                name: FunctionName::BTrim,
+                ..
+            })
+        ));
+        assert!(matches!(
+            parse_expr("CHAR_LENGTH(name)").unwrap(),
+            Expression::FunctionCall(FunctionCall {
+                name: FunctionName::CharLength,
+                ..
+            })
+        ));
+        assert!(matches!(
+            parse_expr("BYTE_LENGTH(name)").unwrap(),
+            Expression::FunctionCall(FunctionCall {
+                name: FunctionName::ByteLength,
+                ..
+            })
+        ));
+        assert!(matches!(
+            parse_expr("TRIM_LIST(values)").unwrap(),
+            Expression::FunctionCall(FunctionCall {
+                name: FunctionName::TrimList,
                 ..
             })
         ));

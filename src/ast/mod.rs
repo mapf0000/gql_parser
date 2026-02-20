@@ -8,12 +8,12 @@ pub mod procedure;
 pub mod program;
 pub mod query;
 pub mod references;
-pub mod visitor;
-pub mod visitors;
 mod session;
 mod span;
 mod transaction;
 pub mod types;
+pub mod visitor;
+pub mod visitors;
 
 // Re-export span types
 pub use span::{Span, Spanned};
@@ -40,9 +40,9 @@ pub use transaction::{
 // Re-export catalog types
 pub use catalog::{
     CallCatalogModifyingProcedureStatement, CatalogStatementKind, CreateGraphStatement,
-    CreateGraphTypeStatement, CreateProcedureStatement, CreateSchemaStatement,
-    DropGraphStatement, DropGraphTypeStatement, DropProcedureStatement, DropSchemaStatement,
-    GraphTypeSource, GraphTypeSpec,
+    CreateGraphTypeStatement, CreateProcedureStatement, CreateSchemaStatement, DropGraphStatement,
+    DropGraphTypeStatement, DropProcedureStatement, DropSchemaStatement, GraphTypeSource,
+    GraphTypeSpec,
 };
 
 // Re-export expression types
@@ -75,14 +75,14 @@ pub use references::{
 
 // Re-export query types
 pub use query::{
-    AmbientLinearQuery, CommonTableExpression, CompositeQuery, FilterStatement,
-    FocusedLinearQuery, ForItem, ForOrdinalityOrOffset, ForStatement, GraphPattern, GroupByClause,
-    GroupingElement, HavingClause, LetStatement, LetVariableDefinition, LimitClause, LinearQuery,
-    MatchStatement, NullOrdering, OffsetClause, OptionalMatchStatement, OptionalOperand,
-    OrderByAndPageStatement, OrderByClause, OrderingSpecification, PrimitiveQueryStatement,
-    PrimitiveResultStatement, Query, ReturnItem, ReturnItemList, ReturnStatement, SelectFromClause,
-    SelectItem, SelectItemList, SelectSourceItem, SelectStatement, SetOperator, SetQuantifier,
-    SimpleMatchStatement, SortSpecification, UseGraphClause, WhereClause, WithClause,
+    AmbientLinearQuery, CommonTableExpression, CompositeQuery, FilterStatement, FocusedLinearQuery,
+    ForItem, ForOrdinalityOrOffset, ForStatement, GraphPattern, GroupByClause, GroupingElement,
+    HavingClause, LetStatement, LetVariableDefinition, LimitClause, LinearQuery, MatchStatement,
+    NullOrdering, OffsetClause, OptionalMatchStatement, OptionalOperand, OrderByAndPageStatement,
+    OrderByClause, OrderingSpecification, PrimitiveQueryStatement, PrimitiveResultStatement, Query,
+    ReturnItem, ReturnItemList, ReturnStatement, SelectFromClause, SelectItem, SelectItemList,
+    SelectSourceItem, SelectStatement, SetOperator, SetQuantifier, SimpleMatchStatement,
+    SortSpecification, UseGraphClause, WhereClause, WithClause,
 };
 
 // Re-export visitor infrastructure and concrete visitors.
@@ -120,10 +120,11 @@ pub use graph_type::{
     EdgeTypeFiller, EdgeTypeLabelSet, EdgeTypePattern, EdgeTypePatternDirected,
     EdgeTypePatternUndirected, EdgeTypePhrase, EdgeTypePhraseContent, EdgeTypePropertyTypes,
     EdgeTypeSpecification as EdgeTypeSpec, ElementTypeList, ElementTypeSpecification, EndpointPair,
-    EndpointPairPhrase, GraphTypeSpecificationBody, LabelName, LabelSetPhrase,
+    EndpointPairPhrase, GraphTypeConstraint, GraphTypeConstraintArgument,
+    GraphTypeSpecificationBody, InheritedTypeReference, LabelName, LabelSetPhrase,
     LabelSetSpecification, LocalNodeTypeAlias, NestedGraphTypeSpecification as NestedGraphTypeSpec,
     NodeTypeFiller, NodeTypeImpliedContent, NodeTypeKeyLabelSet, NodeTypeLabelSet, NodeTypePattern,
     NodeTypePhrase, NodeTypePropertyTypes, NodeTypeReference,
     NodeTypeSpecification as NodeTypeSpec, PropertyName, PropertyType, PropertyTypeList,
-    PropertyTypesSpecification, PropertyValueType,
+    PropertyTypesSpecification, PropertyValueType, TypeInheritanceClause,
 };
