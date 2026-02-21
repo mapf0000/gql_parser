@@ -221,7 +221,7 @@ mod tests {
         let tokens = make_tokens();
         let mut stream = TokenStream::new(&tokens);
 
-        let span = stream.expect(TokenKind::Match).unwrap();
+        let span = stream.expect(TokenKind::Match).expect("Match token should be present");
         assert_eq!(span, 0..5);
         assert_eq!(stream.current().kind, TokenKind::LParen);
     }

@@ -114,7 +114,8 @@ fn validate_match_pattern_connectivity(
 
         // Perform DFS to check connectivity
         let mut visited = HashSet::new();
-        let start_var = all_variables.iter().next().unwrap();
+        // SAFETY: We know all_variables has at least 2 elements due to the check above
+        let start_var = all_variables.iter().next().expect("at least two variables must exist at this point");
         dfs_connectivity(start_var, &adjacency, &mut visited);
 
         // Check if all variables were reached

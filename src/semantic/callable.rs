@@ -884,16 +884,10 @@ impl CallableValidator for DefaultCallableValidator {
             // No signature matches the arity
             if sigs.len() == 1 {
                 let sig = &sigs[0];
-                let expected = if sig.max_arity().is_none() {
-                    format!("at least {} arguments", sig.min_arity())
-                } else if sig.min_arity() == sig.max_arity().unwrap() {
-                    format!("{} arguments", sig.min_arity())
-                } else {
-                    format!(
-                        "between {} and {} arguments",
-                        sig.min_arity(),
-                        sig.max_arity().unwrap()
-                    )
+                let expected = match sig.max_arity() {
+                    None => format!("at least {} arguments", sig.min_arity()),
+                    Some(max) if sig.min_arity() == max => format!("{} arguments", sig.min_arity()),
+                    Some(max) => format!("between {} and {} arguments", sig.min_arity(), max),
                 };
 
                 diagnostics.push(

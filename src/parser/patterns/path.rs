@@ -326,8 +326,9 @@ impl<'a> PatternParser<'a> {
             factors.push(factor);
         }
 
-        let start = factors.first().unwrap().span.start;
-        let end = factors.last().unwrap().span.end;
+        // SAFETY: factors is guaranteed to contain at least one element (first_factor)
+        let start = factors.first().expect("factors vec must have at least one element").span.start;
+        let end = factors.last().expect("factors vec must have at least one element").span.end;
         Some(PathTerm {
             factors,
             span: start..end,

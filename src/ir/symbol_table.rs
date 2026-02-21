@@ -189,7 +189,8 @@ impl SymbolTable {
         symbols_for_name.push(symbol);
 
         // Return reference to the newly added symbol (last element in the vector)
-        symbols_for_name.last().unwrap()
+        // SAFETY: We just pushed an element, so the vector is guaranteed non-empty
+        symbols_for_name.last().expect("vector is non-empty after push")
     }
 
     /// Looks up a symbol by name in the current scope and parent scopes.

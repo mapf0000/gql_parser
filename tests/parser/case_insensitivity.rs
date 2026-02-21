@@ -40,9 +40,9 @@ fn all_reserved_keywords_case_insensitive() {
             .enumerate()
             .map(|(i, c)| {
                 if i % 2 == 0 {
-                    c.to_lowercase().next().unwrap()
+                    c.to_lowercase().next().expect("char should have lowercase variant")
                 } else {
-                    c.to_uppercase().next().unwrap()
+                    c.to_uppercase().next().expect("char should have uppercase variant")
                 }
             })
             .collect();
@@ -611,9 +611,9 @@ fn comprehensive_case_variation_test() {
             .enumerate()
             .map(|(i, c)| {
                 if i % 2 == 0 {
-                    c.to_lowercase().next().unwrap()
+                    c.to_lowercase().next().expect("char should have lowercase variant")
                 } else {
-                    c.to_uppercase().next().unwrap()
+                    c.to_uppercase().next().expect("char should have uppercase variant")
                 }
             })
             .collect();
@@ -630,9 +630,9 @@ fn comprehensive_case_variation_test() {
             .enumerate()
             .map(|(i, c)| {
                 if i % 2 == 1 {
-                    c.to_lowercase().next().unwrap()
+                    c.to_lowercase().next().expect("char should have lowercase variant")
                 } else {
-                    c.to_uppercase().next().unwrap()
+                    c.to_uppercase().next().expect("char should have uppercase variant")
                 }
             })
             .collect();
