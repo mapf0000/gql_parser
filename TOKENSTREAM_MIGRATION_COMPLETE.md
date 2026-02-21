@@ -4,7 +4,7 @@
 
 The GQL parser codebase migration to unified TokenStream architecture is **in progress**. The foundation has been established with clean architecture principles - **NO backward compatibility wrappers**, just clean TokenStream usage throughout.
 
-**Status**: ~40% Complete
+**Status**: ~50% Complete
 **Tests**: ✅ All 300 tests passing
 **Compilation**: ✅ Clean with no migration-related warnings
 
@@ -80,6 +80,33 @@ pub(crate) fn parse_use_graph_clause(stream: &mut TokenStream) -> ParseResult<..
 - NO wrappers, NO legacy signatures
 - Still bridges to legacy functions (expression parsing, pattern parsing, procedure parsing)
 
+### ✅ src/parser/query/linear.rs (100% Complete)
+
+**All functions migrated to pure TokenStream**:
+```rust
+pub(super) fn parse_linear_query_as_query(stream: &mut TokenStream) -> ParseResult<...>
+fn parse_linear_query(stream: &mut TokenStream) -> ParseResult<...>
+fn parse_query_statements(stream: &mut TokenStream, _start: usize) -> (...)
+```
+
+- **3 functions** fully migrated
+- NO wrappers, NO legacy signatures
+- Clean implementation using `stream.check()`, `stream.advance()`, `stream.current()`
+
+### ✅ src/parser/query/mod.rs (100% Complete)
+
+**All functions migrated to pure TokenStream**:
+```rust
+pub fn parse_query(stream: &mut TokenStream) -> ParseResult<Query>
+fn parse_composite_query(stream: &mut TokenStream) -> ParseResult<Query>
+pub(super) fn parse_set_quantifier_opt(stream: &mut TokenStream) -> Option<SetQuantifier>
+pub(super) fn skip_to_query_clause_boundary(stream: &mut TokenStream)
+```
+
+- **4 main functions** fully migrated
+- Legacy wrappers provided: `parse_query_legacy`, `skip_to_query_clause_boundary_legacy`
+- Clean implementation using TokenStream throughout
+
 ### ✅ src/parser/query/linear.rs (Callers Updated)
 
 - Updated to call migrated functions with TokenStream
@@ -95,20 +122,6 @@ pub(crate) fn parse_use_graph_clause(stream: &mut TokenStream) -> ParseResult<..
 ---
 
 ## Remaining Work
-
-### 🔄 Query Module Top Level
-
-**query/mod.rs** (~4 functions):
-- `skip_to_query_clause_boundary`
-- `parse_composite_query`
-- `parse_set_quantifier_opt`
-- Helper functions
-
-**query/linear.rs** (complete migration):
-- `parse_linear_query`
-- `parse_query_statements`
-
-**Estimated**: 3-4 hours
 
 ### 🔄 Mutation Module
 
@@ -176,12 +189,11 @@ struct PatternParser<'a> {
 
 | Phase | Status | Estimated Hours |
 |-------|--------|-----------------|
-| Query module top-level | 🔄 | 3-4 |
 | Mutation module | 🔄 | 10-14 |
 | Procedure module | 🔄 | 12-16 |
 | Pattern parser | 🔄 | 8-12 |
 | Final cleanup | 🔄 | 5-7 |
-| **TOTAL** | | **38-53 hours** |
+| **TOTAL** | | **35-49 hours** |
 
 ---
 
@@ -282,11 +294,12 @@ cargo clippy -- -D warnings
 
 1. ✅ **Complete primitive.rs internals** - All functions migrated
 2. ✅ **Complete result.rs internals** - All functions migrated
-3. **Complete query/mod.rs** - Top-level query parsing
-4. **Tackle mutation.rs** - Large file, consider submodules
-5. **Tackle procedure.rs** - Largest file, most complex
-6. **Refactor PatternParser** - Architectural change
-7. **Final cleanup** - Remove bridge functions, validate all tests
+3. ✅ **Complete query/mod.rs** - Top-level query parsing migrated
+4. ✅ **Complete query/linear.rs** - Linear query parsing migrated
+5. **Tackle mutation.rs** - Large file, consider submodules
+6. **Tackle procedure.rs** - Largest file, most complex
+7. **Refactor PatternParser** - Architectural change
+8. **Final cleanup** - Remove bridge functions, validate all tests
 
 ---
 
@@ -298,4 +311,4 @@ cargo clippy -- -D warnings
 
 ---
 
-**Last Updated**: Migration ~40% complete. Query module (primitive.rs, result.rs, pagination.rs) fully migrated to TokenStream.
+**Last Updated**: Migration ~50% complete. Query module fully migrated to TokenStream (pagination.rs, primitive.rs, result.rs, linear.rs, mod.rs).
