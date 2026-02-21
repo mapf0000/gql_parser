@@ -683,7 +683,6 @@ fn parse_for_item(stream: &mut TokenStream) -> ParseResult<ForItem> {
 /// Parses WITH ORDINALITY or WITH OFFSET clause.
 fn parse_for_ordinality_or_offset(stream: &mut TokenStream) -> ParseResult<ForOrdinalityOrOffset> {
     let mut diags = Vec::new();
-    let start = stream.current().span.start;
 
     let expects_ordinality = match &stream.current().kind {
         TokenKind::Ordinality => {

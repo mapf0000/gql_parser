@@ -64,9 +64,8 @@ pub(super) fn parse_select_statement(stream: &mut TokenStream) -> ParseResult<Se
     let quantifier = parse_set_quantifier_opt(tokens, &mut pos);
     stream.set_position(pos);
 
-    // Parse select items - need to use legacy interface temporarily
-    let (items_opt, mut items_diags) = parse_select_items(tokens, &mut pos);
-    stream.set_position(pos);
+    // Parse select items
+    let (items_opt, mut items_diags) = parse_select_items(stream);
     diags.append(&mut items_diags);
 
     let select_items = match items_opt {
@@ -348,14 +347,14 @@ fn parse_common_table_expression(stream: &mut TokenStream) -> ParseResult<Common
 }
 
 /// Parses select items (SELECT * or item list).
-fn parse_select_items(tokens: &[Token], pos: &mut usize) -> ParseResult<SelectItemList> {
-    if *pos >= tokens.len() {
+fn parse_select_items(stream: &mut TokenStream) -> ParseResult<SelectItemList> {
+    if stream.check(&TokenKind::Eof) {
         return (None, vec![]);
     }
 
     // Check for SELECT *
-    if matches!(tokens[*pos].kind, TokenKind::Star) {
-        *pos += 1;
+    if stream.check(&TokenKind::Star) {
+        stream.advance();
         return (Some(SelectItemList::Star), vec![]);
     }
 
@@ -364,7 +363,7 @@ fn parse_select_items(tokens: &[Token], pos: &mut usize) -> ParseResult<SelectIt
     let mut diags = Vec::new();
 
     loop {
-        let (item_opt, mut item_diags) = parse_select_item(tokens, pos);
+        let (item_opt, mut item_diags) = parse_select_item(stream);
         diags.append(&mut item_diags);
 
         match item_opt {
@@ -373,8 +372,8 @@ fn parse_select_items(tokens: &[Token], pos: &mut usize) -> ParseResult<SelectIt
         }
 
         // Check for comma
-        if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Comma) {
-            *pos += 1;
+        if stream.check(&TokenKind::Comma) {
+            stream.advance();
         } else {
             break;
         }
@@ -388,12 +387,15 @@ fn parse_select_items(tokens: &[Token], pos: &mut usize) -> ParseResult<SelectIt
 }
 
 /// Parses a single select item.
-fn parse_select_item(tokens: &[Token], pos: &mut usize) -> ParseResult<SelectItem> {
+fn parse_select_item(stream: &mut TokenStream) -> ParseResult<SelectItem> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
+    let start = stream.current().span.start;
 
-    // Parse expression
-    let (expression_opt, mut expr_diags) = parse_expression_with_diags(tokens, pos);
+    // Parse expression - need to use legacy interface temporarily
+    let tokens = stream.tokens();
+    let mut pos = stream.position();
+    let (expression_opt, mut expr_diags) = parse_expression_with_diags(tokens, &mut pos);
+    stream.set_position(pos);
     diags.append(&mut expr_diags);
 
     let expression = match expression_opt {
@@ -402,42 +404,34 @@ fn parse_select_item(tokens: &[Token], pos: &mut usize) -> ParseResult<SelectIte
     };
 
     // Parse optional AS alias
-    let alias = if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::As) {
-        let as_span = tokens[*pos].span.clone();
-        *pos += 1;
-        if let Some(token) = tokens.get(*pos) {
-            match &token.kind {
-                TokenKind::Identifier(name) | TokenKind::DelimitedIdentifier(name) => {
-                    *pos += 1;
-                    Some(name.clone())
-                }
-                kind if kind.is_non_reserved_identifier_keyword() => {
-                    *pos += 1;
-                    Some(SmolStr::new(kind.to_string()))
-                }
-                _ => {
-                    diags.push(
-                        Diag::error("Expected alias after AS in SELECT item")
-                            .with_primary_label(as_span, "AS must be followed by an identifier"),
-                    );
-                    None
-                }
+    let alias = if stream.check(&TokenKind::As) {
+        let as_span = stream.current().span.clone();
+        stream.advance();
+
+        match &stream.current().kind {
+            TokenKind::Identifier(name) | TokenKind::DelimitedIdentifier(name) => {
+                let alias_name = name.clone();
+                stream.advance();
+                Some(alias_name)
             }
-        } else {
-            diags.push(
-                Diag::error("Expected alias after AS in SELECT item")
-                    .with_primary_label(as_span, "AS must be followed by an identifier"),
-            );
-            None
+            kind if kind.is_non_reserved_identifier_keyword() => {
+                let alias_name = SmolStr::new(kind.to_string());
+                stream.advance();
+                Some(alias_name)
+            }
+            _ => {
+                diags.push(
+                    Diag::error("Expected alias after AS in SELECT item")
+                        .with_primary_label(as_span, "AS must be followed by an identifier"),
+                );
+                None
+            }
         }
     } else {
         None
     };
 
-    let end = tokens
-        .get(pos.saturating_sub(1))
-        .map(|t| t.span.end)
-        .unwrap_or(start);
+    let end = stream.previous_span().end;
 
     (
         Some(SelectItem {
@@ -452,7 +446,6 @@ fn parse_select_item(tokens: &[Token], pos: &mut usize) -> ParseResult<SelectIte
 /// Parses SELECT FROM clause.
 fn parse_select_from_clause(stream: &mut TokenStream) -> ParseResult<SelectFromClause> {
     let mut diags = Vec::new();
-    let start = stream.current().span.start;
 
     // Variant 1: FROM MATCH <pattern> [, MATCH <pattern> ...]
     if stream.check(&TokenKind::Match) {
@@ -541,27 +534,29 @@ fn parse_select_from_clause(stream: &mut TokenStream) -> ParseResult<SelectFromC
 }
 
 /// Parses a single source item in SELECT FROM clause.
-fn parse_select_source_item(tokens: &[Token], pos: &mut usize) -> ParseResult<SelectSourceItem> {
+fn parse_select_source_item(stream: &mut TokenStream) -> ParseResult<SelectSourceItem> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
+    let start = stream.current().span.start;
 
-    if *pos >= tokens.len() {
+    if stream.check(&TokenKind::Eof) {
         return (None, diags);
     }
 
     // Query source: FROM <query specification>
-    if is_query_spec_start(&tokens[*pos].kind) {
-        let query_start = *pos;
-        let (query_opt, mut query_diags) = parse_query(tokens, pos);
+    if is_query_spec_start(&stream.current().kind) {
+        let query_start = stream.position();
+
+        // Need to use legacy interface for parse_query
+        let tokens = stream.tokens();
+        let mut pos = stream.position();
+        let (query_opt, mut query_diags) = parse_query(tokens, &mut pos);
+        stream.set_position(pos);
         diags.append(&mut query_diags);
 
         if let Some(query) = query_opt {
-            let (alias, mut alias_diags) = parse_optional_source_alias(tokens, pos);
+            let (alias, mut alias_diags) = parse_optional_source_alias(stream);
             diags.append(&mut alias_diags);
-            let end = tokens
-                .get(pos.saturating_sub(1))
-                .map(|t| t.span.end)
-                .unwrap_or_else(|| query.span().end);
+            let end = stream.previous_span().end;
 
             return (
                 Some(SelectSourceItem::Query {
@@ -573,14 +568,22 @@ fn parse_select_source_item(tokens: &[Token], pos: &mut usize) -> ParseResult<Se
             );
         }
 
-        if *pos == query_start {
-            skip_to_query_clause_boundary(tokens, pos);
+        if stream.position() == query_start {
+            // Skip to boundary using legacy interface
+            let tokens = stream.tokens();
+            let mut pos = stream.position();
+            skip_to_query_clause_boundary(tokens, &mut pos);
+            stream.set_position(pos);
         }
         return (None, diags);
     }
 
     // Expression source: FROM <expression> [<query specification>] [alias]
-    let (expr_opt, mut expr_diags) = parse_expression_with_diags(tokens, pos);
+    // Need to use legacy interface for parse_expression
+    let tokens = stream.tokens();
+    let mut pos = stream.position();
+    let (expr_opt, mut expr_diags) = parse_expression_with_diags(tokens, &mut pos);
+    stream.set_position(pos);
     diags.append(&mut expr_diags);
 
     let expression = match expr_opt {
@@ -589,18 +592,20 @@ fn parse_select_source_item(tokens: &[Token], pos: &mut usize) -> ParseResult<Se
     };
 
     // Graph + query source: FROM <graph_expression> <query_specification>
-    if *pos < tokens.len() && is_query_spec_start(&tokens[*pos].kind) {
-        let query_start = *pos;
-        let (query_opt, mut query_diags) = parse_query(tokens, pos);
+    if is_query_spec_start(&stream.current().kind) {
+        let query_start = stream.position();
+
+        // Need to use legacy interface for parse_query
+        let tokens = stream.tokens();
+        let mut pos = stream.position();
+        let (query_opt, mut query_diags) = parse_query(tokens, &mut pos);
+        stream.set_position(pos);
         diags.append(&mut query_diags);
 
         if let Some(query) = query_opt {
-            let (alias, mut alias_diags) = parse_optional_source_alias(tokens, pos);
+            let (alias, mut alias_diags) = parse_optional_source_alias(stream);
             diags.append(&mut alias_diags);
-            let end = tokens
-                .get(pos.saturating_sub(1))
-                .map(|t| t.span.end)
-                .unwrap_or_else(|| query.span().end);
+            let end = stream.previous_span().end;
 
             return (
                 Some(SelectSourceItem::GraphAndQuery {
@@ -613,29 +618,27 @@ fn parse_select_source_item(tokens: &[Token], pos: &mut usize) -> ParseResult<Se
             );
         }
 
-        if *pos == query_start {
-            skip_to_query_clause_boundary(tokens, pos);
+        if stream.position() == query_start {
+            // Skip to boundary using legacy interface
+            let tokens = stream.tokens();
+            let mut pos = stream.position();
+            skip_to_query_clause_boundary(tokens, &mut pos);
+            stream.set_position(pos);
         }
 
         diags.push(
             Diag::error("Expected query specification after graph expression in FROM clause")
                 .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or_else(|| expression.span()),
+                    stream.current().span.clone(),
                     "expected query specification here",
                 ),
         );
         return (None, diags);
     }
 
-    let (alias, mut alias_diags) = parse_optional_source_alias(tokens, pos);
+    let (alias, mut alias_diags) = parse_optional_source_alias(stream);
     diags.append(&mut alias_diags);
-    let end = tokens
-        .get(pos.saturating_sub(1))
-        .map(|t| t.span.end)
-        .unwrap_or_else(|| expression.span().end);
+    let end = stream.previous_span().end;
 
     (
         Some(SelectSourceItem::Expression {
@@ -647,17 +650,22 @@ fn parse_select_source_item(tokens: &[Token], pos: &mut usize) -> ParseResult<Se
     )
 }
 
-fn parse_optional_source_alias(tokens: &[Token], pos: &mut usize) -> (Option<SmolStr>, Vec<Diag>) {
+fn parse_optional_source_alias(stream: &mut TokenStream) -> (Option<SmolStr>, Vec<Diag>) {
     let mut diags = Vec::new();
 
-    if *pos >= tokens.len() {
+    if stream.check(&TokenKind::Eof) {
         return (None, diags);
     }
 
-    if matches!(tokens[*pos].kind, TokenKind::As) {
-        let as_span = tokens[*pos].span.clone();
-        *pos += 1;
-        if let Some((name, _)) = parse_identifier_token(tokens, pos) {
+    if stream.check(&TokenKind::As) {
+        let as_span = stream.current().span.clone();
+        stream.advance();
+
+        // Need to use legacy interface for parse_identifier_token
+        let tokens = stream.tokens();
+        let mut pos = stream.position();
+        if let Some((name, _)) = parse_identifier_token(tokens, &mut pos) {
+            stream.set_position(pos);
             return (Some(name), diags);
         }
 
@@ -668,12 +676,16 @@ fn parse_optional_source_alias(tokens: &[Token], pos: &mut usize) -> (Option<Smo
         return (None, diags);
     }
 
-    if let Some((name, _)) = parse_identifier_token(tokens, pos) {
+    // Need to use legacy interface for parse_identifier_token
+    let tokens = stream.tokens();
+    let mut pos = stream.position();
+    if let Some((name, _)) = parse_identifier_token(tokens, &mut pos) {
         // Bare aliases are accepted only when they are not obvious clause boundaries.
         if !is_from_clause_boundary_keyword(name.as_str()) {
+            stream.set_position(pos);
             return (Some(name), diags);
         }
-        *pos = (*pos).saturating_sub(1);
+        // Don't advance stream if it's a boundary keyword
     }
 
     (None, diags)
@@ -735,19 +747,21 @@ fn is_from_clause_boundary_keyword(word: &str) -> bool {
 }
 
 /// Parses a list of MATCH patterns in FROM clause.
-fn parse_from_graph_match_list(
-    tokens: &[Token],
-    pos: &mut usize,
-) -> (Vec<GraphPattern>, Vec<Diag>) {
+fn parse_from_graph_match_list(stream: &mut TokenStream) -> (Vec<GraphPattern>, Vec<Diag>) {
     let mut matches = Vec::new();
     let mut diags = Vec::new();
 
-    while *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Match) {
-        let match_span = tokens[*pos].span.clone();
-        *pos += 1;
+    while stream.check(&TokenKind::Match) {
+        let match_span = stream.current().span.clone();
+        stream.advance();
 
-        let pattern_start = *pos;
-        let (pattern_opt, mut pattern_diags) = parse_graph_pattern_checked(tokens, pos);
+        let pattern_start = stream.position();
+
+        // Need to use legacy interface for parse_graph_pattern
+        let tokens = stream.tokens();
+        let mut pos = stream.position();
+        let (pattern_opt, mut pattern_diags) = parse_graph_pattern_checked(tokens, &mut pos);
+        stream.set_position(pos);
         diags.append(&mut pattern_diags);
 
         match pattern_opt {
@@ -757,22 +771,30 @@ fn parse_from_graph_match_list(
                     Diag::error("Expected graph pattern after MATCH in FROM clause")
                         .with_primary_label(match_span, "expected graph pattern here"),
                 );
-                if *pos == pattern_start {
-                    skip_to_query_clause_boundary(tokens, pos);
+                if stream.position() == pattern_start {
+                    // Skip to boundary using legacy interface
+                    let tokens = stream.tokens();
+                    let mut pos = stream.position();
+                    skip_to_query_clause_boundary(tokens, &mut pos);
+                    stream.set_position(pos);
                 }
                 break;
             }
         }
 
-        if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Comma) {
-            let comma_span = tokens[*pos].span.clone();
-            *pos += 1;
-            if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Match) {
+        if stream.check(&TokenKind::Comma) {
+            let comma_span = stream.current().span.clone();
+            stream.advance();
+            if !stream.check(&TokenKind::Match) {
                 diags.push(
                     Diag::error("Expected MATCH after ',' in FROM clause")
                         .with_primary_label(comma_span, "expected MATCH here"),
                 );
-                skip_to_query_clause_boundary(tokens, pos);
+                // Skip to boundary using legacy interface
+                let tokens = stream.tokens();
+                let mut pos = stream.position();
+                skip_to_query_clause_boundary(tokens, &mut pos);
+                stream.set_position(pos);
                 break;
             }
             continue;
@@ -913,8 +935,7 @@ pub(crate) fn parse_return_statement(stream: &mut TokenStream) -> ParseResult<Re
     stream.set_position(pos);
 
     // Parse return items
-    let (items_opt, mut items_diags) = parse_return_items(tokens, &mut pos);
-    stream.set_position(pos);
+    let (items_opt, mut items_diags) = parse_return_items(stream);
     diags.append(&mut items_diags);
 
     let items = match items_opt {
@@ -951,14 +972,14 @@ pub(crate) fn parse_return_statement(stream: &mut TokenStream) -> ParseResult<Re
 }
 
 /// Parses return items (RETURN * or item list).
-fn parse_return_items(tokens: &[Token], pos: &mut usize) -> ParseResult<ReturnItemList> {
-    if *pos >= tokens.len() {
+fn parse_return_items(stream: &mut TokenStream) -> ParseResult<ReturnItemList> {
+    if stream.check(&TokenKind::Eof) {
         return (None, vec![]);
     }
 
     // Check for RETURN *
-    if matches!(tokens[*pos].kind, TokenKind::Star) {
-        *pos += 1;
+    if stream.check(&TokenKind::Star) {
+        stream.advance();
         return (Some(ReturnItemList::Star), vec![]);
     }
 
@@ -967,7 +988,7 @@ fn parse_return_items(tokens: &[Token], pos: &mut usize) -> ParseResult<ReturnIt
     let mut diags = Vec::new();
 
     loop {
-        let (item_opt, mut item_diags) = parse_return_item(tokens, pos);
+        let (item_opt, mut item_diags) = parse_return_item(stream);
         diags.append(&mut item_diags);
 
         match item_opt {
@@ -976,8 +997,8 @@ fn parse_return_items(tokens: &[Token], pos: &mut usize) -> ParseResult<ReturnIt
         }
 
         // Check for comma
-        if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Comma) {
-            *pos += 1;
+        if stream.check(&TokenKind::Comma) {
+            stream.advance();
         } else {
             break;
         }
@@ -991,12 +1012,15 @@ fn parse_return_items(tokens: &[Token], pos: &mut usize) -> ParseResult<ReturnIt
 }
 
 /// Parses a single return item.
-fn parse_return_item(tokens: &[Token], pos: &mut usize) -> ParseResult<ReturnItem> {
+fn parse_return_item(stream: &mut TokenStream) -> ParseResult<ReturnItem> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
+    let start = stream.current().span.start;
 
-    // Parse expression
-    let (expression_opt, mut expr_diags) = parse_expression_with_diags(tokens, pos);
+    // Parse expression - need to use legacy interface temporarily
+    let tokens = stream.tokens();
+    let mut pos = stream.position();
+    let (expression_opt, mut expr_diags) = parse_expression_with_diags(tokens, &mut pos);
+    stream.set_position(pos);
     diags.append(&mut expr_diags);
 
     let expression = match expression_opt {
@@ -1005,42 +1029,34 @@ fn parse_return_item(tokens: &[Token], pos: &mut usize) -> ParseResult<ReturnIte
     };
 
     // Parse optional AS alias
-    let alias = if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::As) {
-        let as_span = tokens[*pos].span.clone();
-        *pos += 1;
-        if let Some(token) = tokens.get(*pos) {
-            match &token.kind {
-                TokenKind::Identifier(name) | TokenKind::DelimitedIdentifier(name) => {
-                    *pos += 1;
-                    Some(name.clone())
-                }
-                kind if kind.is_non_reserved_identifier_keyword() => {
-                    *pos += 1;
-                    Some(SmolStr::new(kind.to_string()))
-                }
-                _ => {
-                    diags.push(
-                        Diag::error("Expected alias after AS in RETURN item")
-                            .with_primary_label(as_span, "AS must be followed by an identifier"),
-                    );
-                    None
-                }
+    let alias = if stream.check(&TokenKind::As) {
+        let as_span = stream.current().span.clone();
+        stream.advance();
+
+        match &stream.current().kind {
+            TokenKind::Identifier(name) | TokenKind::DelimitedIdentifier(name) => {
+                let alias_name = name.clone();
+                stream.advance();
+                Some(alias_name)
             }
-        } else {
-            diags.push(
-                Diag::error("Expected alias after AS in RETURN item")
-                    .with_primary_label(as_span, "AS must be followed by an identifier"),
-            );
-            None
+            kind if kind.is_non_reserved_identifier_keyword() => {
+                let alias_name = SmolStr::new(kind.to_string());
+                stream.advance();
+                Some(alias_name)
+            }
+            _ => {
+                diags.push(
+                    Diag::error("Expected alias after AS in RETURN item")
+                        .with_primary_label(as_span, "AS must be followed by an identifier"),
+                );
+                None
+            }
         }
     } else {
         None
     };
 
-    let end = tokens
-        .get(pos.saturating_sub(1))
-        .map(|t| t.span.end)
-        .unwrap_or(start);
+    let end = stream.previous_span().end;
 
     (
         Some(ReturnItem {
