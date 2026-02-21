@@ -1589,20 +1589,22 @@ fn parse_create_procedure_catalog_statement(
         cursor += 1;
     }
 
-    let mut spec_cursor = cursor;
-    let (spec_opt, mut spec_diags) = parse_nested_procedure_specification(tokens, &mut spec_cursor);
+    let mut stream = crate::parser::base::TokenStream::new(tokens);
+    stream.set_position(cursor);
+    let (spec_opt, mut spec_diags) = parse_nested_procedure_specification(&mut stream);
     if let Some(diag) = spec_diags.drain(..).next() {
         return Err(Box::new(diag));
     }
     let Some(specification) = spec_opt else {
         return Err(expected_token_diag(
             tokens,
-            spec_cursor,
+            stream.position(),
             "{",
             "CREATE PROCEDURE statement",
         ));
     };
 
+    let spec_cursor = stream.position();
     if spec_cursor < tokens.len() {
         return Err(unexpected_token_diag(
             tokens,

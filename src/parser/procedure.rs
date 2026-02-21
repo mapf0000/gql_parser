@@ -18,7 +18,7 @@ use crate::ast::references::BindingVariable;
 use crate::ast::{Expression, ProcedureStatement, Span};
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
-use crate::parser::base::{check_token, consume_if, expect_token};
+use crate::parser::base::TokenStream;
 use crate::parser::InternalParseResult;
 use crate::parser::expression::parse_expression;
 use crate::parser::mutation::parse_linear_data_modifying_statement;
@@ -38,29 +38,30 @@ pub(crate) type ParseResult<T> = InternalParseResult<T>;
 // ============================================================================
 
 /// Parse an identifier or identifier-like keyword as SmolStr.
-fn parse_identifier(tokens: &[Token], pos: &mut usize) -> Result<(SmolStr, Span), Box<Diag>> {
-    if *pos >= tokens.len() {
+fn parse_identifier(stream: &mut TokenStream) -> Result<(SmolStr, Span), Box<Diag>> {
+    if stream.check(&TokenKind::Eof) {
+        let pos = stream.position();
         return Err(Box::new(
             Diag::error("Expected identifier")
-                .with_primary_label(*pos..*pos, "expected identifier here"),
+                .with_primary_label(pos..pos, "expected identifier here"),
         ));
     }
 
-    let token = &tokens[*pos];
+    let token = stream.current();
     match &token.kind {
         TokenKind::Identifier(name) => {
             let result = (name.clone(), token.span.clone());
-            *pos += 1;
+            stream.advance();
             Ok(result)
         }
         TokenKind::DelimitedIdentifier(name) => {
             let result = (name.clone(), token.span.clone());
-            *pos += 1;
+            stream.advance();
             Ok(result)
         }
         kind if kind.is_non_reserved_identifier_keyword() => {
             let result = (SmolStr::new(kind.to_string()), token.span.clone());
-            *pos += 1;
+            stream.advance();
             Ok(result)
         }
         _ => Err(Box::new(
@@ -72,26 +73,26 @@ fn parse_identifier(tokens: &[Token], pos: &mut usize) -> Result<(SmolStr, Span)
 
 /// Parse a regular identifier (non-delimited), including non-reserved keywords.
 fn parse_regular_identifier(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> Result<(SmolStr, Span), Box<Diag>> {
-    if *pos >= tokens.len() {
+    if stream.check(&TokenKind::Eof) {
+        let pos = stream.position();
         return Err(Box::new(
             Diag::error("Expected regular identifier")
-                .with_primary_label(*pos..*pos, "expected regular identifier here"),
+                .with_primary_label(pos..pos, "expected regular identifier here"),
         ));
     }
 
-    let token = &tokens[*pos];
+    let token = stream.current();
     match &token.kind {
         TokenKind::Identifier(name) => {
             let result = (name.clone(), token.span.clone());
-            *pos += 1;
+            stream.advance();
             Ok(result)
         }
         kind if kind.is_non_reserved_identifier_keyword() => {
             let result = (SmolStr::new(kind.to_string()), token.span.clone());
-            *pos += 1;
+            stream.advance();
             Ok(result)
         }
         _ => Err(Box::new(
@@ -102,7 +103,9 @@ fn parse_regular_identifier(
 }
 
 /// Find the boundary of an expression in a token stream.
-fn find_expression_boundary(tokens: &[Token], start_pos: usize) -> usize {
+fn find_expression_boundary(stream: &TokenStream) -> usize {
+    let tokens = stream.tokens();
+    let start_pos = stream.position();
     let mut pos = start_pos;
     let mut depth = 0;
 
@@ -186,25 +189,25 @@ fn find_expression_boundary(tokens: &[Token], start_pos: usize) -> usize {
 }
 
 /// Parse an expression starting at the current position.
-fn parse_expression_at(tokens: &[Token], pos: &mut usize) -> Result<Expression, Box<Diag>> {
-    let start_pos = *pos;
-    let count = find_expression_boundary(tokens, start_pos);
+fn parse_expression_at(stream: &mut TokenStream) -> Result<Expression, Box<Diag>> {
+    let start_pos = stream.position();
+    let count = find_expression_boundary(stream);
 
     if count == 0 {
         return Err(Box::new(
             Diag::error("Expected expression").with_primary_label(
-                tokens
-                    .get(start_pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(start_pos..start_pos),
+                stream.current().span.clone(),
                 "expected expression here",
             ),
         ));
     }
 
+    let tokens = stream.tokens();
     let expr_tokens = &tokens[start_pos..start_pos + count];
     let result = parse_expression(expr_tokens)?;
-    *pos = start_pos + count;
+
+    // Advance stream position
+    stream.set_position(start_pos + count);
 
     Ok(result)
 }
@@ -228,21 +231,27 @@ pub fn parse_call_procedure_statement(
     tokens: &[Token],
     pos: &mut usize,
 ) -> ParseResult<CallProcedureStatement> {
-    let start_pos = *pos;
+    let mut stream = TokenStream::new(tokens);
+    stream.set_position(*pos);
+
+    let start_pos = stream.position();
     let mut diags = vec![];
 
     // Check for OPTIONAL keyword
-    let optional = consume_if(tokens, pos, TokenKind::Optional);
+    let optional = stream.consume(&TokenKind::Optional);
 
     // Expect CALL keyword
-    if let Err(diag) = expect_token(tokens, pos, TokenKind::Call, "call procedure statement") {
+    if let Err(diag) = stream.expect(TokenKind::Call) {
         diags.push(*diag);
+        *pos = stream.position();
         return (None, diags);
     }
 
     // Parse procedure call (inline or named)
-    let (call_opt, call_diags) = parse_procedure_call(tokens, pos);
+    let (call_opt, call_diags) = parse_procedure_call(&mut stream);
     diags.extend(call_diags);
+
+    *pos = stream.position();
 
     if let Some(call) = call_opt {
         let end_span = call.span().end;
@@ -260,22 +269,21 @@ pub fn parse_call_procedure_statement(
 /// Parse a procedure call (inline or named).
 ///
 /// Grammar: `procedureCall: inlineProcedureCall | namedProcedureCall`
-fn parse_procedure_call(tokens: &[Token], pos: &mut usize) -> ParseResult<ProcedureCall> {
-    let start_pos = *pos;
+fn parse_procedure_call(stream: &mut TokenStream) -> ParseResult<ProcedureCall> {
+    let start_pos = stream.position();
 
     // Try inline procedure call first (looks for LParen or LBrace)
-    if check_token(tokens, *pos, TokenKind::LParen) || check_token(tokens, *pos, TokenKind::LBrace)
-    {
-        let (inline_opt, diags) = parse_inline_procedure_call(tokens, pos);
+    if stream.check(&TokenKind::LParen) || stream.check(&TokenKind::LBrace) {
+        let (inline_opt, diags) = parse_inline_procedure_call(stream);
         if let Some(inline) = inline_opt {
             return (Some(ProcedureCall::Inline(inline)), diags);
         }
         // If inline parse failed, try named
-        *pos = start_pos;
+        stream.set_position(start_pos);
     }
 
     // Try named procedure call
-    let (named_opt, diags) = parse_named_procedure_call(tokens, pos);
+    let (named_opt, diags) = parse_named_procedure_call(stream);
     if let Some(named) = named_opt {
         (Some(ProcedureCall::Named(named)), diags)
     } else {
@@ -309,15 +317,14 @@ impl ProcedureCall {
 /// { MATCH (n) RETURN n }
 /// ```
 pub fn parse_inline_procedure_call(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<InlineProcedureCall> {
-    let start_pos = *pos;
+    let start_pos = stream.position();
     let mut diags = vec![];
 
     // Parse optional variable scope clause
-    let (variable_scope, scope_diags) = if check_token(tokens, *pos, TokenKind::LParen) {
-        let (scope_opt, scope_diags) = parse_variable_scope_clause(tokens, pos);
+    let (variable_scope, scope_diags) = if stream.check(&TokenKind::LParen) {
+        let (scope_opt, scope_diags) = parse_variable_scope_clause(stream);
         (scope_opt, scope_diags)
     } else {
         (None, vec![])
@@ -325,7 +332,7 @@ pub fn parse_inline_procedure_call(
     diags.extend(scope_diags);
 
     // Parse nested procedure specification
-    let (spec_opt, spec_diags) = parse_nested_procedure_specification(tokens, pos);
+    let (spec_opt, spec_diags) = parse_nested_procedure_specification(stream);
     diags.extend(spec_diags);
 
     if let Some(specification) = spec_opt {
@@ -353,44 +360,39 @@ pub fn parse_inline_procedure_call(
 /// (x, y, z)
 /// ```
 pub fn parse_variable_scope_clause(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<VariableScopeClause> {
-    let start_pos = *pos;
+    let start_pos = stream.position();
     let mut diags = vec![];
 
     // Expect opening parenthesis
-    if let Err(diag) = expect_token(tokens, pos, TokenKind::LParen, "variable scope clause") {
+    if let Err(diag) = stream.expect(TokenKind::LParen) {
         diags.push(*diag);
         return (None, diags);
     }
 
     // Parse optional binding variable reference list
-    let (variables, var_diags) = if check_token(tokens, *pos, TokenKind::RParen) {
+    let (variables, var_diags) = if stream.check(&TokenKind::RParen) {
         (vec![], vec![])
     } else {
-        let (vars_opt, diags) = parse_binding_variable_reference_list(tokens, pos);
+        let (vars_opt, diags) = parse_binding_variable_reference_list(stream);
         (vars_opt.unwrap_or_default(), diags)
     };
     diags.extend(var_diags);
 
     // Expect closing parenthesis
-    let end_span =
-        if let Ok(span) = expect_token(tokens, pos, TokenKind::RParen, "variable scope clause") {
-            span.end
-        } else {
-            diags.push(
-                Diag::error("Expected closing parenthesis in variable scope clause")
-                    .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map(|t| t.span.clone())
-                            .unwrap_or(start_pos..start_pos),
-                        "expected ')' here",
-                    ),
-            );
-            start_pos
-        };
+    let end_span = if let Ok(span) = stream.expect(TokenKind::RParen) {
+        span.end
+    } else {
+        diags.push(
+            Diag::error("Expected closing parenthesis in variable scope clause")
+                .with_primary_label(
+                    stream.current().span.clone(),
+                    "expected ')' here",
+                ),
+        );
+        start_pos
+    };
 
     let clause = VariableScopeClause {
         variables,
@@ -403,15 +405,14 @@ pub fn parse_variable_scope_clause(
 ///
 /// Grammar: `bindingVariableReferenceList: bindingVariableReference (COMMA bindingVariableReference)*`
 pub fn parse_binding_variable_reference_list(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<Vec<BindingVariable>> {
     let mut variables = vec![];
     let mut diags = vec![];
 
     loop {
         // Parse binding variable reference
-        let (var_opt, var_diags) = parse_binding_variable(tokens, pos);
+        let (var_opt, var_diags) = parse_binding_variable(stream);
         diags.extend(var_diags);
 
         if let Some(var) = var_opt {
@@ -421,17 +422,13 @@ pub fn parse_binding_variable_reference_list(
         }
 
         // Check for comma
-        if !consume_if(tokens, pos, TokenKind::Comma) {
+        if !stream.consume(&TokenKind::Comma) {
             break;
         }
-        if check_token(tokens, *pos, TokenKind::RParen) || check_token(tokens, *pos, TokenKind::Eof)
-        {
+        if stream.check(&TokenKind::RParen) || stream.check(&TokenKind::Eof) {
             diags.push(
                 Diag::error("Expected binding variable after ','").with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(*pos..*pos),
+                    stream.current().span.clone(),
                     "expected binding variable here",
                 ),
             );
@@ -443,8 +440,8 @@ pub fn parse_binding_variable_reference_list(
 }
 
 /// Parse a binding variable.
-fn parse_binding_variable(tokens: &[Token], pos: &mut usize) -> ParseResult<BindingVariable> {
-    match parse_regular_identifier(tokens, pos) {
+fn parse_binding_variable(stream: &mut TokenStream) -> ParseResult<BindingVariable> {
+    match parse_regular_identifier(stream) {
         Ok((name, span)) => {
             let var = BindingVariable { name, span };
             (Some(var), vec![])
@@ -469,17 +466,17 @@ fn parse_binding_variable(tokens: &[Token], pos: &mut usize) -> ParseResult<Bind
 /// my_procedure(arg1) YIELD result1, result2
 /// ```
 pub fn parse_named_procedure_call(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<NamedProcedureCall> {
-    let start_pos = *pos;
+    let start_pos = stream.position();
     let mut diags = vec![];
 
     // Parse procedure reference
     // We need to slice the tokens for the procedure reference parser
-    let proc_ref_start = *pos;
+    let proc_ref_start = stream.position();
 
     // Find the end of the procedure reference (before '(' or YIELD or end)
+    let tokens = stream.tokens();
     let mut proc_ref_end = proc_ref_start;
     while proc_ref_end < tokens.len() {
         match &tokens[proc_ref_end].kind {
@@ -491,10 +488,7 @@ pub fn parse_named_procedure_call(
     if proc_ref_end == proc_ref_start {
         diags.push(
             Diag::error("Expected procedure reference").with_primary_label(
-                tokens
-                    .get(*pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(start_pos..start_pos),
+                stream.current().span.clone(),
                 "expected procedure reference here",
             ),
         );
@@ -504,7 +498,7 @@ pub fn parse_named_procedure_call(
     let proc_ref_tokens = &tokens[proc_ref_start..proc_ref_end];
     let procedure = match parse_procedure_reference(proc_ref_tokens) {
         Ok(p) => {
-            *pos = proc_ref_end;
+            stream.set_position(proc_ref_end);
             p
         }
         Err(diag) => {
@@ -514,28 +508,25 @@ pub fn parse_named_procedure_call(
     };
 
     // Parse required procedure argument list
-    if !check_token(tokens, *pos, TokenKind::LParen) {
+    if !stream.check(&TokenKind::LParen) {
         diags.push(
             Diag::error("Expected '(' after procedure reference").with_primary_label(
-                tokens
-                    .get(*pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(start_pos..start_pos),
+                stream.current().span.clone(),
                 "expected '(' here",
             ),
         );
         return (None, diags);
     }
 
-    let (arguments_opt, arg_diags) = parse_procedure_argument_list(tokens, pos);
+    let (arguments_opt, arg_diags) = parse_procedure_argument_list(stream);
     diags.extend(arg_diags);
     let Some(arguments) = arguments_opt else {
         return (None, diags);
     };
 
     // Parse optional YIELD clause
-    let (yield_clause, yield_diags) = if check_token(tokens, *pos, TokenKind::Yield) {
-        parse_yield_clause(tokens, pos)
+    let (yield_clause, yield_diags) = if stream.check(&TokenKind::Yield) {
+        parse_yield_clause(stream)
     } else {
         (None, vec![])
     };
@@ -560,14 +551,13 @@ pub fn parse_named_procedure_call(
 ///
 /// Grammar: `procedureArgumentList: LPAREN (procedureArgument (COMMA procedureArgument)*)? RPAREN`
 pub fn parse_procedure_argument_list(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<ProcedureArgumentList> {
-    let start_pos = *pos;
+    let start_pos = stream.position();
     let mut diags = vec![];
 
     // Expect opening parenthesis
-    if let Err(diag) = expect_token(tokens, pos, TokenKind::LParen, "procedure argument list") {
+    if let Err(diag) = stream.expect(TokenKind::LParen) {
         diags.push(*diag);
         return (None, diags);
     }
@@ -575,16 +565,15 @@ pub fn parse_procedure_argument_list(
     let mut arguments = vec![];
 
     // Parse arguments until closing parenthesis
-    while !check_token(tokens, *pos, TokenKind::RParen)
-        && !check_token(tokens, *pos, TokenKind::Eof)
-    {
-        // Parse procedure argument
-        let arg_start = *pos;
-        match parse_expression_at(tokens, pos) {
+    while !stream.check(&TokenKind::RParen) && !stream.check(&TokenKind::Eof) {
+        // Parse procedure argument using expression parser
+        let arg_start = stream.position();
+
+        match parse_expression_at(stream) {
             Ok(expression) => {
                 let arg = ProcedureArgument {
                     expression,
-                    span: arg_start..*pos,
+                    span: arg_start..stream.position(),
                 };
                 arguments.push(arg);
             }
@@ -595,17 +584,13 @@ pub fn parse_procedure_argument_list(
         }
 
         // Check for comma
-        if !consume_if(tokens, pos, TokenKind::Comma) {
+        if !stream.consume(&TokenKind::Comma) {
             break;
         }
-        if check_token(tokens, *pos, TokenKind::RParen) || check_token(tokens, *pos, TokenKind::Eof)
-        {
+        if stream.check(&TokenKind::RParen) || stream.check(&TokenKind::Eof) {
             diags.push(
                 Diag::error("Expected argument expression after ','").with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start_pos..start_pos),
+                    stream.current().span.clone(),
                     "expected argument expression here",
                 ),
             );
@@ -614,22 +599,18 @@ pub fn parse_procedure_argument_list(
     }
 
     // Expect closing parenthesis
-    let end_span =
-        if let Ok(span) = expect_token(tokens, pos, TokenKind::RParen, "procedure argument list") {
-            span.end
-        } else {
-            diags.push(
-                Diag::error("Expected closing parenthesis in procedure argument list")
-                    .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map(|t| t.span.clone())
-                            .unwrap_or(start_pos..start_pos),
-                        "expected ')' here",
-                    ),
-            );
-            *pos
-        };
+    let end_span = if let Ok(span) = stream.expect(TokenKind::RParen) {
+        span.end
+    } else {
+        diags.push(
+            Diag::error("Expected closing parenthesis in procedure argument list")
+                .with_primary_label(
+                    stream.current().span.clone(),
+                    "expected ')' here",
+                ),
+        );
+        stream.position()
+    };
 
     let list = ProcedureArgumentList {
         arguments,
@@ -641,18 +622,18 @@ pub fn parse_procedure_argument_list(
 /// Parse a YIELD clause.
 ///
 /// Grammar: `yieldClause: YIELD yieldItemList`
-pub fn parse_yield_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<YieldClause> {
-    let start_pos = *pos;
+pub fn parse_yield_clause(stream: &mut TokenStream) -> ParseResult<YieldClause> {
+    let start_pos = stream.position();
     let mut diags = vec![];
 
     // Expect YIELD keyword
-    if let Err(diag) = expect_token(tokens, pos, TokenKind::Yield, "yield clause") {
+    if let Err(diag) = stream.expect(TokenKind::Yield) {
         diags.push(*diag);
         return (None, diags);
     }
 
     // Parse yield item list
-    let (items_opt, items_diags) = parse_yield_item_list(tokens, pos);
+    let (items_opt, items_diags) = parse_yield_item_list(stream);
     diags.extend(items_diags);
 
     if let Some(items) = items_opt {
@@ -668,16 +649,16 @@ pub fn parse_yield_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<Yiel
 }
 
 /// Parse a yield item list (comma-separated).
-pub fn parse_yield_item_list(tokens: &[Token], pos: &mut usize) -> ParseResult<YieldItemList> {
-    let start_pos = *pos;
+pub fn parse_yield_item_list(stream: &mut TokenStream) -> ParseResult<YieldItemList> {
+    let start_pos = stream.position();
     let mut items = vec![];
     let mut diags = vec![];
 
     loop {
-        let item_start = *pos;
+        let item_start = stream.position();
 
         // yieldItemName is a field name (identifier), not a general expression.
-        let (name, name_span) = match parse_identifier(tokens, pos) {
+        let (name, name_span) = match parse_identifier(stream) {
             Ok(value) => value,
             Err(diag) => {
                 diags.push(*diag);
@@ -686,8 +667,8 @@ pub fn parse_yield_item_list(tokens: &[Token], pos: &mut usize) -> ParseResult<Y
         };
 
         // Check for optional alias (AS bindingVariable).
-        let alias = if consume_if(tokens, pos, TokenKind::As) {
-            match parse_regular_identifier(tokens, pos) {
+        let alias = if stream.consume(&TokenKind::As) {
+            match parse_regular_identifier(stream) {
                 Ok((alias_name, alias_span)) => Some(YieldItemAlias {
                     name: alias_name,
                     span: alias_span,
@@ -704,26 +685,23 @@ pub fn parse_yield_item_list(tokens: &[Token], pos: &mut usize) -> ParseResult<Y
         let item = YieldItem {
             expression: Expression::VariableReference(name, name_span),
             alias,
-            span: item_start..*pos,
+            span: item_start..stream.position(),
         };
         items.push(item);
 
         // Check for comma.
-        if !consume_if(tokens, pos, TokenKind::Comma) {
+        if !stream.consume(&TokenKind::Comma) {
             break;
         }
-        if check_token(tokens, *pos, TokenKind::Eof)
-            || check_token(tokens, *pos, TokenKind::RParen)
-            || check_token(tokens, *pos, TokenKind::RBrace)
-            || check_token(tokens, *pos, TokenKind::Semicolon)
-            || check_token(tokens, *pos, TokenKind::Next)
+        if stream.check(&TokenKind::Eof)
+            || stream.check(&TokenKind::RParen)
+            || stream.check(&TokenKind::RBrace)
+            || stream.check(&TokenKind::Semicolon)
+            || stream.check(&TokenKind::Next)
         {
             diags.push(
                 Diag::error("Expected yield item after ','").with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start_pos..start_pos),
+                    stream.current().span.clone(),
                     "expected yield item here",
                 ),
             );
@@ -741,7 +719,7 @@ pub fn parse_yield_item_list(tokens: &[Token], pos: &mut usize) -> ParseResult<Y
 
     let list = YieldItemList {
         items,
-        span: start_pos..*pos,
+        span: start_pos..stream.position(),
     };
     (Some(list), diags)
 }
@@ -754,47 +732,33 @@ pub fn parse_yield_item_list(tokens: &[Token], pos: &mut usize) -> ParseResult<Y
 ///
 /// Grammar: `nestedProcedureSpecification: LBRACE procedureBody RBRACE`
 pub fn parse_nested_procedure_specification(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<NestedProcedureSpecification> {
-    let start_pos = *pos;
+    let start_pos = stream.position();
     let mut diags = vec![];
 
     // Expect opening brace
-    if let Err(diag) = expect_token(
-        tokens,
-        pos,
-        TokenKind::LBrace,
-        "nested procedure specification",
-    ) {
+    if let Err(diag) = stream.expect(TokenKind::LBrace) {
         diags.push(*diag);
         return (None, diags);
     }
 
     // Parse procedure body
-    let (body_opt, body_diags) = parse_procedure_body(tokens, pos);
+    let (body_opt, body_diags) = parse_procedure_body(stream);
     diags.extend(body_diags);
 
     // Expect closing brace
-    let end_span = if let Ok(span) = expect_token(
-        tokens,
-        pos,
-        TokenKind::RBrace,
-        "nested procedure specification",
-    ) {
+    let end_span = if let Ok(span) = stream.expect(TokenKind::RBrace) {
         span.end
     } else {
         diags.push(
             Diag::error("Expected closing brace in nested procedure specification")
                 .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start_pos..start_pos),
+                    stream.current().span.clone(),
                     "expected '}' here",
                 ),
         );
-        *pos
+        stream.position()
     };
 
     if let Some(body) = body_opt {
@@ -810,10 +774,9 @@ pub fn parse_nested_procedure_specification(
 
 /// Parse a nested data-modifying procedure specification.
 pub fn parse_nested_data_modifying_procedure_specification(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<NestedDataModifyingProcedureSpecification> {
-    let (spec_opt, diags) = parse_nested_procedure_specification(tokens, pos);
+    let (spec_opt, diags) = parse_nested_procedure_specification(stream);
     if let Some(spec) = spec_opt {
         return (
             Some(NestedDataModifyingProcedureSpecification {
@@ -828,10 +791,9 @@ pub fn parse_nested_data_modifying_procedure_specification(
 
 /// Parse a nested query specification.
 pub fn parse_nested_query_specification(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<NestedQuerySpecification> {
-    let (spec_opt, diags) = parse_nested_procedure_specification(tokens, pos);
+    let (spec_opt, diags) = parse_nested_procedure_specification(stream);
     if let Some(spec) = spec_opt {
         return (
             Some(NestedQuerySpecification {
@@ -847,28 +809,28 @@ pub fn parse_nested_query_specification(
 /// Parse a procedure body.
 ///
 /// Grammar: `procedureBody: atSchemaClause? bindingVariableDefinitionBlock? statementBlock`
-pub fn parse_procedure_body(tokens: &[Token], pos: &mut usize) -> ParseResult<ProcedureBody> {
-    let start_pos = *pos;
+pub fn parse_procedure_body(stream: &mut TokenStream) -> ParseResult<ProcedureBody> {
+    let start_pos = stream.position();
     let mut diags = vec![];
 
     // Parse optional AT schema clause
-    let (at_schema, at_diags) = if check_token(tokens, *pos, TokenKind::At) {
-        parse_at_schema_clause(tokens, pos)
+    let (at_schema, at_diags) = if stream.check(&TokenKind::At) {
+        parse_at_schema_clause(stream)
     } else {
         (None, vec![])
     };
     diags.extend(at_diags);
 
     // Parse optional variable definition block
-    let (variable_definitions, var_diags) = if is_variable_definition_start(tokens, *pos) {
-        parse_binding_variable_definition_block(tokens, pos)
+    let (variable_definitions, var_diags) = if is_variable_definition_start(stream) {
+        parse_binding_variable_definition_block(stream)
     } else {
         (None, vec![])
     };
     diags.extend(var_diags);
 
     // Parse statement block
-    let (statements, stmt_diags) = parse_statement_block(tokens, pos);
+    let (statements, stmt_diags) = parse_statement_block(stream);
     diags.extend(stmt_diags);
 
     if let Some(statements) = statements {
@@ -886,12 +848,12 @@ pub fn parse_procedure_body(tokens: &[Token], pos: &mut usize) -> ParseResult<Pr
 }
 
 /// Check if the current position starts a variable definition.
-fn is_variable_definition_start(tokens: &[Token], pos: usize) -> bool {
-    if pos >= tokens.len() {
+fn is_variable_definition_start(stream: &TokenStream) -> bool {
+    if stream.check(&TokenKind::Eof) {
         return false;
     }
 
-    is_variable_definition_keyword(&tokens[pos].kind)
+    is_variable_definition_keyword(&stream.current().kind)
 }
 
 fn is_variable_definition_keyword(kind: &TokenKind) -> bool {
@@ -943,18 +905,18 @@ fn is_at_schema_follow_boundary(kind: &TokenKind) -> bool {
         )
 }
 
-fn consume_typed_marker(tokens: &[Token], pos: &mut usize) -> bool {
-    if check_token(tokens, *pos, TokenKind::DoubleColon)
-        || check_token(tokens, *pos, TokenKind::Typed)
-    {
-        *pos += 1;
+fn consume_typed_marker(stream: &mut TokenStream) -> bool {
+    if stream.check(&TokenKind::DoubleColon) || stream.check(&TokenKind::Typed) {
+        stream.advance();
         true
     } else {
         false
     }
 }
 
-fn find_type_annotation_end(tokens: &[Token], start: usize) -> usize {
+fn find_type_annotation_end(stream: &TokenStream) -> usize {
+    let tokens = stream.tokens();
+    let start = stream.position();
     let mut cursor = start;
     let mut depth = 0usize;
 
@@ -1000,16 +962,15 @@ fn find_type_annotation_end(tokens: &[Token], start: usize) -> usize {
 ///
 /// Grammar: `bindingVariableDefinitionBlock: bindingVariableDefinition+`
 pub fn parse_binding_variable_definition_block(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<BindingVariableDefinitionBlock> {
-    let start_pos = *pos;
+    let start_pos = stream.position();
     let mut definitions = vec![];
     let mut diags = vec![];
 
     // Parse one or more variable definitions
-    while is_variable_definition_start(tokens, *pos) {
-        let (def_opt, def_diags) = parse_binding_variable_definition(tokens, pos);
+    while is_variable_definition_start(stream) {
+        let (def_opt, def_diags) = parse_binding_variable_definition(stream);
         diags.extend(def_diags);
 
         if let Some(def) = def_opt {
@@ -1025,7 +986,7 @@ pub fn parse_binding_variable_definition_block(
 
     let block = BindingVariableDefinitionBlock {
         definitions,
-        span: start_pos..*pos,
+        span: start_pos..stream.position(),
     };
     (Some(block), diags)
 }
@@ -1034,25 +995,24 @@ pub fn parse_binding_variable_definition_block(
 ///
 /// Grammar: `bindingVariableDefinition: graphVariableDefinition | bindingTableVariableDefinition | valueVariableDefinition`
 pub fn parse_binding_variable_definition(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<BindingVariableDefinition> {
-    if *pos >= tokens.len() {
+    if stream.check(&TokenKind::Eof) {
         return (None, vec![]);
     }
 
     // Dispatch based on keyword
-    match &tokens[*pos].kind {
+    match &stream.current().kind {
         TokenKind::Graph | TokenKind::Property => {
-            let (def_opt, diags) = parse_graph_variable_definition(tokens, pos);
+            let (def_opt, diags) = parse_graph_variable_definition(stream);
             (def_opt.map(BindingVariableDefinition::Graph), diags)
         }
         TokenKind::Table | TokenKind::Binding => {
-            let (def_opt, diags) = parse_binding_table_variable_definition(tokens, pos);
+            let (def_opt, diags) = parse_binding_table_variable_definition(stream);
             (def_opt.map(BindingVariableDefinition::BindingTable), diags)
         }
         TokenKind::Value => {
-            let (def_opt, diags) = parse_value_variable_definition(tokens, pos);
+            let (def_opt, diags) = parse_value_variable_definition(stream);
             (def_opt.map(BindingVariableDefinition::Value), diags)
         }
         _ => (None, vec![]),
@@ -1063,23 +1023,22 @@ pub fn parse_binding_variable_definition(
 ///
 /// Grammar: `graphVariableDefinition: PROPERTY? GRAPH bindingVariable optTypedGraphInitializer?`
 pub fn parse_graph_variable_definition(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<GraphVariableDefinition> {
-    let start_pos = *pos;
+    let start_pos = stream.position();
     let mut diags = vec![];
 
     // Check for optional PROPERTY keyword
-    let is_property = consume_if(tokens, pos, TokenKind::Property);
+    let is_property = stream.consume(&TokenKind::Property);
 
     // Expect GRAPH keyword
-    if let Err(diag) = expect_token(tokens, pos, TokenKind::Graph, "graph variable definition") {
+    if let Err(diag) = stream.expect(TokenKind::Graph) {
         diags.push(*diag);
         return (None, diags);
     }
 
     // Parse binding variable
-    let (variable, var_diags) = parse_binding_variable(tokens, pos);
+    let (variable, var_diags) = parse_binding_variable(stream);
     diags.extend(var_diags);
 
     let variable = match variable {
@@ -1092,27 +1051,25 @@ pub fn parse_graph_variable_definition(
     // Parse optional type annotation and required initializer.
     let mut type_annotation = None;
 
-    if !check_token(tokens, *pos, TokenKind::Eq) {
-        let had_typed_marker = consume_typed_marker(tokens, pos);
-        let type_start = *pos;
-        let type_end = find_type_annotation_end(tokens, type_start);
+    if !stream.check(&TokenKind::Eq) {
+        let had_typed_marker = consume_typed_marker(stream);
+        let type_start = stream.position();
+        let type_end = find_type_annotation_end(stream);
+        let tokens = stream.tokens();
 
         if type_end > type_start {
             let type_tokens = &tokens[type_start..type_end];
             match parse_graph_reference_value_type(type_tokens) {
                 Ok(ty) => {
                     type_annotation = Some(ty);
-                    *pos = type_end;
+                    stream.set_position(type_end);
                 }
                 Err(diag) => diags.push(*diag),
             }
         } else if had_typed_marker {
             diags.push(
                 Diag::error("Expected graph type after typed marker").with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start_pos..start_pos),
+                    stream.current().span.clone(),
                     "expected graph type here",
                 ),
             );
@@ -1120,20 +1077,17 @@ pub fn parse_graph_variable_definition(
         }
     }
 
-    if !consume_if(tokens, pos, TokenKind::Eq) {
+    if !stream.consume(&TokenKind::Eq) {
         diags.push(
             Diag::error("Expected '=' in graph variable definition").with_primary_label(
-                tokens
-                    .get(*pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(start_pos..start_pos),
+                stream.current().span.clone(),
                 "expected '=' here",
             ),
         );
         return (None, diags);
     }
 
-    let (init_opt, init_diags) = parse_graph_initializer(tokens, pos);
+    let (init_opt, init_diags) = parse_graph_initializer(stream);
     diags.extend(init_diags);
     let Some(init) = init_opt else {
         return (None, diags);
@@ -1145,55 +1099,58 @@ pub fn parse_graph_variable_definition(
         variable,
         type_annotation,
         initializer,
-        span: start_pos..*pos,
+        span: start_pos..stream.position(),
     };
     (Some(def), diags)
 }
 
 /// Parse a graph initializer.
-fn parse_graph_initializer(tokens: &[Token], pos: &mut usize) -> ParseResult<GraphInitializer> {
-    let start_pos = *pos;
+fn parse_graph_initializer(stream: &mut TokenStream) -> ParseResult<GraphInitializer> {
+    let start_pos = stream.position();
 
     // For now, we parse simple graph expressions
     // Check for CURRENT GRAPH tokens, CURRENT_GRAPH identifier, or variable reference.
-    if *pos < tokens.len() {
-        let token = &tokens[*pos];
+    if !stream.check(&TokenKind::Eof) {
+        let token = stream.current();
         match &token.kind {
-            TokenKind::Current
-                if *pos + 1 < tokens.len() && tokens[*pos + 1].kind == TokenKind::Graph =>
-            {
-                *pos += 2;
-                let expr = GraphExpression::CurrentGraph(start_pos..*pos);
-                return (
-                    Some(GraphInitializer {
-                        expression: expr,
-                        span: start_pos..*pos,
-                    }),
-                    vec![],
-                );
+            TokenKind::Current => {
+                if let Some(next_token) = stream.peek() {
+                    if next_token.kind == TokenKind::Graph {
+                        stream.advance();
+                        stream.advance();
+                        let expr = GraphExpression::CurrentGraph(start_pos..stream.position());
+                        return (
+                            Some(GraphInitializer {
+                                expression: expr,
+                                span: start_pos..stream.position(),
+                            }),
+                            vec![],
+                        );
+                    }
+                }
             }
             TokenKind::Identifier(name) => {
                 if name.eq_ignore_ascii_case("CURRENT_GRAPH")
                     || name.eq_ignore_ascii_case("CURRENT_PROPERTY_GRAPH")
                 {
-                    *pos += 1;
-                    let expr = GraphExpression::CurrentGraph(start_pos..*pos);
+                    stream.advance();
+                    let expr = GraphExpression::CurrentGraph(start_pos..stream.position());
                     return (
                         Some(GraphInitializer {
                             expression: expr,
-                            span: start_pos..*pos,
+                            span: start_pos..stream.position(),
                         }),
                         vec![],
                     );
                 }
                 let name = name.clone();
                 let span = token.span.clone();
-                *pos += 1;
+                stream.advance();
                 let expr = GraphExpression::VariableReference(name, span.clone());
                 return (
                     Some(GraphInitializer {
                         expression: expr,
-                        span: start_pos..*pos,
+                        span: start_pos..stream.position(),
                     }),
                     vec![],
                 );
@@ -1203,11 +1160,11 @@ fn parse_graph_initializer(tokens: &[Token], pos: &mut usize) -> ParseResult<Gra
     }
 
     // Fall back to general expression parsing
-    match parse_expression_at(tokens, pos) {
+    match parse_expression_at(stream) {
         Ok(expression) => {
             let init = GraphInitializer {
                 expression: GraphExpression::Expression(Box::new(expression)),
-                span: start_pos..*pos,
+                span: start_pos..stream.position(),
             };
             (Some(init), vec![])
         }
@@ -1219,28 +1176,22 @@ fn parse_graph_initializer(tokens: &[Token], pos: &mut usize) -> ParseResult<Gra
 ///
 /// Grammar: `bindingTableVariableDefinition: BINDING? TABLE bindingVariable optTypedBindingTableInitializer?`
 pub fn parse_binding_table_variable_definition(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<BindingTableVariableDefinition> {
-    let start_pos = *pos;
+    let start_pos = stream.position();
     let mut diags = vec![];
 
     // Check for optional BINDING keyword
-    let is_binding = consume_if(tokens, pos, TokenKind::Binding);
+    let is_binding = stream.consume(&TokenKind::Binding);
 
     // Expect TABLE keyword
-    if let Err(diag) = expect_token(
-        tokens,
-        pos,
-        TokenKind::Table,
-        "binding table variable definition",
-    ) {
+    if let Err(diag) = stream.expect(TokenKind::Table) {
         diags.push(*diag);
         return (None, diags);
     }
 
     // Parse binding variable
-    let (variable, var_diags) = parse_binding_variable(tokens, pos);
+    let (variable, var_diags) = parse_binding_variable(stream);
     diags.extend(var_diags);
 
     let variable = match variable {
@@ -1253,27 +1204,25 @@ pub fn parse_binding_table_variable_definition(
     // Parse optional type annotation and required initializer.
     let mut type_annotation = None;
 
-    if !check_token(tokens, *pos, TokenKind::Eq) {
-        let had_typed_marker = consume_typed_marker(tokens, pos);
-        let type_start = *pos;
-        let type_end = find_type_annotation_end(tokens, type_start);
+    if !stream.check(&TokenKind::Eq) {
+        let had_typed_marker = consume_typed_marker(stream);
+        let type_start = stream.position();
+        let type_end = find_type_annotation_end(stream);
+        let tokens = stream.tokens();
 
         if type_end > type_start {
             let type_tokens = &tokens[type_start..type_end];
             match parse_binding_table_reference_value_type(type_tokens) {
                 Ok(ty) => {
                     type_annotation = Some(ty);
-                    *pos = type_end;
+                    stream.set_position(type_end);
                 }
                 Err(diag) => diags.push(*diag),
             }
         } else if had_typed_marker {
             diags.push(
                 Diag::error("Expected binding table type after typed marker").with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start_pos..start_pos),
+                    stream.current().span.clone(),
                     "expected binding table type here",
                 ),
             );
@@ -1281,20 +1230,17 @@ pub fn parse_binding_table_variable_definition(
         }
     }
 
-    if !consume_if(tokens, pos, TokenKind::Eq) {
+    if !stream.consume(&TokenKind::Eq) {
         diags.push(
             Diag::error("Expected '=' in binding table variable definition").with_primary_label(
-                tokens
-                    .get(*pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(start_pos..start_pos),
+                stream.current().span.clone(),
                 "expected '=' here",
             ),
         );
         return (None, diags);
     }
 
-    let (init_opt, init_diags) = parse_binding_table_initializer(tokens, pos);
+    let (init_opt, init_diags) = parse_binding_table_initializer(stream);
     diags.extend(init_diags);
     let Some(init) = init_opt else {
         return (None, diags);
@@ -1306,30 +1252,29 @@ pub fn parse_binding_table_variable_definition(
         variable,
         type_annotation,
         initializer,
-        span: start_pos..*pos,
+        span: start_pos..stream.position(),
     };
     (Some(def), diags)
 }
 
 /// Parse a binding table initializer.
 fn parse_binding_table_initializer(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<BindingTableInitializer> {
-    let start_pos = *pos;
+    let start_pos = stream.position();
 
     // For now, we parse simple binding table expressions
-    if *pos < tokens.len() {
-        let token = &tokens[*pos];
+    if !stream.check(&TokenKind::Eof) {
+        let token = stream.current();
         if let TokenKind::Identifier(name) = &token.kind {
             let name = name.clone();
             let span = token.span.clone();
-            *pos += 1;
+            stream.advance();
             let expr = BindingTableExpression::VariableReference(name, span);
             return (
                 Some(BindingTableInitializer {
                     expression: expr,
-                    span: start_pos..*pos,
+                    span: start_pos..stream.position(),
                 }),
                 vec![],
             );
@@ -1337,11 +1282,11 @@ fn parse_binding_table_initializer(
     }
 
     // Fall back to general expression parsing
-    match parse_expression_at(tokens, pos) {
+    match parse_expression_at(stream) {
         Ok(expression) => {
             let init = BindingTableInitializer {
                 expression: BindingTableExpression::Expression(Box::new(expression)),
-                span: start_pos..*pos,
+                span: start_pos..stream.position(),
             };
             (Some(init), vec![])
         }
@@ -1353,20 +1298,19 @@ fn parse_binding_table_initializer(
 ///
 /// Grammar: `valueVariableDefinition: VALUE bindingVariable optTypedValueInitializer?`
 pub fn parse_value_variable_definition(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<ValueVariableDefinition> {
-    let start_pos = *pos;
+    let start_pos = stream.position();
     let mut diags = vec![];
 
     // Expect VALUE keyword
-    if let Err(diag) = expect_token(tokens, pos, TokenKind::Value, "value variable definition") {
+    if let Err(diag) = stream.expect(TokenKind::Value) {
         diags.push(*diag);
         return (None, diags);
     }
 
     // Parse binding variable
-    let (variable, var_diags) = parse_binding_variable(tokens, pos);
+    let (variable, var_diags) = parse_binding_variable(stream);
     diags.extend(var_diags);
 
     let variable = match variable {
@@ -1379,27 +1323,25 @@ pub fn parse_value_variable_definition(
     // Parse optional type annotation and required initializer.
     let mut type_annotation = None;
 
-    if !check_token(tokens, *pos, TokenKind::Eq) {
-        let had_typed_marker = consume_typed_marker(tokens, pos);
-        let type_start = *pos;
-        let type_end = find_type_annotation_end(tokens, type_start);
+    if !stream.check(&TokenKind::Eq) {
+        let had_typed_marker = consume_typed_marker(stream);
+        let type_start = stream.position();
+        let type_end = find_type_annotation_end(stream);
+        let tokens = stream.tokens();
 
         if type_end > type_start {
             let type_tokens = &tokens[type_start..type_end];
             match parse_value_type(type_tokens) {
                 Ok(ty) => {
                     type_annotation = Some(ty);
-                    *pos = type_end;
+                    stream.set_position(type_end);
                 }
                 Err(diag) => diags.push(*diag),
             }
         } else if had_typed_marker {
             diags.push(
                 Diag::error("Expected value type after typed marker").with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start_pos..start_pos),
+                    stream.current().span.clone(),
                     "expected value type here",
                 ),
             );
@@ -1407,20 +1349,17 @@ pub fn parse_value_variable_definition(
         }
     }
 
-    if !consume_if(tokens, pos, TokenKind::Eq) {
+    if !stream.consume(&TokenKind::Eq) {
         diags.push(
             Diag::error("Expected '=' in value variable definition").with_primary_label(
-                tokens
-                    .get(*pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(start_pos..start_pos),
+                stream.current().span.clone(),
                 "expected '=' here",
             ),
         );
         return (None, diags);
     }
 
-    let (init_opt, init_diags) = parse_value_initializer(tokens, pos);
+    let (init_opt, init_diags) = parse_value_initializer(stream);
     diags.extend(init_diags);
     let Some(init) = init_opt else {
         return (None, diags);
@@ -1431,20 +1370,21 @@ pub fn parse_value_variable_definition(
         variable,
         type_annotation,
         initializer,
-        span: start_pos..*pos,
+        span: start_pos..stream.position(),
     };
     (Some(def), diags)
 }
 
 /// Parse a value initializer.
-fn parse_value_initializer(tokens: &[Token], pos: &mut usize) -> ParseResult<ValueInitializer> {
-    let start_pos = *pos;
+fn parse_value_initializer(stream: &mut TokenStream) -> ParseResult<ValueInitializer> {
+    let start_pos = stream.position();
 
-    match parse_expression_at(tokens, pos) {
+    // Parse expression
+    match parse_expression_at(stream) {
         Ok(expression) => {
             let init = ValueInitializer {
                 expression,
-                span: start_pos..*pos,
+                span: start_pos..stream.position(),
             };
             (Some(init), vec![])
         }
@@ -1459,22 +1399,19 @@ fn parse_value_initializer(tokens: &[Token], pos: &mut usize) -> ParseResult<Val
 /// Parse a statement block.
 ///
 /// Grammar: `statementBlock: statement nextStatement*`
-pub fn parse_statement_block(tokens: &[Token], pos: &mut usize) -> ParseResult<StatementBlock> {
-    let start_pos = *pos;
+pub fn parse_statement_block(stream: &mut TokenStream) -> ParseResult<StatementBlock> {
+    let start_pos = stream.position();
     let mut statements = vec![];
     let mut next_statements = vec![];
     let mut diags = vec![];
 
     // Parse required initial statement.
-    let (first_opt, first_diags) = parse_statement(tokens, pos);
+    let (first_opt, first_diags) = parse_statement(stream);
     diags.extend(first_diags);
     let Some(first) = first_opt else {
         diags.push(
             Diag::error("Expected statement in procedure body").with_primary_label(
-                tokens
-                    .get(*pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(start_pos..start_pos),
+                stream.current().span.clone(),
                 "expected statement here",
             ),
         );
@@ -1483,8 +1420,8 @@ pub fn parse_statement_block(tokens: &[Token], pos: &mut usize) -> ParseResult<S
     statements.push(first);
 
     // Parse NEXT statements
-    while check_token(tokens, *pos, TokenKind::Next) {
-        let (next_opt, next_diags) = parse_next_statement(tokens, pos);
+    while stream.check(&TokenKind::Next) {
+        let (next_opt, next_diags) = parse_next_statement(stream);
         diags.extend(next_diags);
 
         if let Some(next) = next_opt {
@@ -1508,22 +1445,20 @@ pub fn parse_statement_block(tokens: &[Token], pos: &mut usize) -> ParseResult<S
     (Some(block), diags)
 }
 
-fn parse_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<ProcedureStatement> {
-    let start = *pos;
-    if start >= tokens.len() {
+fn parse_statement(stream: &mut TokenStream) -> ParseResult<ProcedureStatement> {
+    let start = stream.position();
+    if stream.check(&TokenKind::Eof) {
         return (None, vec![]);
     }
 
     let mut candidates: Vec<(usize, usize, ProcedureStatement, Vec<Diag>)> = Vec::new();
-    let start_kind = &tokens[start].kind;
+    let start_kind = &stream.current().kind;
     let is_optional_call = matches!(start_kind, TokenKind::Optional)
-        && matches!(
-            tokens.get(start + 1).map(|t| &t.kind),
-            Some(TokenKind::Call)
-        );
+        && stream.peek().map(|t| &t.kind) == Some(&TokenKind::Call);
 
-    // Query candidate
+    // Query candidate - use bridge pattern
     if !matches!(start_kind, TokenKind::Create | TokenKind::Drop) {
+        let tokens = stream.tokens();
         let mut query_pos = start;
         let (query_opt, query_diags) = parse_query_legacy(tokens, &mut query_pos);
         if let Some(query) = query_opt {
@@ -1536,7 +1471,7 @@ fn parse_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<ProcedureSt
         }
     }
 
-    // Mutation candidate
+    // Mutation candidate - use bridge pattern
     if matches!(
         start_kind,
         TokenKind::Use
@@ -1549,6 +1484,7 @@ fn parse_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<ProcedureSt
             | TokenKind::Call
             | TokenKind::Optional
     ) {
+        let tokens = stream.tokens();
         let mut mutation_pos = start;
         let (mutation_opt, mutation_diags) =
             parse_linear_data_modifying_statement(tokens, &mut mutation_pos);
@@ -1568,7 +1504,7 @@ fn parse_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<ProcedureSt
         TokenKind::Create | TokenKind::Drop | TokenKind::Call
     ) || is_optional_call
     {
-        let (catalog_opt, catalog_diags, catalog_pos) = parse_catalog_statement_at(tokens, start);
+        let (catalog_opt, catalog_diags, catalog_pos) = parse_catalog_statement_at(stream);
         if let Some(catalog) = catalog_opt {
             candidates.push((
                 catalog_pos,
@@ -1595,19 +1531,20 @@ fn parse_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<ProcedureSt
     }
 
     let (best_pos, _, statement, diags) = candidates.remove(best_idx);
-    *pos = best_pos;
+    stream.set_position(best_pos);
     (Some(statement), diags)
 }
 
 fn parse_catalog_statement_at(
-    tokens: &[Token],
-    start: usize,
+    stream: &TokenStream,
 ) -> (Option<LinearCatalogModifyingStatement>, Vec<Diag>, usize) {
-    let end = find_statement_boundary(tokens, start);
+    let start = stream.position();
+    let end = find_statement_boundary(stream);
     if end <= start {
         return (None, vec![], start);
     }
 
+    let tokens = stream.tokens();
     let statement_tokens = &tokens[start..end];
     match parse_catalog_statement_kind(statement_tokens) {
         Ok(kind) => (Some(kind), vec![], end),
@@ -1615,7 +1552,9 @@ fn parse_catalog_statement_at(
     }
 }
 
-fn find_statement_boundary(tokens: &[Token], start: usize) -> usize {
+fn find_statement_boundary(stream: &TokenStream) -> usize {
+    let tokens = stream.tokens();
+    let start = stream.position();
     let mut cursor = start;
     let mut paren_depth = 0usize;
     let mut bracket_depth = 0usize;
@@ -1652,33 +1591,30 @@ fn find_statement_boundary(tokens: &[Token], start: usize) -> usize {
 /// Parse a NEXT statement.
 ///
 /// Grammar: `nextStatement: NEXT yieldClause? statement`
-pub fn parse_next_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<NextStatement> {
-    let start_pos = *pos;
+pub fn parse_next_statement(stream: &mut TokenStream) -> ParseResult<NextStatement> {
+    let start_pos = stream.position();
     let mut diags = vec![];
 
     // Expect NEXT keyword
-    if let Err(diag) = expect_token(tokens, pos, TokenKind::Next, "next statement") {
+    if let Err(diag) = stream.expect(TokenKind::Next) {
         diags.push(*diag);
         return (None, diags);
     }
 
     // Parse optional YIELD clause
-    let (yield_clause, yield_diags) = if check_token(tokens, *pos, TokenKind::Yield) {
-        parse_yield_clause(tokens, pos)
+    let (yield_clause, yield_diags) = if stream.check(&TokenKind::Yield) {
+        parse_yield_clause(stream)
     } else {
         (None, vec![])
     };
     diags.extend(yield_diags);
 
-    let (statement_opt, statement_diags) = parse_statement(tokens, pos);
+    let (statement_opt, statement_diags) = parse_statement(stream);
     diags.extend(statement_diags);
     let Some(statement) = statement_opt else {
         diags.push(
             Diag::error("Expected statement after NEXT").with_primary_label(
-                tokens
-                    .get(*pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(start_pos..start_pos),
+                stream.current().span.clone(),
                 "expected statement here",
             ),
         );
@@ -1700,21 +1636,22 @@ pub fn parse_next_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<Ne
 /// Parse an AT schema clause.
 ///
 /// Grammar: `atSchemaClause: AT schemaReference`
-pub fn parse_at_schema_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<AtSchemaClause> {
-    let start_pos = *pos;
+pub fn parse_at_schema_clause(stream: &mut TokenStream) -> ParseResult<AtSchemaClause> {
+    let start_pos = stream.position();
     let mut diags = vec![];
 
     // Expect AT keyword
-    if let Err(diag) = expect_token(tokens, pos, TokenKind::At, "at schema clause") {
+    if let Err(diag) = stream.expect(TokenKind::At) {
         diags.push(*diag);
         return (None, diags);
     }
 
     // Parse the longest schema reference that ends on a known clause boundary.
-    let schema_ref_start = *pos;
+    let schema_ref_start = stream.position();
     let mut parsed_schema = None;
     let mut schema_ref_end = schema_ref_start;
 
+    let tokens = stream.tokens();
     for end in (schema_ref_start + 1)..=tokens.len() {
         let candidate_tokens = &tokens[schema_ref_start..end];
         if let Ok(schema) = parse_schema_reference(candidate_tokens) {
@@ -1732,16 +1669,13 @@ pub fn parse_at_schema_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<
     let Some(schema) = parsed_schema else {
         diags.push(
             Diag::error("Expected schema reference after AT keyword").with_primary_label(
-                tokens
-                    .get(*pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(start_pos..start_pos),
+                stream.current().span.clone(),
                 "expected schema reference here",
             ),
         );
         return (None, diags);
     };
-    *pos = schema_ref_end;
+    stream.set_position(schema_ref_end);
 
     let end_span = schema.span().end;
     let clause = AtSchemaClause {
@@ -1795,9 +1729,9 @@ mod tests {
     fn test_parse_variable_scope_empty() {
         let source = "()";
         let tokens = Lexer::new(source).tokenize().tokens;
-        let mut pos = 0;
+        let mut stream = TokenStream::new(&tokens);
 
-        let (scope_opt, diags) = parse_variable_scope_clause(&tokens, &mut pos);
+        let (scope_opt, diags) = parse_variable_scope_clause(&mut stream);
         assert!(scope_opt.is_some(), "Failed to parse empty variable scope");
         assert!(diags.is_empty(), "Unexpected diagnostics: {diags:?}");
 
@@ -1809,9 +1743,9 @@ mod tests {
     fn test_parse_variable_scope_with_variables() {
         let source = "(x, y, z)";
         let tokens = Lexer::new(source).tokenize().tokens;
-        let mut pos = 0;
+        let mut stream = TokenStream::new(&tokens);
 
-        let (scope_opt, diags) = parse_variable_scope_clause(&tokens, &mut pos);
+        let (scope_opt, diags) = parse_variable_scope_clause(&mut stream);
         assert!(
             scope_opt.is_some(),
             "Failed to parse variable scope with variables"
@@ -1826,9 +1760,9 @@ mod tests {
     fn test_parse_yield_clause() {
         let source = "YIELD result1, result2 AS alias2";
         let tokens = Lexer::new(source).tokenize().tokens;
-        let mut pos = 0;
+        let mut stream = TokenStream::new(&tokens);
 
-        let (yield_opt, diags) = parse_yield_clause(&tokens, &mut pos);
+        let (yield_opt, diags) = parse_yield_clause(&mut stream);
         assert!(yield_opt.is_some(), "Failed to parse YIELD clause");
         assert!(diags.is_empty(), "Unexpected diagnostics: {diags:?}");
 
@@ -1841,9 +1775,9 @@ mod tests {
     fn test_parse_procedure_argument_list_empty() {
         let source = "()";
         let tokens = Lexer::new(source).tokenize().tokens;
-        let mut pos = 0;
+        let mut stream = TokenStream::new(&tokens);
 
-        let (args_opt, diags) = parse_procedure_argument_list(&tokens, &mut pos);
+        let (args_opt, diags) = parse_procedure_argument_list(&mut stream);
         assert!(args_opt.is_some(), "Failed to parse empty argument list");
         assert!(diags.is_empty(), "Unexpected diagnostics: {diags:?}");
 
@@ -1855,9 +1789,9 @@ mod tests {
     fn test_parse_procedure_argument_list_with_args() {
         let source = "(1, 'test', x + 5)";
         let tokens = Lexer::new(source).tokenize().tokens;
-        let mut pos = 0;
+        let mut stream = TokenStream::new(&tokens);
 
-        let (args_opt, _diags) = parse_procedure_argument_list(&tokens, &mut pos);
+        let (args_opt, _diags) = parse_procedure_argument_list(&mut stream);
         assert!(
             args_opt.is_some(),
             "Failed to parse argument list with args"
@@ -1871,9 +1805,9 @@ mod tests {
     fn test_parse_value_variable_definition() {
         let source = "VALUE counter";
         let tokens = Lexer::new(source).tokenize().tokens;
-        let mut pos = 0;
+        let mut stream = TokenStream::new(&tokens);
 
-        let (def_opt, diags) = parse_value_variable_definition(&tokens, &mut pos);
+        let (def_opt, diags) = parse_value_variable_definition(&mut stream);
         assert!(def_opt.is_none(), "Expected missing initializer to fail");
         assert!(!diags.is_empty(), "Expected diagnostics");
     }
@@ -1882,9 +1816,9 @@ mod tests {
     fn test_parse_value_variable_definition_with_initializer() {
         let source = "VALUE counter = 0";
         let tokens = Lexer::new(source).tokenize().tokens;
-        let mut pos = 0;
+        let mut stream = TokenStream::new(&tokens);
 
-        let (def_opt, _diags) = parse_value_variable_definition(&tokens, &mut pos);
+        let (def_opt, _diags) = parse_value_variable_definition(&mut stream);
         assert!(
             def_opt.is_some(),
             "Failed to parse value variable definition with initializer"
@@ -1899,9 +1833,9 @@ mod tests {
     fn test_parse_graph_variable_definition() {
         let source = "GRAPH g";
         let tokens = Lexer::new(source).tokenize().tokens;
-        let mut pos = 0;
+        let mut stream = TokenStream::new(&tokens);
 
-        let (def_opt, diags) = parse_graph_variable_definition(&tokens, &mut pos);
+        let (def_opt, diags) = parse_graph_variable_definition(&mut stream);
         assert!(def_opt.is_none(), "Expected missing initializer to fail");
         assert!(!diags.is_empty(), "Expected diagnostics");
     }
@@ -1910,9 +1844,9 @@ mod tests {
     fn test_parse_property_graph_variable_definition() {
         let source = "PROPERTY GRAPH g";
         let tokens = Lexer::new(source).tokenize().tokens;
-        let mut pos = 0;
+        let mut stream = TokenStream::new(&tokens);
 
-        let (def_opt, diags) = parse_graph_variable_definition(&tokens, &mut pos);
+        let (def_opt, diags) = parse_graph_variable_definition(&mut stream);
         assert!(def_opt.is_none(), "Expected missing initializer to fail");
         assert!(!diags.is_empty(), "Expected diagnostics");
     }
@@ -1921,9 +1855,9 @@ mod tests {
     fn test_parse_binding_table_variable_definition() {
         let source = "TABLE t";
         let tokens = Lexer::new(source).tokenize().tokens;
-        let mut pos = 0;
+        let mut stream = TokenStream::new(&tokens);
 
-        let (def_opt, diags) = parse_binding_table_variable_definition(&tokens, &mut pos);
+        let (def_opt, diags) = parse_binding_table_variable_definition(&mut stream);
         assert!(def_opt.is_none(), "Expected missing initializer to fail");
         assert!(!diags.is_empty(), "Expected diagnostics");
     }
@@ -1932,9 +1866,9 @@ mod tests {
     fn test_parse_binding_binding_table_variable_definition() {
         let source = "BINDING TABLE t";
         let tokens = Lexer::new(source).tokenize().tokens;
-        let mut pos = 0;
+        let mut stream = TokenStream::new(&tokens);
 
-        let (def_opt, diags) = parse_binding_table_variable_definition(&tokens, &mut pos);
+        let (def_opt, diags) = parse_binding_table_variable_definition(&mut stream);
         assert!(def_opt.is_none(), "Expected missing initializer to fail");
         assert!(!diags.is_empty(), "Expected diagnostics");
     }
@@ -1943,9 +1877,9 @@ mod tests {
     fn test_parse_at_schema_clause() {
         let source = "AT my_schema";
         let tokens = Lexer::new(source).tokenize().tokens;
-        let mut pos = 0;
+        let mut stream = TokenStream::new(&tokens);
 
-        let (clause_opt, _diags) = parse_at_schema_clause(&tokens, &mut pos);
+        let (clause_opt, _diags) = parse_at_schema_clause(&mut stream);
         assert!(clause_opt.is_some(), "Failed to parse AT schema clause");
 
         let _clause = clause_opt.unwrap();

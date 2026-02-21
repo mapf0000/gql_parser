@@ -46,16 +46,58 @@ impl<'a> TokenStream<'a> {
 
     /// Advances to the next token.
     ///
-    /// Does nothing if already at EOF (last token).
+    /// This can advance past the last token to indicate all tokens have been consumed.
+    ///
+    /// Note: If already at or past the EOF token, this is a no-op. Parse functions should
+    /// check `is_at_end()` if they need to ensure progress was made, or use `try_advance()`
+    /// to get feedback about whether the advance succeeded.
     pub fn advance(&mut self) {
-        if self.pos < self.tokens.len().saturating_sub(1) {
+        if self.pos < self.tokens.len() {
             self.pos += 1;
         }
     }
 
+    /// Attempts to advance to the next token, returning whether progress was made.
+    ///
+    /// Returns `true` if the position changed, `false` if already past the last real token.
+    /// Use this when you need to ensure an advance actually made progress.
+    ///
+    /// Note: This can advance from the EOF token position to one past EOF, but will
+    /// return false if already past EOF.
+    ///
+    /// # Example
+    /// ```ignore
+    /// if !stream.try_advance() {
+    ///     // Can't advance further
+    ///     return None;
+    /// }
+    /// ```
+    pub fn try_advance(&mut self) -> bool {
+        if self.pos < self.tokens.len() {
+            self.pos += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Returns true if positioned at or past the EOF token.
+    ///
+    /// Use this to check if further parsing is possible. Parse functions that do error
+    /// recovery should avoid returning Some(result) when at EOF, as this can cause
+    /// infinite loops in greedy parsing loops.
+    pub fn is_at_end(&self) -> bool {
+        self.pos >= self.tokens.len().saturating_sub(1)
+            && self.tokens.last().map(|t| t.kind == TokenKind::Eof).unwrap_or(true)
+    }
+
     /// Checks if the current token matches the given kind.
     pub fn check(&self, kind: &TokenKind) -> bool {
-        &self.current().kind == kind
+        if self.pos >= self.tokens.len() {
+            return matches!(kind, TokenKind::Eof);
+        }
+
+        &self.tokens[self.pos].kind == kind
     }
 
     /// Consumes the current token if it matches the given kind.
@@ -106,7 +148,7 @@ impl<'a> TokenStream<'a> {
 
     /// Sets the position in the token stream (used for backtracking).
     pub fn set_position(&mut self, pos: usize) {
-        self.pos = pos.min(self.tokens.len().saturating_sub(1));
+        self.pos = pos.min(self.tokens.len());
     }
 
     /// Returns a reference to the underlying token slice.
@@ -273,5 +315,60 @@ mod tests {
         // Should stay at EOF
         stream.advance();
         assert_eq!(stream.current().kind, TokenKind::Eof);
+    }
+
+    #[test]
+    fn token_stream_try_advance_success() {
+        let tokens = make_tokens();
+        let mut stream = TokenStream::new(&tokens);
+
+        assert!(stream.try_advance()); // Match -> LParen
+        assert_eq!(stream.current().kind, TokenKind::LParen);
+
+        assert!(stream.try_advance()); // LParen -> Identifier
+        assert_eq!(stream.current().kind, TokenKind::Identifier("n".into()));
+    }
+
+    #[test]
+    fn token_stream_try_advance_at_eof() {
+        let tokens = make_tokens();
+        let mut stream = TokenStream::new(&tokens);
+
+        // Advance to EOF token
+        while stream.current().kind != TokenKind::Eof {
+            stream.advance();
+        }
+
+        // We're AT the EOF token (position = tokens.len() - 1)
+        assert_eq!(stream.current().kind, TokenKind::Eof);
+
+        // try_advance should succeed once more (to go past EOF)
+        assert!(stream.try_advance());
+
+        // Now we're past EOF (position = tokens.len())
+        // current() still returns EOF (last token)
+        assert_eq!(stream.current().kind, TokenKind::Eof);
+
+        // But try_advance should now return false
+        assert!(!stream.try_advance());
+        assert_eq!(stream.current().kind, TokenKind::Eof);
+    }
+
+    #[test]
+    fn token_stream_is_at_end() {
+        let tokens = make_tokens();
+        let mut stream = TokenStream::new(&tokens);
+
+        assert!(!stream.is_at_end()); // At Match
+
+        // Advance to just before EOF
+        while stream.peek().map(|t| &t.kind) != Some(&TokenKind::Eof) {
+            stream.advance();
+        }
+        assert!(!stream.is_at_end()); // At RParen
+
+        // Advance to EOF
+        stream.advance();
+        assert!(stream.is_at_end()); // At EOF token
     }
 }

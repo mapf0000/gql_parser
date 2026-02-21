@@ -10,6 +10,7 @@
 
 use gql_parser::ast::ProcedureCall;
 use gql_parser::lexer::Lexer;
+use gql_parser::parser::base::TokenStream;
 use gql_parser::parser::procedure::*;
 
 #[test]
@@ -172,9 +173,9 @@ fn test_inline_procedure_call_with_variables() {
 fn test_value_variable_definition_simple() {
     let source = "VALUE counter";
     let tokens = Lexer::new(source).tokenize().tokens;
-    let mut pos = 0;
+    let mut stream = TokenStream::new(&tokens);
 
-    let (def_opt, diags) = parse_value_variable_definition(&tokens, &mut pos);
+    let (def_opt, diags) = parse_value_variable_definition(&mut stream);
     assert!(def_opt.is_none(), "Expected missing initializer to fail");
     assert!(
         !diags.is_empty(),
@@ -186,9 +187,9 @@ fn test_value_variable_definition_simple() {
 fn test_value_variable_definition_with_initializer() {
     let source = "VALUE counter = 42";
     let tokens = Lexer::new(source).tokenize().tokens;
-    let mut pos = 0;
+    let mut stream = TokenStream::new(&tokens);
 
-    let (def_opt, _diags) = parse_value_variable_definition(&tokens, &mut pos);
+    let (def_opt, _diags) = parse_value_variable_definition(&mut stream);
     assert!(
         def_opt.is_some(),
         "Failed to parse value variable with initializer"
@@ -203,9 +204,9 @@ fn test_value_variable_definition_with_initializer() {
 fn test_graph_variable_definition() {
     let source = "GRAPH g";
     let tokens = Lexer::new(source).tokenize().tokens;
-    let mut pos = 0;
+    let mut stream = TokenStream::new(&tokens);
 
-    let (def_opt, diags) = parse_graph_variable_definition(&tokens, &mut pos);
+    let (def_opt, diags) = parse_graph_variable_definition(&mut stream);
     assert!(def_opt.is_none(), "Expected missing initializer to fail");
     assert!(
         !diags.is_empty(),
@@ -217,9 +218,9 @@ fn test_graph_variable_definition() {
 fn test_property_graph_variable_definition() {
     let source = "PROPERTY GRAPH pg";
     let tokens = Lexer::new(source).tokenize().tokens;
-    let mut pos = 0;
+    let mut stream = TokenStream::new(&tokens);
 
-    let (def_opt, diags) = parse_graph_variable_definition(&tokens, &mut pos);
+    let (def_opt, diags) = parse_graph_variable_definition(&mut stream);
     assert!(def_opt.is_none(), "Expected missing initializer to fail");
     assert!(
         !diags.is_empty(),
@@ -231,9 +232,9 @@ fn test_property_graph_variable_definition() {
 fn test_binding_table_variable_definition() {
     let source = "TABLE results";
     let tokens = Lexer::new(source).tokenize().tokens;
-    let mut pos = 0;
+    let mut stream = TokenStream::new(&tokens);
 
-    let (def_opt, diags) = parse_binding_table_variable_definition(&tokens, &mut pos);
+    let (def_opt, diags) = parse_binding_table_variable_definition(&mut stream);
     assert!(def_opt.is_none(), "Expected missing initializer to fail");
     assert!(
         !diags.is_empty(),
@@ -245,9 +246,9 @@ fn test_binding_table_variable_definition() {
 fn test_binding_binding_table_variable_definition() {
     let source = "BINDING TABLE results";
     let tokens = Lexer::new(source).tokenize().tokens;
-    let mut pos = 0;
+    let mut stream = TokenStream::new(&tokens);
 
-    let (def_opt, diags) = parse_binding_table_variable_definition(&tokens, &mut pos);
+    let (def_opt, diags) = parse_binding_table_variable_definition(&mut stream);
     assert!(def_opt.is_none(), "Expected missing initializer to fail");
     assert!(
         !diags.is_empty(),
@@ -259,9 +260,9 @@ fn test_binding_binding_table_variable_definition() {
 fn test_at_schema_clause() {
     let source = "AT my_schema";
     let tokens = Lexer::new(source).tokenize().tokens;
-    let mut pos = 0;
+    let mut stream = TokenStream::new(&tokens);
 
-    let (clause_opt, _diags) = parse_at_schema_clause(&tokens, &mut pos);
+    let (clause_opt, _diags) = parse_at_schema_clause(&mut stream);
     assert!(clause_opt.is_some(), "Failed to parse AT schema clause");
 }
 
@@ -269,9 +270,9 @@ fn test_at_schema_clause() {
 fn test_multiple_variable_definitions() {
     let source = "VALUE x = 1";
     let tokens = Lexer::new(source).tokenize().tokens;
-    let mut pos = 0;
+    let mut stream = TokenStream::new(&tokens);
 
-    let (block_opt, _diags) = parse_binding_variable_definition_block(&tokens, &mut pos);
+    let (block_opt, _diags) = parse_binding_variable_definition_block(&mut stream);
     assert!(
         block_opt.is_some(),
         "Failed to parse variable definition block"
@@ -285,9 +286,9 @@ fn test_multiple_variable_definitions() {
 fn test_procedure_argument_list_empty() {
     let source = "()";
     let tokens = Lexer::new(source).tokenize().tokens;
-    let mut pos = 0;
+    let mut stream = TokenStream::new(&tokens);
 
-    let (args_opt, diags) = parse_procedure_argument_list(&tokens, &mut pos);
+    let (args_opt, diags) = parse_procedure_argument_list(&mut stream);
     assert!(args_opt.is_some(), "Failed to parse empty argument list");
     assert!(diags.is_empty(), "Unexpected diagnostics: {diags:?}");
 
@@ -299,9 +300,9 @@ fn test_procedure_argument_list_empty() {
 fn test_procedure_argument_list_multiple_args() {
     let source = "(1, 2, 3)";
     let tokens = Lexer::new(source).tokenize().tokens;
-    let mut pos = 0;
+    let mut stream = TokenStream::new(&tokens);
 
-    let (args_opt, _diags) = parse_procedure_argument_list(&tokens, &mut pos);
+    let (args_opt, _diags) = parse_procedure_argument_list(&mut stream);
     assert!(args_opt.is_some(), "Failed to parse argument list");
 
     let args = args_opt.unwrap();
@@ -312,9 +313,9 @@ fn test_procedure_argument_list_multiple_args() {
 fn test_yield_item_list_simple() {
     let source = "YIELD x, y";
     let tokens = Lexer::new(source).tokenize().tokens;
-    let mut pos = 0;
+    let mut stream = TokenStream::new(&tokens);
 
-    let (yield_opt, diags) = parse_yield_clause(&tokens, &mut pos);
+    let (yield_opt, diags) = parse_yield_clause(&mut stream);
     assert!(yield_opt.is_some(), "Failed to parse yield clause");
     assert!(diags.is_empty(), "Unexpected diagnostics: {diags:?}");
 
@@ -326,9 +327,9 @@ fn test_yield_item_list_simple() {
 fn test_yield_item_with_alias() {
     let source = "YIELD x AS result";
     let tokens = Lexer::new(source).tokenize().tokens;
-    let mut pos = 0;
+    let mut stream = TokenStream::new(&tokens);
 
-    let (yield_opt, diags) = parse_yield_clause(&tokens, &mut pos);
+    let (yield_opt, diags) = parse_yield_clause(&mut stream);
     assert!(
         yield_opt.is_some(),
         "Failed to parse yield clause with alias"
@@ -377,8 +378,8 @@ fn test_yield_disallows_arbitrary_expression_items() {
 fn test_argument_list_disallows_trailing_comma() {
     let source = "(1,)";
     let tokens = Lexer::new(source).tokenize().tokens;
-    let mut pos = 0;
+    let mut stream = TokenStream::new(&tokens);
 
-    let (_args_opt, diags) = parse_procedure_argument_list(&tokens, &mut pos);
+    let (_args_opt, diags) = parse_procedure_argument_list(&mut stream);
     assert!(!diags.is_empty(), "Expected trailing comma diagnostic");
 }

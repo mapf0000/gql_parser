@@ -14,7 +14,7 @@ impl<'a> PatternParser<'a> {
         }
 
         let start = self.current_start().unwrap_or(0);
-        self.pos += 1;
+        self.stream.advance();
 
         let filler = self.parse_element_pattern_filler(FillerTerminator::RParen, start);
 
@@ -25,10 +25,10 @@ impl<'a> PatternParser<'a> {
             );
             self.skip_to_token(|kind| matches!(kind, TokenKind::RParen));
             if matches!(self.current_kind(), Some(TokenKind::RParen)) {
-                self.pos += 1;
+                self.stream.advance();
             }
         } else {
-            self.pos += 1;
+            self.stream.advance();
         }
 
         let end = self.last_consumed_end(start);
@@ -46,9 +46,9 @@ impl<'a> PatternParser<'a> {
 
         match self.current_kind() {
             Some(TokenKind::LeftArrow) => {
-                self.pos += 1;
+                self.stream.advance();
                 if matches!(self.current_kind(), Some(TokenKind::LBracket)) {
-                    self.pos += 1;
+                    self.stream.advance();
                     let filler =
                         self.parse_element_pattern_filler(FillerTerminator::RBracket, start);
                     if !matches!(self.current_kind(), Some(TokenKind::RBracket)) {
@@ -60,7 +60,7 @@ impl<'a> PatternParser<'a> {
                         );
                         return None;
                     }
-                    self.pos += 1;
+                    self.stream.advance();
 
                     let direction = match self.current_kind() {
                         Some(TokenKind::Minus) => EdgeDirection::PointingLeft,
@@ -76,7 +76,7 @@ impl<'a> PatternParser<'a> {
                             return None;
                         }
                     };
-                    self.pos += 1;
+                    self.stream.advance();
 
                     let end = self.last_consumed_end(start);
                     Some(EdgePattern::Full(Box::new(FullEdgePattern {
@@ -98,9 +98,9 @@ impl<'a> PatternParser<'a> {
                 }
             }
             Some(TokenKind::Minus) => {
-                self.pos += 1;
+                self.stream.advance();
                 if matches!(self.current_kind(), Some(TokenKind::LBracket)) {
-                    self.pos += 1;
+                    self.stream.advance();
                     let filler =
                         self.parse_element_pattern_filler(FillerTerminator::RBracket, start);
                     if !matches!(self.current_kind(), Some(TokenKind::RBracket)) {
@@ -112,7 +112,7 @@ impl<'a> PatternParser<'a> {
                         );
                         return None;
                     }
-                    self.pos += 1;
+                    self.stream.advance();
 
                     let direction = match self.current_kind() {
                         Some(TokenKind::Arrow) => EdgeDirection::PointingRight,
@@ -128,7 +128,7 @@ impl<'a> PatternParser<'a> {
                             return None;
                         }
                     };
-                    self.pos += 1;
+                    self.stream.advance();
 
                     let end = self.last_consumed_end(start);
                     Some(EdgePattern::Full(Box::new(FullEdgePattern {
@@ -150,9 +150,9 @@ impl<'a> PatternParser<'a> {
                 }
             }
             Some(TokenKind::Tilde) => {
-                self.pos += 1;
+                self.stream.advance();
                 if matches!(self.current_kind(), Some(TokenKind::LBracket)) {
-                    self.pos += 1;
+                    self.stream.advance();
                     let filler =
                         self.parse_element_pattern_filler(FillerTerminator::RBracket, start);
                     if !matches!(self.current_kind(), Some(TokenKind::RBracket)) {
@@ -164,7 +164,7 @@ impl<'a> PatternParser<'a> {
                         );
                         return None;
                     }
-                    self.pos += 1;
+                    self.stream.advance();
 
                     let direction = match self.current_kind() {
                         Some(TokenKind::Tilde) => EdgeDirection::Undirected,
@@ -180,7 +180,7 @@ impl<'a> PatternParser<'a> {
                             return None;
                         }
                     };
-                    self.pos += 1;
+                    self.stream.advance();
 
                     let end = self.last_consumed_end(start);
                     Some(EdgePattern::Full(Box::new(FullEdgePattern {
@@ -202,9 +202,9 @@ impl<'a> PatternParser<'a> {
                 }
             }
             Some(TokenKind::LeftTilde) => {
-                self.pos += 1;
+                self.stream.advance();
                 if matches!(self.current_kind(), Some(TokenKind::LBracket)) {
-                    self.pos += 1;
+                    self.stream.advance();
                     let filler =
                         self.parse_element_pattern_filler(FillerTerminator::RBracket, start);
                     if !matches!(self.current_kind(), Some(TokenKind::RBracket)) {
@@ -216,7 +216,7 @@ impl<'a> PatternParser<'a> {
                         );
                         return None;
                     }
-                    self.pos += 1;
+                    self.stream.advance();
 
                     if !matches!(self.current_kind(), Some(TokenKind::Tilde)) {
                         self.diags.push(
@@ -227,7 +227,7 @@ impl<'a> PatternParser<'a> {
                         );
                         return None;
                     }
-                    self.pos += 1;
+                    self.stream.advance();
 
                     let end = self.last_consumed_end(start);
                     Some(EdgePattern::Full(Box::new(FullEdgePattern {
@@ -257,14 +257,14 @@ impl<'a> PatternParser<'a> {
                 }
             }
             Some(TokenKind::Arrow) => {
-                self.pos += 1;
+                self.stream.advance();
                 let end = self.last_consumed_end(start);
                 Some(EdgePattern::Abbreviated(
                     AbbreviatedEdgePattern::RightArrow { span: start..end },
                 ))
             }
             Some(TokenKind::RightTilde) => {
-                self.pos += 1;
+                self.stream.advance();
                 let end = self.last_consumed_end(start);
                 Some(EdgePattern::Full(Box::new(FullEdgePattern {
                     direction: EdgeDirection::RightOrUndirected,
@@ -291,15 +291,15 @@ impl<'a> PatternParser<'a> {
 
         let variable = match self.current_kind() {
             Some(kind) if regular_identifier_from_kind(kind).is_some() => {
-                let token = self.tokens[self.pos].clone();
-                self.pos += 1;
+                let token = self.stream.current().clone();
+                self.stream.advance();
                 regular_identifier_from_kind(&token.kind).map(|name| ElementVariableDeclaration {
                     variable: name,
                     span: token.span,
                 })
             }
             Some(TokenKind::DelimitedIdentifier(_)) => {
-                let token = self.tokens[self.pos].clone();
+                let token = self.stream.current().clone();
                 self.diags.push(
                     Diag::error("Element variable declaration requires a regular identifier")
                         .with_primary_label(
@@ -307,7 +307,7 @@ impl<'a> PatternParser<'a> {
                             "delimited identifiers are not allowed here",
                         ),
                 );
-                self.pos += 1;
+                self.stream.advance();
                 None
             }
             _ => None,
@@ -359,8 +359,9 @@ impl<'a> PatternParser<'a> {
         }
 
         let end = self
-            .tokens
-            .get(self.pos.saturating_sub(1))
+            .stream
+            .tokens()
+            .get(self.stream.position().saturating_sub(1))
             .map(|t| t.span.end)
             .unwrap_or(start);
 
@@ -379,7 +380,7 @@ impl<'a> PatternParser<'a> {
         }
 
         let start = self.current_start().unwrap_or(0);
-        self.pos += 1;
+        self.stream.advance();
 
         let mut properties = Vec::new();
 
@@ -390,7 +391,7 @@ impl<'a> PatternParser<'a> {
             let Some(pair) = self.parse_property_key_value_pair() else {
                 self.skip_to_token(|kind| matches!(kind, TokenKind::Comma | TokenKind::RBrace));
                 if matches!(self.current_kind(), Some(TokenKind::Comma)) {
-                    self.pos += 1;
+                    self.stream.advance();
                     continue;
                 }
                 break;
@@ -398,7 +399,7 @@ impl<'a> PatternParser<'a> {
             properties.push(pair);
 
             if matches!(self.current_kind(), Some(TokenKind::Comma)) {
-                self.pos += 1;
+                self.stream.advance();
                 continue;
             }
             break;
@@ -410,7 +411,7 @@ impl<'a> PatternParser<'a> {
                     .with_primary_label(self.current_span_or(start), "expected '}' here"),
             );
         } else {
-            self.pos += 1;
+            self.stream.advance();
         }
 
         let end = self.last_consumed_end(start);
@@ -421,7 +422,7 @@ impl<'a> PatternParser<'a> {
     }
 
     fn parse_property_key_value_pair(&mut self) -> Option<PropertyKeyValuePair> {
-        let key_start = self.current_start().unwrap_or(self.pos);
+        let key_start = self.current_start().unwrap_or(self.stream.position());
         let key = match self.parse_property_name() {
             Some(key) => key,
             None => {
@@ -443,9 +444,9 @@ impl<'a> PatternParser<'a> {
             );
             return None;
         }
-        self.pos += 1;
+        self.stream.advance();
 
-        let expr_start = self.pos;
+        let expr_start = self.stream.position();
         let expr_end = self.find_expression_end(expr_start, |kind| {
             matches!(kind, TokenKind::Comma | TokenKind::RBrace)
         });
@@ -457,7 +458,7 @@ impl<'a> PatternParser<'a> {
     }
 
     fn parse_property_name(&mut self) -> Option<SmolStr> {
-        let token = self.tokens.get(self.pos)?;
+        let token = self.stream.current();
         let key = match &token.kind {
             TokenKind::Identifier(name)
             | TokenKind::DelimitedIdentifier(name)
@@ -466,7 +467,7 @@ impl<'a> PatternParser<'a> {
             _ => return None,
         };
 
-        self.pos += 1;
+        self.stream.advance();
         Some(key)
     }
 
@@ -478,10 +479,10 @@ impl<'a> PatternParser<'a> {
             return None;
         }
 
-        let start = self.current_start().unwrap_or(self.pos);
-        self.pos += 1;
+        let start = self.current_start().unwrap_or(self.stream.position());
+        self.stream.advance();
 
-        let expr_start = self.pos;
+        let expr_start = self.stream.position();
         let expr_end = self.find_expression_end(expr_start, |kind| terminator.matches(kind));
         let condition =
             self.parse_expression_range(expr_start, expr_end, "condition after WHERE")?;

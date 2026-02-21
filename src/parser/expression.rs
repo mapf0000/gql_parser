@@ -784,11 +784,9 @@ impl<'a> ExpressionParser<'a> {
             return Err(self.stream.error_here(expected_message));
         }
 
-        let mut pos = self.stream.position();
-        let (spec_opt, diags) = parse_nested_query_specification(self.stream.tokens(), &mut pos);
+        let (spec_opt, diags) = parse_nested_query_specification(&mut self.stream);
         if let Some(spec) = spec_opt {
             let span = spec.span.clone();
-            self.stream.set_position(pos);
             Ok((spec, span))
         } else if let Some(diag) = diags.into_iter().next() {
             Err(Box::new(diag))

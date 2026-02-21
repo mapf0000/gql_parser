@@ -461,3 +461,48 @@ fn test_bidirectional_path_patterns() {
 
     assert!(result.ast.is_some(), "Bidirectional path patterns should parse");
 }
+
+/// Regression test for infinite loop bug when parsing incomplete node patterns.
+///
+/// Previously, malformed input like "MATCH (" would cause an infinite loop in parse_path_term
+/// because parse_path_factor would return Some without consuming tokens. The fix ensures
+/// that parse_path_term follows the grammar structure (pathFactor+) and includes defensive
+/// checks to prevent infinite loops from parser bugs.
+#[test]
+fn test_incomplete_node_pattern_no_infinite_loop() {
+    let source = "MATCH (";
+
+    let lexer = Lexer::new(source);
+    let lex_result = lexer.tokenize();
+    let parser = Parser::new(lex_result.tokens, source);
+    let result = parser.parse();
+
+    // Should complete without hanging, even though it's malformed
+    // The parser should generate diagnostics and recover gracefully
+    assert!(!result.diagnostics.is_empty(), "Should have parse errors for incomplete pattern");
+}
+
+#[test]
+fn test_incomplete_path_pattern_variations() {
+    let test_cases = vec![
+        "MATCH (",
+        "MATCH (a",
+        "MATCH (a:",
+        "MATCH (a)-",
+        "MATCH (a)-[",
+    ];
+
+    for source in test_cases {
+        let lexer = Lexer::new(source);
+        let lex_result = lexer.tokenize();
+        let parser = Parser::new(lex_result.tokens, source);
+        let result = parser.parse();
+
+        // All should complete without infinite loops
+        assert!(
+            !result.diagnostics.is_empty(),
+            "Incomplete pattern '{}' should generate diagnostics",
+            source
+        );
+    }
+}

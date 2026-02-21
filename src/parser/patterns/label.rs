@@ -12,12 +12,12 @@ impl<'a> PatternParser<'a> {
         if !matches!(self.current_kind(), Some(TokenKind::Is | TokenKind::Colon)) {
             return None;
         }
-        self.pos += 1;
+        self.stream.advance();
 
         let Some(expr) = self.parse_label_expression() else {
             self.diags
                 .push(Diag::error("Expected label expression").with_primary_label(
-                    self.current_span_or(self.pos),
+                    self.current_span_or(self.stream.position()),
                     "expected label expression here",
                 ));
             return None;
@@ -34,11 +34,11 @@ impl<'a> PatternParser<'a> {
         let mut expr = self.parse_label_conjunction()?;
 
         while matches!(self.current_kind(), Some(TokenKind::Pipe)) {
-            self.pos += 1;
+            self.stream.advance();
             let Some(right) = self.parse_label_conjunction() else {
                 self.diags.push(
                     Diag::error("Expected label expression after '|'")
-                        .with_primary_label(self.current_span_or(self.pos), "expected label here"),
+                        .with_primary_label(self.current_span_or(self.stream.position()), "expected label here"),
                 );
                 break;
             };
@@ -58,11 +58,11 @@ impl<'a> PatternParser<'a> {
         let mut expr = self.parse_label_unary()?;
 
         while matches!(self.current_kind(), Some(TokenKind::Ampersand)) {
-            self.pos += 1;
+            self.stream.advance();
             let Some(right) = self.parse_label_unary() else {
                 self.diags.push(
                     Diag::error("Expected label expression after '&'")
-                        .with_primary_label(self.current_span_or(self.pos), "expected label here"),
+                        .with_primary_label(self.current_span_or(self.stream.position()), "expected label here"),
                 );
                 break;
             };
@@ -80,8 +80,8 @@ impl<'a> PatternParser<'a> {
 
     fn parse_label_unary(&mut self) -> Option<LabelExpression> {
         if matches!(self.current_kind(), Some(TokenKind::Bang | TokenKind::Not)) {
-            let start = self.current_start().unwrap_or(self.pos);
-            self.pos += 1;
+            let start = self.current_start().unwrap_or(self.stream.position());
+            self.stream.advance();
             let operand = self.parse_label_unary()?;
             let span = start..operand.span().end;
             return Some(LabelExpression::Negation {
@@ -96,13 +96,13 @@ impl<'a> PatternParser<'a> {
     fn parse_label_primary(&mut self) -> Option<LabelExpression> {
         match self.current_kind() {
             Some(TokenKind::Percent) => {
-                let span = self.current_span_or(self.pos);
-                self.pos += 1;
+                let span = self.current_span_or(self.stream.position());
+                self.stream.advance();
                 Some(LabelExpression::Wildcard { span })
             }
             Some(TokenKind::LParen) => {
-                let start = self.current_start().unwrap_or(self.pos);
-                self.pos += 1;
+                let start = self.current_start().unwrap_or(self.stream.position());
+                self.stream.advance();
                 let inner = self.parse_label_expression()?;
                 if !matches!(self.current_kind(), Some(TokenKind::RParen)) {
                     self.diags.push(
@@ -110,7 +110,7 @@ impl<'a> PatternParser<'a> {
                             .with_primary_label(self.current_span_or(start), "expected ')' here"),
                     );
                 } else {
-                    self.pos += 1;
+                    self.stream.advance();
                 }
                 let end = self.last_consumed_end(start);
                 Some(LabelExpression::Parenthesized {
@@ -119,8 +119,8 @@ impl<'a> PatternParser<'a> {
                 })
             }
             Some(TokenKind::Label | TokenKind::Labels) => {
-                let phrase_start = self.current_start().unwrap_or(self.pos);
-                self.pos += 1;
+                let phrase_start = self.current_start().unwrap_or(self.stream.position());
+                self.stream.advance();
 
                 let Some((name, span)) = self.parse_label_name() else {
                     self.diags.push(
@@ -134,7 +134,7 @@ impl<'a> PatternParser<'a> {
 
                 let mut expr = LabelExpression::LabelName { name, span };
                 while matches!(self.current_kind(), Some(TokenKind::Ampersand)) {
-                    self.pos += 1;
+                    self.stream.advance();
                     let Some((next_name, next_span)) = self.parse_label_name() else {
                         self.diags.push(
                             Diag::error("Expected label name after '&'").with_primary_label(
@@ -166,10 +166,11 @@ impl<'a> PatternParser<'a> {
     }
 
     fn parse_label_name(&mut self) -> Option<(SmolStr, std::ops::Range<usize>)> {
-        let token = self.tokens.get(self.pos)?;
+        let token = self.stream.current();
         let name = identifier_from_kind(&token.kind)?;
-        self.pos += 1;
-        Some((name, token.span.clone()))
+        let span = token.span.clone();
+        self.stream.advance();
+        Some((name, span))
     }
 }
 

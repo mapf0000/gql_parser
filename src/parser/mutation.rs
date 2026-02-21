@@ -25,19 +25,19 @@ pub fn parse_linear_data_modifying_statement(
     tokens: &[Token],
     pos: &mut usize,
 ) -> ParseResult<LinearDataModifyingStatement> {
-    if *pos >= tokens.len() {
+    let mut stream = TokenStream::new(tokens);
+    stream.set_position(*pos);
+
+    if stream.check(&TokenKind::Eof) {
         return (None, vec![]);
     }
 
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map_or(0, |token| token.span.start);
+    let start = stream.current().span.start;
 
     // Check for optional USE clause
-    let use_graph_clause = if matches!(tokens[*pos].kind, TokenKind::Use) {
-        let mut stream = TokenStream::new(tokens);
-        stream.set_position(*pos);
+    let use_graph_clause = if stream.check(&TokenKind::Use) {
         let (use_graph_clause_opt, mut use_diags) = parse_use_graph_clause(&mut stream);
-        *pos = stream.position();
         diags.append(&mut use_diags);
         use_graph_clause_opt
     } else {
@@ -45,7 +45,7 @@ pub fn parse_linear_data_modifying_statement(
     };
 
     let (statements, primitive_result_statement, mut body_diags, end) =
-        parse_linear_data_modifying_body(tokens, pos, start);
+        parse_linear_data_modifying_body(&mut stream, start);
     diags.append(&mut body_diags);
 
     if statements.is_empty() {
@@ -57,16 +57,16 @@ pub fn parse_linear_data_modifying_statement(
         diags.push(
             Diag::error(error_msg)
                 .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map_or(start..start, |token| token.span.clone()),
+                    stream.current().span.clone(),
                     "expected statement here",
                 )
                 .with_code("P_MUT"),
         );
+        *pos = stream.position();
         return (None, diags);
     }
 
+    *pos = stream.position();
     (
         Some(LinearDataModifyingStatement {
             use_graph_clause,
@@ -79,8 +79,7 @@ pub fn parse_linear_data_modifying_statement(
 }
 
 fn parse_linear_data_modifying_body(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
     start: usize,
 ) -> (
     Vec<SimpleDataAccessingStatement>,
@@ -92,25 +91,25 @@ fn parse_linear_data_modifying_body(
     let mut statements = Vec::new();
 
     loop {
-        if *pos >= tokens.len() {
+        if stream.check(&TokenKind::Eof) {
             break;
         }
 
-        if is_result_statement_start(&tokens[*pos].kind)
-            || is_linear_mutation_boundary(&tokens[*pos].kind)
+        if is_result_statement_start(&stream.current().kind)
+            || is_linear_mutation_boundary(&stream.current().kind)
         {
             break;
         }
 
-        let before = *pos;
+        let before = stream.position();
         let (statement_opt, mut statement_diags) =
-            parse_simple_data_accessing_statement(tokens, pos);
+            parse_simple_data_accessing_statement(stream);
         diags.append(&mut statement_diags);
 
         match statement_opt {
             Some(statement) => statements.push(statement),
             None => {
-                if *pos == before {
+                if stream.position() == before {
                     break;
                 }
             }
@@ -118,57 +117,53 @@ fn parse_linear_data_modifying_body(
     }
 
     let primitive_result_statement =
-        if *pos < tokens.len() && is_result_statement_start(&tokens[*pos].kind) {
-            let (result_opt, mut result_diags) = parse_primitive_result_statement(tokens, pos);
+        if !stream.check(&TokenKind::Eof) && is_result_statement_start(&stream.current().kind) {
+            let (result_opt, mut result_diags) = parse_primitive_result_statement(stream);
             diags.append(&mut result_diags);
             result_opt
         } else {
             None
         };
 
-    let end = end_after_last_consumed(tokens, *pos, start);
+    let end = end_after_last_consumed(stream, start);
     (statements, primitive_result_statement, diags, end)
 }
 
 fn parse_simple_data_accessing_statement(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<SimpleDataAccessingStatement> {
-    if *pos >= tokens.len() {
+    if stream.check(&TokenKind::Eof) {
         return (None, vec![]);
     }
 
     // In mutation pipelines, CALL/OPTIONAL CALL is parsed as data-modifying call syntax.
-    if matches!(tokens[*pos].kind, TokenKind::Call)
-        || (matches!(tokens[*pos].kind, TokenKind::Optional)
-            && matches!(
-                tokens.get(*pos + 1).map(|token| &token.kind),
-                Some(TokenKind::Call)
-            ))
+    let tokens = stream.tokens();
+    let pos = stream.position();
+    if stream.check(&TokenKind::Call)
+        || (stream.check(&TokenKind::Optional)
+            && pos + 1 < tokens.len()
+            && matches!(tokens[pos + 1].kind, TokenKind::Call))
     {
-        let (modifying_opt, diags) = parse_simple_data_modifying_statement(tokens, pos);
+        let (modifying_opt, diags) = parse_simple_data_modifying_statement(stream);
         return (
             modifying_opt.map(SimpleDataAccessingStatement::Modifying),
             diags,
         );
     }
 
-    let checkpoint = *pos;
-    let mut stream = TokenStream::new(tokens);
-    stream.set_position(*pos);
-    let (query_opt, mut query_diags) = parse_primitive_query_statement(&mut stream);
-    *pos = stream.position();
+    let checkpoint = stream.position();
+    let (query_opt, mut query_diags) = parse_primitive_query_statement(stream);
     if let Some(query_stmt) = query_opt {
         return (
             Some(SimpleDataAccessingStatement::Query(Box::new(query_stmt))),
             query_diags,
         );
     }
-    if *pos != checkpoint {
+    if stream.position() != checkpoint {
         return (None, query_diags);
     }
 
-    let (modifying_opt, mut modifying_diags) = parse_simple_data_modifying_statement(tokens, pos);
+    let (modifying_opt, mut modifying_diags) = parse_simple_data_modifying_statement(stream);
     query_diags.append(&mut modifying_diags);
     (
         modifying_opt.map(SimpleDataAccessingStatement::Modifying),
@@ -177,28 +172,27 @@ fn parse_simple_data_accessing_statement(
 }
 
 fn parse_simple_data_modifying_statement(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<SimpleDataModifyingStatement> {
-    if *pos >= tokens.len() {
+    if stream.check(&TokenKind::Eof) {
         return (None, vec![]);
     }
 
-    match tokens[*pos].kind {
+    match &stream.current().kind {
         TokenKind::Insert
         | TokenKind::Set
         | TokenKind::Remove
         | TokenKind::Delete
         | TokenKind::Detach
         | TokenKind::Nodetach => {
-            let (primitive_opt, diags) = parse_primitive_data_modifying_statement(tokens, pos);
+            let (primitive_opt, diags) = parse_primitive_data_modifying_statement(stream);
             (
                 primitive_opt.map(SimpleDataModifyingStatement::Primitive),
                 diags,
             )
         }
         TokenKind::Call | TokenKind::Optional => {
-            let (call_opt, diags) = parse_call_data_modifying_procedure_statement(tokens, pos);
+            let (call_opt, diags) = parse_call_data_modifying_procedure_statement(stream);
             (
                 call_opt.map(|call| SimpleDataModifyingStatement::Call(Box::new(call))),
                 diags,
@@ -209,37 +203,36 @@ fn parse_simple_data_modifying_statement(
 }
 
 fn parse_primitive_data_modifying_statement(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<PrimitiveDataModifyingStatement> {
-    if *pos >= tokens.len() {
+    if stream.check(&TokenKind::Eof) {
         return (None, vec![]);
     }
 
-    match tokens[*pos].kind {
+    match &stream.current().kind {
         TokenKind::Insert => {
-            let (statement_opt, diags) = parse_insert_statement(tokens, pos);
+            let (statement_opt, diags) = parse_insert_statement(stream);
             (
                 statement_opt.map(PrimitiveDataModifyingStatement::Insert),
                 diags,
             )
         }
         TokenKind::Set => {
-            let (statement_opt, diags) = parse_set_statement(tokens, pos);
+            let (statement_opt, diags) = parse_set_statement(stream);
             (
                 statement_opt.map(PrimitiveDataModifyingStatement::Set),
                 diags,
             )
         }
         TokenKind::Remove => {
-            let (statement_opt, diags) = parse_remove_statement(tokens, pos);
+            let (statement_opt, diags) = parse_remove_statement(stream);
             (
                 statement_opt.map(PrimitiveDataModifyingStatement::Remove),
                 diags,
             )
         }
         TokenKind::Delete | TokenKind::Detach | TokenKind::Nodetach => {
-            let (statement_opt, diags) = parse_delete_statement(tokens, pos);
+            let (statement_opt, diags) = parse_delete_statement(stream);
             (
                 statement_opt.map(PrimitiveDataModifyingStatement::Delete),
                 diags,
@@ -249,26 +242,24 @@ fn parse_primitive_data_modifying_statement(
     }
 }
 
-fn parse_insert_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<InsertStatement> {
+fn parse_insert_statement(stream: &mut TokenStream) -> ParseResult<InsertStatement> {
     let mut diags = Vec::new();
 
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Insert) {
+    if !stream.check(&TokenKind::Insert) {
         return (None, diags);
     }
 
-    let start = tokens[*pos].span.start;
-    *pos += 1;
+    let start = stream.current().span.start;
+    stream.advance();
 
-    let (pattern_opt, mut pattern_diags) = parse_insert_graph_pattern(tokens, pos);
+    let (pattern_opt, mut pattern_diags) = parse_insert_graph_pattern(stream);
     diags.append(&mut pattern_diags);
 
     let Some(pattern) = pattern_opt else {
         diags.push(
             Diag::error("Expected insert graph pattern after INSERT")
                 .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map_or(start..start, |token| token.span.clone()),
+                    stream.current().span.clone(),
                     "expected insert pattern here",
                 )
                 .with_code("P_MUT"),
@@ -286,13 +277,12 @@ fn parse_insert_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<Inse
 }
 
 fn parse_insert_graph_pattern(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<InsertGraphPattern> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map_or(0, |token| token.span.start);
+    let start = stream.current().span.start;
 
-    let (first_opt, mut first_diags) = parse_insert_path_pattern(tokens, pos);
+    let (first_opt, mut first_diags) = parse_insert_path_pattern(stream);
     diags.append(&mut first_diags);
 
     let Some(first) = first_opt else {
@@ -301,19 +291,17 @@ fn parse_insert_graph_pattern(
 
     let mut paths = vec![first];
 
-    while *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Comma) {
-        *pos += 1;
+    while stream.check(&TokenKind::Comma) {
+        stream.advance();
 
-        let (path_opt, mut path_diags) = parse_insert_path_pattern(tokens, pos);
+        let (path_opt, mut path_diags) = parse_insert_path_pattern(stream);
         diags.append(&mut path_diags);
 
         let Some(path) = path_opt else {
             diags.push(
                 Diag::error("Expected insert path pattern after ','")
                     .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map_or(start..start, |token| token.span.clone()),
+                        stream.current().span.clone(),
                         "missing insert path pattern",
                     )
                     .with_code("P_MUT"),
@@ -334,11 +322,11 @@ fn parse_insert_graph_pattern(
     )
 }
 
-fn parse_insert_path_pattern(tokens: &[Token], pos: &mut usize) -> ParseResult<InsertPathPattern> {
+fn parse_insert_path_pattern(stream: &mut TokenStream) -> ParseResult<InsertPathPattern> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map_or(0, |token| token.span.start);
+    let start = stream.current().span.start;
 
-    let (node_opt, mut node_diags) = parse_insert_node_pattern(tokens, pos);
+    let (node_opt, mut node_diags) = parse_insert_node_pattern(stream);
     diags.append(&mut node_diags);
 
     let Some(node) = node_opt else {
@@ -348,12 +336,12 @@ fn parse_insert_path_pattern(tokens: &[Token], pos: &mut usize) -> ParseResult<I
     let mut elements = vec![InsertElementPattern::Node(node)];
 
     loop {
-        let before = *pos;
-        let (edge_opt, mut edge_diags) = parse_insert_edge_pattern(tokens, pos);
+        let before = stream.position();
+        let (edge_opt, mut edge_diags) = parse_insert_edge_pattern(stream);
         diags.append(&mut edge_diags);
 
         let Some(edge) = edge_opt else {
-            if *pos == before {
+            if stream.position() == before {
                 break;
             }
             continue;
@@ -361,16 +349,14 @@ fn parse_insert_path_pattern(tokens: &[Token], pos: &mut usize) -> ParseResult<I
 
         elements.push(InsertElementPattern::Edge(edge));
 
-        let (next_node_opt, mut next_node_diags) = parse_insert_node_pattern(tokens, pos);
+        let (next_node_opt, mut next_node_diags) = parse_insert_node_pattern(stream);
         diags.append(&mut next_node_diags);
 
         let Some(next_node) = next_node_opt else {
             diags.push(
                 Diag::error("Expected node pattern after insert edge")
                     .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map_or(start..start, |token| token.span.clone()),
+                        stream.current().span.clone(),
                         "expected node pattern here",
                     )
                     .with_code("P_MUT"),
@@ -391,31 +377,29 @@ fn parse_insert_path_pattern(tokens: &[Token], pos: &mut usize) -> ParseResult<I
     )
 }
 
-fn parse_insert_node_pattern(tokens: &[Token], pos: &mut usize) -> ParseResult<InsertNodePattern> {
+fn parse_insert_node_pattern(stream: &mut TokenStream) -> ParseResult<InsertNodePattern> {
     let mut diags = Vec::new();
 
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::LParen) {
+    if !stream.check(&TokenKind::LParen) {
         return (None, diags);
     }
 
-    let start = tokens[*pos].span.start;
-    *pos += 1;
+    let start = stream.current().span.start;
+    stream.advance();
 
-    let filler = if *pos < tokens.len() && !matches!(tokens[*pos].kind, TokenKind::RParen) {
-        let (filler_opt, mut filler_diags) = parse_insert_element_pattern_filler(tokens, pos);
+    let filler = if !stream.check(&TokenKind::RParen) {
+        let (filler_opt, mut filler_diags) = parse_insert_element_pattern_filler(stream);
         diags.append(&mut filler_diags);
         filler_opt
     } else {
         None
     };
 
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::RParen) {
+    if !stream.check(&TokenKind::RParen) {
         diags.push(
             Diag::error("Expected ')' to close insert node pattern")
                 .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map_or(start..start, |token| token.span.clone()),
+                    stream.current().span.clone(),
                     "expected ')' here",
                 )
                 .with_code("P_MUT"),
@@ -423,8 +407,8 @@ fn parse_insert_node_pattern(tokens: &[Token], pos: &mut usize) -> ParseResult<I
         return (None, diags);
     }
 
-    let end = tokens[*pos].span.end;
-    *pos += 1;
+    let end = stream.current().span.end;
+    stream.advance();
 
     (
         Some(InsertNodePattern {
@@ -435,178 +419,171 @@ fn parse_insert_node_pattern(tokens: &[Token], pos: &mut usize) -> ParseResult<I
     )
 }
 
-fn parse_insert_edge_pattern(tokens: &[Token], pos: &mut usize) -> ParseResult<InsertEdgePattern> {
-    if *pos + 1 >= tokens.len() {
+fn parse_insert_edge_pattern(stream: &mut TokenStream) -> ParseResult<InsertEdgePattern> {
+    // Need at least 2 tokens for edge patterns
+    let tokens = stream.tokens();
+    let pos = stream.position();
+    if pos + 1 >= tokens.len() {
         return (None, vec![]);
     }
 
     let mut diags = Vec::new();
-    let start = tokens[*pos].span.start;
+    let start = stream.current().span.start;
 
-    if matches!(tokens[*pos].kind, TokenKind::LeftArrow)
-        && matches!(tokens[*pos + 1].kind, TokenKind::LBracket)
-    {
-        *pos += 2;
-        let (filler, mut filler_diags) = parse_optional_insert_edge_filler(tokens, pos, start);
-        diags.append(&mut filler_diags);
+    if stream.check(&TokenKind::LeftArrow) {
+        let next_token = &tokens[pos + 1];
+        if matches!(next_token.kind, TokenKind::LBracket) {
+            stream.advance();
+            stream.advance();
+            let (filler, mut filler_diags) = parse_optional_insert_edge_filler(stream);
+            diags.append(&mut filler_diags);
 
-        if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::RBracket) {
-            diags.push(
-                Diag::error("Expected ']' in insert edge pattern")
-                    .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map_or(start..start, |token| token.span.clone()),
-                        "expected ']' here",
-                    )
-                    .with_code("P_MUT"),
+            if !stream.check(&TokenKind::RBracket) {
+                diags.push(
+                    Diag::error("Expected ']' in insert edge pattern")
+                        .with_primary_label(
+                            stream.current().span.clone(),
+                            "expected ']' here",
+                        )
+                        .with_code("P_MUT"),
+                );
+                return (None, diags);
+            }
+            stream.advance();
+
+            if !stream.check(&TokenKind::Minus) {
+                diags.push(
+                    Diag::error("Expected '-' after '<-[...]' in insert edge pattern")
+                        .with_primary_label(
+                            stream.current().span.clone(),
+                            "expected '-' here",
+                        )
+                        .with_code("P_MUT"),
+                );
+                return (None, diags);
+            }
+
+            let end = stream.current().span.end;
+            stream.advance();
+
+            return (
+                Some(InsertEdgePattern::PointingLeft(InsertEdgePointingLeft {
+                    filler,
+                    span: start..end,
+                })),
+                diags,
             );
-            return (None, diags);
         }
-        *pos += 1;
-
-        if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Minus) {
-            diags.push(
-                Diag::error("Expected '-' after '<-[...]' in insert edge pattern")
-                    .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map_or(start..start, |token| token.span.clone()),
-                        "expected '-' here",
-                    )
-                    .with_code("P_MUT"),
-            );
-            return (None, diags);
-        }
-
-        let end = tokens[*pos].span.end;
-        *pos += 1;
-
-        return (
-            Some(InsertEdgePattern::PointingLeft(InsertEdgePointingLeft {
-                filler,
-                span: start..end,
-            })),
-            diags,
-        );
     }
 
-    if matches!(tokens[*pos].kind, TokenKind::Minus)
-        && matches!(tokens[*pos + 1].kind, TokenKind::LBracket)
-    {
-        *pos += 2;
-        let (filler, mut filler_diags) = parse_optional_insert_edge_filler(tokens, pos, start);
-        diags.append(&mut filler_diags);
+    if stream.check(&TokenKind::Minus) {
+        let next_token = &tokens[pos + 1];
+        if matches!(next_token.kind, TokenKind::LBracket) {
+            stream.advance();
+            stream.advance();
+            let (filler, mut filler_diags) = parse_optional_insert_edge_filler(stream);
+            diags.append(&mut filler_diags);
 
-        if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::RBracket) {
-            diags.push(
-                Diag::error("Expected ']' in insert edge pattern")
-                    .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map_or(start..start, |token| token.span.clone()),
-                        "expected ']' here",
-                    )
-                    .with_code("P_MUT"),
+            if !stream.check(&TokenKind::RBracket) {
+                diags.push(
+                    Diag::error("Expected ']' in insert edge pattern")
+                        .with_primary_label(
+                            stream.current().span.clone(),
+                            "expected ']' here",
+                        )
+                        .with_code("P_MUT"),
+                );
+                return (None, diags);
+            }
+            stream.advance();
+
+            if !stream.check(&TokenKind::Arrow) {
+                diags.push(
+                    Diag::error("Expected '->' after '-[...]' in insert edge pattern")
+                        .with_primary_label(
+                            stream.current().span.clone(),
+                            "expected '->' here",
+                        )
+                        .with_code("P_MUT"),
+                );
+                return (None, diags);
+            }
+
+            let end = stream.current().span.end;
+            stream.advance();
+
+            return (
+                Some(InsertEdgePattern::PointingRight(InsertEdgePointingRight {
+                    filler,
+                    span: start..end,
+                })),
+                diags,
             );
-            return (None, diags);
         }
-        *pos += 1;
-
-        if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Arrow) {
-            diags.push(
-                Diag::error("Expected '->' after '-[...]' in insert edge pattern")
-                    .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map_or(start..start, |token| token.span.clone()),
-                        "expected '->' here",
-                    )
-                    .with_code("P_MUT"),
-            );
-            return (None, diags);
-        }
-
-        let end = tokens[*pos].span.end;
-        *pos += 1;
-
-        return (
-            Some(InsertEdgePattern::PointingRight(InsertEdgePointingRight {
-                filler,
-                span: start..end,
-            })),
-            diags,
-        );
     }
 
-    if matches!(tokens[*pos].kind, TokenKind::Tilde)
-        && matches!(tokens[*pos + 1].kind, TokenKind::LBracket)
-    {
-        *pos += 2;
-        let (filler, mut filler_diags) = parse_optional_insert_edge_filler(tokens, pos, start);
-        diags.append(&mut filler_diags);
+    if stream.check(&TokenKind::Tilde) {
+        let next_token = &tokens[pos + 1];
+        if matches!(next_token.kind, TokenKind::LBracket) {
+            stream.advance();
+            stream.advance();
+            let (filler, mut filler_diags) = parse_optional_insert_edge_filler(stream);
+            diags.append(&mut filler_diags);
 
-        if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::RBracket) {
-            diags.push(
-                Diag::error("Expected ']' in insert edge pattern")
-                    .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map_or(start..start, |token| token.span.clone()),
-                        "expected ']' here",
-                    )
-                    .with_code("P_MUT"),
+            if !stream.check(&TokenKind::RBracket) {
+                diags.push(
+                    Diag::error("Expected ']' in insert edge pattern")
+                        .with_primary_label(
+                            stream.current().span.clone(),
+                            "expected ']' here",
+                        )
+                        .with_code("P_MUT"),
+                );
+                return (None, diags);
+            }
+            stream.advance();
+
+            if !stream.check(&TokenKind::Tilde) {
+                diags.push(
+                    Diag::error("Expected '~' after '~[...]' in insert edge pattern")
+                        .with_primary_label(
+                            stream.current().span.clone(),
+                            "expected '~' here",
+                        )
+                        .with_code("P_MUT"),
+                );
+                return (None, diags);
+            }
+
+            let end = stream.current().span.end;
+            stream.advance();
+
+            return (
+                Some(InsertEdgePattern::Undirected(InsertEdgeUndirected {
+                    filler,
+                    span: start..end,
+                })),
+                diags,
             );
-            return (None, diags);
         }
-        *pos += 1;
-
-        if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Tilde) {
-            diags.push(
-                Diag::error("Expected '~' after '~[...]' in insert edge pattern")
-                    .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map_or(start..start, |token| token.span.clone()),
-                        "expected '~' here",
-                    )
-                    .with_code("P_MUT"),
-            );
-            return (None, diags);
-        }
-
-        let end = tokens[*pos].span.end;
-        *pos += 1;
-
-        return (
-            Some(InsertEdgePattern::Undirected(InsertEdgeUndirected {
-                filler,
-                span: start..end,
-            })),
-            diags,
-        );
     }
 
     (None, diags)
 }
 
 fn parse_optional_insert_edge_filler(
-    tokens: &[Token],
-    pos: &mut usize,
-    start: usize,
+    stream: &mut TokenStream,
 ) -> (Option<InsertElementPatternFiller>, Vec<Diag>) {
-    if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::RBracket) {
+    if stream.check(&TokenKind::RBracket) {
         return (None, vec![]);
     }
 
-    let (filler_opt, mut diags) = parse_insert_element_pattern_filler(tokens, pos);
+    let (filler_opt, mut diags) = parse_insert_element_pattern_filler(stream);
     if filler_opt.is_none() {
         diags.push(
             Diag::error("Expected insert edge filler")
                 .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map_or(start..start, |token| token.span.clone()),
+                    stream.current().span.clone(),
                     "expected edge filler here",
                 )
                 .with_code("P_MUT"),
@@ -617,25 +594,24 @@ fn parse_optional_insert_edge_filler(
 }
 
 fn parse_insert_element_pattern_filler(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<InsertElementPatternFiller> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map_or(0, |token| token.span.start);
+    let start = stream.current().span.start;
     let mut consumed_any = false;
 
-    let variable = parse_element_variable_declaration_opt(tokens, pos);
+    let variable = parse_element_variable_declaration_opt(stream);
     if variable.is_some() {
         consumed_any = true;
     }
 
     let mut label_set = None;
     let mut use_is_keyword = false;
-    if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Is | TokenKind::Colon) {
-        use_is_keyword = matches!(tokens[*pos].kind, TokenKind::Is);
-        *pos += 1;
+    if stream.check(&TokenKind::Is) || stream.check(&TokenKind::Colon) {
+        use_is_keyword = stream.check(&TokenKind::Is);
+        stream.advance();
 
-        let (label_set_opt, mut label_diags) = parse_label_set_specification(tokens, pos);
+        let (label_set_opt, mut label_diags) = parse_label_set_specification(stream);
         diags.append(&mut label_diags);
 
         if label_set_opt.is_some() {
@@ -645,9 +621,9 @@ fn parse_insert_element_pattern_filler(
     }
 
     let mut properties = None;
-    if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::LBrace) {
+    if stream.check(&TokenKind::LBrace) {
         let (properties_opt, mut prop_diags) =
-            parse_element_property_specification(tokens, pos, false);
+            parse_element_property_specification(stream, false);
         diags.append(&mut prop_diags);
         if properties_opt.is_some() {
             consumed_any = true;
@@ -659,7 +635,8 @@ fn parse_insert_element_pattern_filler(
         return (None, diags);
     }
 
-    let end = end_after_last_consumed(tokens, *pos, start);
+    // Get end position from stream's previous position
+    let end = end_after_last_consumed(stream, start);
     (
         Some(InsertElementPatternFiller {
             variable,
@@ -672,26 +649,24 @@ fn parse_insert_element_pattern_filler(
     )
 }
 
-fn parse_set_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<SetStatement> {
+fn parse_set_statement(stream: &mut TokenStream) -> ParseResult<SetStatement> {
     let mut diags = Vec::new();
 
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Set) {
+    if !stream.check(&TokenKind::Set) {
         return (None, diags);
     }
 
-    let start = tokens[*pos].span.start;
-    *pos += 1;
+    let start = stream.current().span.start;
+    stream.advance();
 
-    let (items_opt, mut item_diags) = parse_set_item_list(tokens, pos);
+    let (items_opt, mut item_diags) = parse_set_item_list(stream);
     diags.append(&mut item_diags);
 
     let Some(items) = items_opt else {
         diags.push(
             Diag::error("Expected SET item list")
                 .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map_or(start..start, |token| token.span.clone()),
+                    stream.current().span.clone(),
                     "expected set item here",
                 )
                 .with_code("P_MUT"),
@@ -708,11 +683,11 @@ fn parse_set_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<SetStat
     )
 }
 
-fn parse_set_item_list(tokens: &[Token], pos: &mut usize) -> ParseResult<SetItemList> {
+fn parse_set_item_list(stream: &mut TokenStream) -> ParseResult<SetItemList> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map_or(0, |token| token.span.start);
+    let start = stream.current().span.start;
 
-    let (first_opt, mut first_diags) = parse_set_item(tokens, pos);
+    let (first_opt, mut first_diags) = parse_set_item(stream);
     diags.append(&mut first_diags);
 
     let Some(first) = first_opt else {
@@ -721,18 +696,16 @@ fn parse_set_item_list(tokens: &[Token], pos: &mut usize) -> ParseResult<SetItem
 
     let mut items = vec![first];
 
-    while *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Comma) {
-        *pos += 1;
-        let (item_opt, mut item_diags) = parse_set_item(tokens, pos);
+    while stream.check(&TokenKind::Comma) {
+        stream.advance();
+        let (item_opt, mut item_diags) = parse_set_item(stream);
         diags.append(&mut item_diags);
 
         let Some(item) = item_opt else {
             diags.push(
                 Diag::error("Expected SET item after ','")
                     .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map_or(start..start, |token| token.span.clone()),
+                        stream.current().span.clone(),
                         "missing SET item",
                     )
                     .with_code("P_MUT"),
@@ -753,15 +726,15 @@ fn parse_set_item_list(tokens: &[Token], pos: &mut usize) -> ParseResult<SetItem
     )
 }
 
-fn parse_set_item(tokens: &[Token], pos: &mut usize) -> ParseResult<SetItem> {
+fn parse_set_item(stream: &mut TokenStream) -> ParseResult<SetItem> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map_or(0, |token| token.span.start);
+    let start = stream.current().span.start;
 
-    let Some((element, element_span)) = parse_regular_identifier(tokens, pos) else {
+    let Some((element, element_span)) = parse_regular_identifier(stream) else {
         return (None, diags);
     };
 
-    if *pos >= tokens.len() {
+    if stream.check(&TokenKind::Eof) {
         diags.push(
             Diag::error("Expected '.', '=', or label assignment in SET item")
                 .with_primary_label(element_span, "incomplete SET item")
@@ -770,16 +743,14 @@ fn parse_set_item(tokens: &[Token], pos: &mut usize) -> ParseResult<SetItem> {
         return (None, diags);
     }
 
-    match tokens[*pos].kind {
+    match &stream.current().kind {
         TokenKind::Dot => {
-            *pos += 1;
-            let Some((property, property_span)) = parse_identifier(tokens, pos) else {
+            stream.advance();
+            let Some((property, _property_span)) = parse_identifier(stream) else {
                 diags.push(
                     Diag::error("Expected property name after '.' in SET item")
                         .with_primary_label(
-                            tokens
-                                .get(*pos)
-                                .map_or(start..start, |token| token.span.clone()),
+                            stream.current().span.clone(),
                             "expected property name",
                         )
                         .with_code("P_MUT"),
@@ -787,31 +758,31 @@ fn parse_set_item(tokens: &[Token], pos: &mut usize) -> ParseResult<SetItem> {
                 return (None, diags);
             };
 
-            if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Eq) {
+            if !stream.check(&TokenKind::Eq) {
                 diags.push(
                     Diag::error("Expected '=' in SET property item")
                         .with_primary_label(
-                            tokens
-                                .get(*pos)
-                                .map_or(property_span, |token| token.span.clone()),
+                            stream.current().span.clone(),
                             "expected '=' here",
                         )
                         .with_code("P_MUT"),
                 );
                 return (None, diags);
             }
-            *pos += 1;
+            stream.advance();
 
-            let (value_opt, mut value_diags) = parse_expression_with_diags(tokens, pos);
+            // Bridge to legacy expression parser
+            let tokens = stream.tokens();
+            let mut pos = stream.position();
+            let (value_opt, mut value_diags) = parse_expression_with_diags(tokens, &mut pos);
+            stream.set_position(pos);
             diags.append(&mut value_diags);
 
             let Some(value) = value_opt else {
                 diags.push(
                     Diag::error("Expected value expression in SET property item")
                         .with_primary_label(
-                            tokens
-                                .get(*pos)
-                                .map_or(start..start, |token| token.span.clone()),
+                            stream.current().span.clone(),
                             "expected expression here",
                         )
                         .with_code("P_MUT"),
@@ -831,18 +802,16 @@ fn parse_set_item(tokens: &[Token], pos: &mut usize) -> ParseResult<SetItem> {
             )
         }
         TokenKind::Eq => {
-            *pos += 1;
+            stream.advance();
             let (properties_opt, mut properties_diags) =
-                parse_element_property_specification(tokens, pos, true);
+                parse_element_property_specification(stream, true);
             diags.append(&mut properties_diags);
 
             let Some(properties) = properties_opt else {
                 diags.push(
                     Diag::error("Expected record literal in SET all-properties item")
                         .with_primary_label(
-                            tokens
-                                .get(*pos)
-                                .map_or(start..start, |token| token.span.clone()),
+                            stream.current().span.clone(),
                             "expected '{...}' here",
                         )
                         .with_code("P_MUT"),
@@ -860,16 +829,14 @@ fn parse_set_item(tokens: &[Token], pos: &mut usize) -> ParseResult<SetItem> {
             )
         }
         TokenKind::Is | TokenKind::Colon => {
-            let use_is_keyword = matches!(tokens[*pos].kind, TokenKind::Is);
-            *pos += 1;
+            let use_is_keyword = matches!(stream.current().kind, TokenKind::Is);
+            stream.advance();
 
-            let Some((label, label_span)) = parse_identifier(tokens, pos) else {
+            let Some((label, label_span)) = parse_identifier(stream) else {
                 diags.push(
                     Diag::error("Expected label name in SET label item")
                         .with_primary_label(
-                            tokens
-                                .get(*pos)
-                                .map_or(start..start, |token| token.span.clone()),
+                            stream.current().span.clone(),
                             "expected label name",
                         )
                         .with_code("P_MUT"),
@@ -890,7 +857,7 @@ fn parse_set_item(tokens: &[Token], pos: &mut usize) -> ParseResult<SetItem> {
         _ => {
             diags.push(
                 Diag::error("Expected '.', '=', or label assignment in SET item")
-                    .with_primary_label(tokens[*pos].span.clone(), "expected '.', '=', IS, or ':'")
+                    .with_primary_label(stream.current().span.clone(), "expected '.', '=', IS, or ':'")
                     .with_code("P_MUT"),
             );
             (None, diags)
@@ -898,26 +865,24 @@ fn parse_set_item(tokens: &[Token], pos: &mut usize) -> ParseResult<SetItem> {
     }
 }
 
-fn parse_remove_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<RemoveStatement> {
+fn parse_remove_statement(stream: &mut TokenStream) -> ParseResult<RemoveStatement> {
     let mut diags = Vec::new();
 
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Remove) {
+    if !stream.check(&TokenKind::Remove) {
         return (None, diags);
     }
 
-    let start = tokens[*pos].span.start;
-    *pos += 1;
+    let start = stream.current().span.start;
+    stream.advance();
 
-    let (items_opt, mut item_diags) = parse_remove_item_list(tokens, pos);
+    let (items_opt, mut item_diags) = parse_remove_item_list(stream);
     diags.append(&mut item_diags);
 
     let Some(items) = items_opt else {
         diags.push(
             Diag::error("Expected REMOVE item list")
                 .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map_or(start..start, |token| token.span.clone()),
+                    stream.current().span.clone(),
                     "expected remove item here",
                 )
                 .with_code("P_MUT"),
@@ -934,11 +899,11 @@ fn parse_remove_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<Remo
     )
 }
 
-fn parse_remove_item_list(tokens: &[Token], pos: &mut usize) -> ParseResult<RemoveItemList> {
+fn parse_remove_item_list(stream: &mut TokenStream) -> ParseResult<RemoveItemList> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map_or(0, |token| token.span.start);
+    let start = stream.current().span.start;
 
-    let (first_opt, mut first_diags) = parse_remove_item(tokens, pos);
+    let (first_opt, mut first_diags) = parse_remove_item(stream);
     diags.append(&mut first_diags);
 
     let Some(first) = first_opt else {
@@ -947,19 +912,17 @@ fn parse_remove_item_list(tokens: &[Token], pos: &mut usize) -> ParseResult<Remo
 
     let mut items = vec![first];
 
-    while *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Comma) {
-        *pos += 1;
+    while stream.check(&TokenKind::Comma) {
+        stream.advance();
 
-        let (item_opt, mut item_diags) = parse_remove_item(tokens, pos);
+        let (item_opt, mut item_diags) = parse_remove_item(stream);
         diags.append(&mut item_diags);
 
         let Some(item) = item_opt else {
             diags.push(
                 Diag::error("Expected REMOVE item after ','")
                     .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map_or(start..start, |token| token.span.clone()),
+                        stream.current().span.clone(),
                         "missing REMOVE item",
                     )
                     .with_code("P_MUT"),
@@ -980,15 +943,15 @@ fn parse_remove_item_list(tokens: &[Token], pos: &mut usize) -> ParseResult<Remo
     )
 }
 
-fn parse_remove_item(tokens: &[Token], pos: &mut usize) -> ParseResult<RemoveItem> {
+fn parse_remove_item(stream: &mut TokenStream) -> ParseResult<RemoveItem> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map_or(0, |token| token.span.start);
+    let start = stream.current().span.start;
 
-    let Some((element, _)) = parse_regular_identifier(tokens, pos) else {
+    let Some((element, _)) = parse_regular_identifier(stream) else {
         return (None, diags);
     };
 
-    if *pos >= tokens.len() {
+    if stream.check(&TokenKind::Eof) {
         diags.push(
             Diag::error("Expected property or label removal after element")
                 .with_primary_label(start..start, "incomplete REMOVE item")
@@ -997,16 +960,14 @@ fn parse_remove_item(tokens: &[Token], pos: &mut usize) -> ParseResult<RemoveIte
         return (None, diags);
     }
 
-    match tokens[*pos].kind {
+    match &stream.current().kind {
         TokenKind::Dot => {
-            *pos += 1;
-            let Some((property, property_span)) = parse_identifier(tokens, pos) else {
+            stream.advance();
+            let Some((property, property_span)) = parse_identifier(stream) else {
                 diags.push(
                     Diag::error("Expected property name in REMOVE property item")
                         .with_primary_label(
-                            tokens
-                                .get(*pos)
-                                .map_or(start..start, |token| token.span.clone()),
+                            stream.current().span.clone(),
                             "expected property name",
                         )
                         .with_code("P_MUT"),
@@ -1024,16 +985,14 @@ fn parse_remove_item(tokens: &[Token], pos: &mut usize) -> ParseResult<RemoveIte
             )
         }
         TokenKind::Is | TokenKind::Colon => {
-            let use_is_keyword = matches!(tokens[*pos].kind, TokenKind::Is);
-            *pos += 1;
+            let use_is_keyword = matches!(stream.current().kind, TokenKind::Is);
+            stream.advance();
 
-            let Some((label, label_span)) = parse_identifier(tokens, pos) else {
+            let Some((label, label_span)) = parse_identifier(stream) else {
                 diags.push(
                     Diag::error("Expected label name in REMOVE label item")
                         .with_primary_label(
-                            tokens
-                                .get(*pos)
-                                .map_or(start..start, |token| token.span.clone()),
+                            stream.current().span.clone(),
                             "expected label name",
                         )
                         .with_code("P_MUT"),
@@ -1054,7 +1013,7 @@ fn parse_remove_item(tokens: &[Token], pos: &mut usize) -> ParseResult<RemoveIte
         _ => {
             diags.push(
                 Diag::error("Expected '.' or label assignment in REMOVE item")
-                    .with_primary_label(tokens[*pos].span.clone(), "expected '.', IS, or ':'")
+                    .with_primary_label(stream.current().span.clone(), "expected '.', IS, or ':'")
                     .with_code("P_MUT"),
             );
             (None, diags)
@@ -1062,45 +1021,41 @@ fn parse_remove_item(tokens: &[Token], pos: &mut usize) -> ParseResult<RemoveIte
     }
 }
 
-fn parse_delete_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<DeleteStatement> {
+fn parse_delete_statement(stream: &mut TokenStream) -> ParseResult<DeleteStatement> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map_or(0, |token| token.span.start);
+    let start = stream.current().span.start;
 
-    let detach_option = if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Detach) {
-        *pos += 1;
+    let detach_option = if stream.check(&TokenKind::Detach) {
+        stream.advance();
         DetachOption::Detach
-    } else if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Nodetach) {
-        *pos += 1;
+    } else if stream.check(&TokenKind::Nodetach) {
+        stream.advance();
         DetachOption::NoDetach
     } else {
         DetachOption::Default
     };
 
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Delete) {
+    if !stream.check(&TokenKind::Delete) {
         diags.push(
             Diag::error("Expected DELETE keyword")
                 .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map_or(start..start, |token| token.span.clone()),
+                    stream.current().span.clone(),
                     "expected DELETE here",
                 )
                 .with_code("P_MUT"),
         );
         return (None, diags);
     }
-    *pos += 1;
+    stream.advance();
 
-    let (items_opt, mut item_diags) = parse_delete_item_list(tokens, pos);
+    let (items_opt, mut item_diags) = parse_delete_item_list(stream);
     diags.append(&mut item_diags);
 
     let Some(items) = items_opt else {
         diags.push(
             Diag::error("Expected DELETE item list")
                 .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map_or(start..start, |token| token.span.clone()),
+                    stream.current().span.clone(),
                     "expected delete item here",
                 )
                 .with_code("P_MUT"),
@@ -1118,11 +1073,11 @@ fn parse_delete_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<Dele
     )
 }
 
-fn parse_delete_item_list(tokens: &[Token], pos: &mut usize) -> ParseResult<DeleteItemList> {
+fn parse_delete_item_list(stream: &mut TokenStream) -> ParseResult<DeleteItemList> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map_or(0, |token| token.span.start);
+    let start = stream.current().span.start;
 
-    let (first_opt, mut first_diags) = parse_delete_item(tokens, pos);
+    let (first_opt, mut first_diags) = parse_delete_item(stream);
     diags.append(&mut first_diags);
 
     let Some(first) = first_opt else {
@@ -1131,19 +1086,17 @@ fn parse_delete_item_list(tokens: &[Token], pos: &mut usize) -> ParseResult<Dele
 
     let mut items = vec![first];
 
-    while *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Comma) {
-        *pos += 1;
+    while stream.check(&TokenKind::Comma) {
+        stream.advance();
 
-        let (item_opt, mut item_diags) = parse_delete_item(tokens, pos);
+        let (item_opt, mut item_diags) = parse_delete_item(stream);
         diags.append(&mut item_diags);
 
         let Some(item) = item_opt else {
             diags.push(
                 Diag::error("Expected DELETE item after ','")
                     .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map_or(start..start, |token| token.span.clone()),
+                        stream.current().span.clone(),
                         "missing DELETE item",
                     )
                     .with_code("P_MUT"),
@@ -1164,11 +1117,15 @@ fn parse_delete_item_list(tokens: &[Token], pos: &mut usize) -> ParseResult<Dele
     )
 }
 
-fn parse_delete_item(tokens: &[Token], pos: &mut usize) -> ParseResult<DeleteItem> {
+fn parse_delete_item(stream: &mut TokenStream) -> ParseResult<DeleteItem> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map_or(0, |token| token.span.start);
+    let start = stream.current().span.start;
 
-    let (expression_opt, mut expression_diags) = parse_expression_with_diags(tokens, pos);
+    // Bridge to legacy expression parser
+    let tokens = stream.tokens();
+    let mut pos = stream.position();
+    let (expression_opt, mut expression_diags) = parse_expression_with_diags(tokens, &mut pos);
+    stream.set_position(pos);
     diags.append(&mut expression_diags);
 
     let Some(expression) = expression_opt else {
@@ -1186,10 +1143,14 @@ fn parse_delete_item(tokens: &[Token], pos: &mut usize) -> ParseResult<DeleteIte
 }
 
 fn parse_call_data_modifying_procedure_statement(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<CallDataModifyingProcedureStatement> {
-    let (call_opt, diags) = parse_call_procedure_statement(tokens, pos);
+    // Bridge to legacy procedure parser
+    let tokens = stream.tokens();
+    let mut pos = stream.position();
+    let (call_opt, diags) = parse_call_procedure_statement(tokens, &mut pos);
+    stream.set_position(pos);
+
     let Some(call) = call_opt else {
         return (None, diags);
     };
@@ -1204,24 +1165,20 @@ fn parse_call_data_modifying_procedure_statement(
 }
 
 fn parse_primitive_result_statement(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<PrimitiveResultStatement> {
-    if *pos >= tokens.len() {
+    if stream.check(&TokenKind::Eof) {
         return (None, vec![]);
     }
 
-    match tokens[*pos].kind {
+    match &stream.current().kind {
         TokenKind::Return => {
-            let mut stream = TokenStream::new(tokens);
-            stream.set_position(*pos);
-            let (return_opt, diags) = parse_return_statement(&mut stream);
-            *pos = stream.position();
+            let (return_opt, diags) = parse_return_statement(stream);
             (return_opt.map(PrimitiveResultStatement::Return), diags)
         }
         TokenKind::Finish => {
-            let span = tokens[*pos].span.clone();
-            *pos += 1;
+            let span = stream.current().span.clone();
+            stream.advance();
             (Some(PrimitiveResultStatement::Finish(span)), vec![])
         }
         _ => (None, vec![]),
@@ -1229,29 +1186,26 @@ fn parse_primitive_result_statement(
 }
 
 fn parse_label_set_specification(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<LabelSetSpecification> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map_or(0, |token| token.span.start);
+    let start = stream.current().span.start;
 
-    let Some((first, first_span)) = parse_identifier(tokens, pos) else {
+    let Some((first, first_span)) = parse_identifier(stream) else {
         return (None, diags);
     };
 
     let mut labels = vec![first];
     let mut end = first_span.end;
 
-    while *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Ampersand) {
-        *pos += 1;
+    while stream.check(&TokenKind::Ampersand) {
+        stream.advance();
 
-        let Some((next, next_span)) = parse_identifier(tokens, pos) else {
+        let Some((next, next_span)) = parse_identifier(stream) else {
             diags.push(
                 Diag::error("Expected label name after '&'")
                     .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map_or(start..start, |token| token.span.clone()),
+                        stream.current().span.clone(),
                         "missing label name",
                     )
                     .with_code("P_MUT"),
@@ -1273,24 +1227,23 @@ fn parse_label_set_specification(
 }
 
 fn parse_element_property_specification(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
     allow_empty: bool,
 ) -> ParseResult<ElementPropertySpecification> {
     let mut diags = Vec::new();
 
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::LBrace) {
+    if !stream.check(&TokenKind::LBrace) {
         return (None, diags);
     }
 
-    let start = tokens[*pos].span.start;
-    *pos += 1;
+    let start = stream.current().span.start;
+    stream.advance();
 
     let mut properties = Vec::new();
 
-    if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::RBrace) {
-        let end = tokens[*pos].span.end;
-        *pos += 1;
+    if stream.check(&TokenKind::RBrace) {
+        let end = stream.current().span.end;
+        stream.advance();
         if !allow_empty {
             diags.push(
                 Diag::error("Expected at least one property key-value pair")
@@ -1310,15 +1263,13 @@ fn parse_element_property_specification(
     }
 
     loop {
-        let pair_start = tokens.get(*pos).map_or(start, |token| token.span.start);
+        let pair_start = stream.current().span.start;
 
-        let Some((key, key_span)) = parse_identifier(tokens, pos) else {
+        let Some((key, _key_span)) = parse_identifier(stream) else {
             diags.push(
                 Diag::error("Expected property name")
                     .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map_or(pair_start..pair_start, |token| token.span.clone()),
+                        stream.current().span.clone(),
                         "expected property name",
                     )
                     .with_code("P_MUT"),
@@ -1326,31 +1277,31 @@ fn parse_element_property_specification(
             break;
         };
 
-        if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Colon) {
+        if !stream.check(&TokenKind::Colon) {
             diags.push(
                 Diag::error("Expected ':' after property name")
                     .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map_or(key_span, |token| token.span.clone()),
+                        stream.current().span.clone(),
                         "expected ':' here",
                     )
                     .with_code("P_MUT"),
             );
             break;
         }
-        *pos += 1;
+        stream.advance();
 
-        let (value_opt, mut value_diags) = parse_expression_with_diags(tokens, pos);
+        // Bridge to legacy expression parser
+        let tokens = stream.tokens();
+        let mut pos = stream.position();
+        let (value_opt, mut value_diags) = parse_expression_with_diags(tokens, &mut pos);
+        stream.set_position(pos);
         diags.append(&mut value_diags);
 
         let Some(value) = value_opt else {
             diags.push(
                 Diag::error("Expected property value expression")
                     .with_primary_label(
-                        tokens
-                            .get(*pos)
-                            .map_or(pair_start..pair_start, |token| token.span.clone()),
+                        stream.current().span.clone(),
                         "expected value expression",
                     )
                     .with_code("P_MUT"),
@@ -1365,21 +1316,19 @@ fn parse_element_property_specification(
             span: pair_start..value_span.end,
         });
 
-        if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Comma) {
-            *pos += 1;
+        if stream.check(&TokenKind::Comma) {
+            stream.advance();
             continue;
         }
 
         break;
     }
 
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::RBrace) {
+    if !stream.check(&TokenKind::RBrace) {
         diags.push(
             Diag::error("Expected '}' to close property map")
                 .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map_or(start..start, |token| token.span.clone()),
+                    stream.current().span.clone(),
                     "expected '}' here",
                 )
                 .with_code("P_MUT"),
@@ -1387,8 +1336,8 @@ fn parse_element_property_specification(
         return (None, diags);
     }
 
-    let end = tokens[*pos].span.end;
-    *pos += 1;
+    let end = stream.current().span.end;
+    stream.advance();
 
     if properties.is_empty() && !allow_empty {
         diags.push(
@@ -1409,38 +1358,39 @@ fn parse_element_property_specification(
 }
 
 fn parse_element_variable_declaration_opt(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> Option<ElementVariableDeclaration> {
-    let (variable, span) = parse_regular_identifier(tokens, pos)?;
+    let (variable, span) = parse_regular_identifier(stream)?;
     Some(ElementVariableDeclaration { variable, span })
 }
 
-fn parse_regular_identifier(tokens: &[Token], pos: &mut usize) -> Option<(SmolStr, Span)> {
-    let token = tokens.get(*pos)?;
+fn parse_regular_identifier(stream: &mut TokenStream) -> Option<(SmolStr, Span)> {
+    let token = stream.current();
     let name = match &token.kind {
         TokenKind::Identifier(name) => name.clone(),
         kind if kind.is_non_reserved_identifier_keyword() => SmolStr::new(kind.to_string()),
         _ => return None,
     };
     let span = token.span.clone();
-    *pos += 1;
+    stream.advance();
     Some((name, span))
 }
 
-fn parse_identifier(tokens: &[Token], pos: &mut usize) -> Option<(SmolStr, Span)> {
-    let token = tokens.get(*pos)?;
+fn parse_identifier(stream: &mut TokenStream) -> Option<(SmolStr, Span)> {
+    let token = stream.current();
     let name = match &token.kind {
         TokenKind::Identifier(name) | TokenKind::DelimitedIdentifier(name) => name.clone(),
         kind if kind.is_non_reserved_identifier_keyword() => SmolStr::new(kind.to_string()),
         _ => return None,
     };
     let span = token.span.clone();
-    *pos += 1;
+    stream.advance();
     Some((name, span))
 }
 
-fn end_after_last_consumed(tokens: &[Token], pos: usize, fallback: usize) -> usize {
+fn end_after_last_consumed(stream: &TokenStream, fallback: usize) -> usize {
+    let pos = stream.position();
+    let tokens = stream.tokens();
     if pos > 0 {
         tokens.get(pos - 1).map_or(fallback, |token| token.span.end)
     } else {

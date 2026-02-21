@@ -5,6 +5,7 @@
 
 use gql_parser::ast::ProcedureCall;
 use gql_parser::lexer::Lexer;
+use gql_parser::parser::base::TokenStream;
 use gql_parser::parser::procedure::*;
 
 fn main() {
@@ -144,8 +145,8 @@ fn demo_variable_definitions() {
     let source1 = "PROPERTY GRAPH my_graph";
     println!("Source: {}", source1);
     let tokens = Lexer::new(source1).tokenize().tokens;
-    let mut pos = 0;
-    match parse_graph_variable_definition(&tokens, &mut pos) {
+    let mut stream = TokenStream::new(&tokens);
+    match parse_graph_variable_definition(&mut stream) {
         (Some(def), diags) if diags.is_empty() => {
             println!("✓ Graph variable parsed");
             println!("  Is property: {}", def.is_property);
@@ -158,8 +159,8 @@ fn demo_variable_definitions() {
     let source2 = "VALUE counter = 42";
     println!("\nSource: {}", source2);
     let tokens = Lexer::new(source2).tokenize().tokens;
-    let mut pos = 0;
-    match parse_value_variable_definition(&tokens, &mut pos) {
+    let mut stream = TokenStream::new(&tokens);
+    match parse_value_variable_definition(&mut stream) {
         (Some(def), _diags) => {
             println!("✓ Value variable parsed");
             println!("  Variable: {}", def.variable.name);
@@ -172,8 +173,8 @@ fn demo_variable_definitions() {
     let source3 = "BINDING TABLE results";
     println!("\nSource: {}", source3);
     let tokens = Lexer::new(source3).tokenize().tokens;
-    let mut pos = 0;
-    match parse_binding_table_variable_definition(&tokens, &mut pos) {
+    let mut stream = TokenStream::new(&tokens);
+    match parse_binding_table_variable_definition(&mut stream) {
         (Some(def), diags) if diags.is_empty() => {
             println!("✓ Binding table variable parsed");
             println!("  Is binding: {}", def.is_binding);
@@ -190,9 +191,9 @@ fn demo_at_schema() {
     println!("Source: {}", source);
 
     let tokens = Lexer::new(source).tokenize().tokens;
-    let mut pos = 0;
+    let mut stream = TokenStream::new(&tokens);
 
-    match parse_at_schema_clause(&tokens, &mut pos) {
+    match parse_at_schema_clause(&mut stream) {
         (Some(_clause), _diags) => {
             println!("✓ AT schema clause parsed successfully");
         }

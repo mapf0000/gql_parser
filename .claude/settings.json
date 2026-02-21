@@ -12,7 +12,9 @@
       "Bash(/tmp/test_parse.sh)",
       "Bash(/tmp/test_lex.rs:*)",
       "Read(//Users/d072013/SAPDevelop/gql_parser/**)",
-      "Bash(cloc:*)"
+      "Bash(cloc:*)",
+      "Bash(/tmp/test_incomplete_pattern.gql:*)",
+      "Bash(gtimeout 5 cargo run:*)"
     ],
     "additionalDirectories": [
       "/Users/d072013/SAPDevelop/gql_parser",

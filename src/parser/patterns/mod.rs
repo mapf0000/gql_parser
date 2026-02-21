@@ -5,6 +5,7 @@ use crate::ast::query::*;
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
 use crate::parser::InternalParseResult;
+use crate::parser::base::TokenStream;
 use crate::parser::expression::parse_expression;
 use smol_str::SmolStr;
 
@@ -24,9 +25,11 @@ pub(super) enum PatternSyncContext {
 
 /// Parses a graph pattern starting at the given position.
 pub fn parse_graph_pattern(tokens: &[Token], pos: &mut usize) -> ParseResult<GraphPattern> {
-    let mut parser = PatternParser::new(tokens, *pos);
+    let mut stream = TokenStream::new(tokens);
+    stream.set_position(*pos);
+    let mut parser = PatternParser::new(stream);
     let pattern = parser.parse_graph_pattern();
-    *pos = parser.pos;
+    *pos = parser.stream.position();
     (pattern, parser.diags)
 }
 
@@ -35,7 +38,9 @@ pub fn parse_graph_pattern_binding_table(
     tokens: &[Token],
     pos: &mut usize,
 ) -> ParseResult<GraphPatternBindingTable> {
-    let mut parser = PatternParser::new(tokens, *pos);
+    let mut stream = TokenStream::new(tokens);
+    stream.set_position(*pos);
+    let mut parser = PatternParser::new(stream);
     let table = parser.parse_graph_pattern().map(|pattern| {
         let span = pattern.span.clone();
         let yield_clause = pattern.yield_clause.clone();
@@ -45,7 +50,7 @@ pub fn parse_graph_pattern_binding_table(
             span,
         }
     });
-    *pos = parser.pos;
+    *pos = parser.stream.position();
     (table, parser.diags)
 }
 
@@ -89,23 +94,21 @@ struct ParsedElementFiller {
 }
 
 struct PatternParser<'a> {
-    tokens: &'a [Token],
-    pos: usize,
+    stream: TokenStream<'a>,
     diags: Vec<Diag>,
 }
 
 impl<'a> PatternParser<'a> {
-    fn new(tokens: &'a [Token], start: usize) -> Self {
+    fn new(stream: TokenStream<'a>) -> Self {
         Self {
-            tokens,
-            pos: start,
+            stream,
             diags: Vec::new(),
         }
     }
 
     fn parse_graph_pattern(&mut self) -> Option<GraphPattern> {
-        let start_pos = self.pos;
-        if self.pos >= self.tokens.len()
+        let start_pos = self.stream.position();
+        if self.stream.check(&TokenKind::Eof)
             || matches!(self.current_kind(), Some(kind) if is_query_boundary(kind))
         {
             let span = self.current_span_or(start_pos);
@@ -120,7 +123,7 @@ impl<'a> PatternParser<'a> {
         let paths = match self.parse_path_pattern_list() {
             Some(paths) => paths,
             None => {
-                if self.pos == start_pos {
+                if self.stream.position() == start_pos {
                     self.skip_to_statement_boundary();
                 }
                 return None;
@@ -145,7 +148,7 @@ impl<'a> PatternParser<'a> {
             None
         };
 
-        if self.pos == start_pos {
+        if self.stream.position() == start_pos {
             self.diags.push(
                 Diag::error("Graph pattern parser made no progress").with_primary_label(
                     self.current_span_or(start_pos),
@@ -156,7 +159,8 @@ impl<'a> PatternParser<'a> {
         }
 
         let start = self
-            .tokens
+            .stream
+            .tokens()
             .get(start_pos)
             .map(|t| t.span.start)
             .unwrap_or(paths.span.start);
@@ -175,13 +179,13 @@ impl<'a> PatternParser<'a> {
     fn parse_match_mode(&mut self) -> Option<MatchMode> {
         match self.current_kind() {
             Some(TokenKind::Repeatable) => {
-                let repeatable_span = self.current_span_or(self.pos);
-                self.pos += 1;
+                let repeatable_span = self.current_span_or(self.stream.position());
+                self.stream.advance();
 
                 if matches!(self.current_kind(), Some(kind) if is_elements_keyword(kind)) {
-                    self.pos += 1;
+                    self.stream.advance();
                     if matches!(self.current_kind(), Some(kind) if is_bindings_keyword(kind)) {
-                        self.pos += 1;
+                        self.stream.advance();
                     }
                 } else {
                     self.diags.push(
@@ -196,13 +200,13 @@ impl<'a> PatternParser<'a> {
                 Some(MatchMode::RepeatableElements)
             }
             Some(TokenKind::Different) => {
-                let different_span = self.current_span_or(self.pos);
-                self.pos += 1;
+                let different_span = self.current_span_or(self.stream.position());
+                self.stream.advance();
 
                 if matches!(self.current_kind(), Some(kind) if is_edge_keyword(kind)) {
-                    self.pos += 1;
+                    self.stream.advance();
                     if matches!(self.current_kind(), Some(kind) if is_bindings_keyword(kind)) {
-                        self.pos += 1;
+                        self.stream.advance();
                     }
                 } else {
                     self.diags.push(
@@ -236,7 +240,7 @@ impl<'a> PatternParser<'a> {
 
         while matches!(self.current_kind(), Some(TokenKind::Comma)) {
             let comma_span = self.current_span_or(start);
-            self.pos += 1;
+            self.stream.advance();
 
             let Some(pattern) = self.parse_path_pattern() else {
                 self.diags.push(
@@ -261,7 +265,7 @@ impl<'a> PatternParser<'a> {
         }
 
         let start = self.current_start().unwrap_or(0);
-        self.pos += 1;
+        self.stream.advance();
 
         let Some(prefix) = self.parse_path_pattern_prefix() else {
             self.diags.push(
@@ -285,9 +289,9 @@ impl<'a> PatternParser<'a> {
         }
 
         let start = self.current_start().unwrap_or(0);
-        self.pos += 1;
+        self.stream.advance();
 
-        let expr_start = self.pos;
+        let expr_start = self.stream.position();
         let expr_end = self.find_expression_end(expr_start, |kind| {
             matches!(
                 kind,
@@ -311,7 +315,7 @@ impl<'a> PatternParser<'a> {
         }
 
         let start = self.current_start().unwrap_or(0);
-        self.pos += 1;
+        self.stream.advance();
 
         let mut items = Vec::new();
 
@@ -325,7 +329,7 @@ impl<'a> PatternParser<'a> {
         items.push(first_item);
 
         while matches!(self.current_kind(), Some(TokenKind::Comma)) {
-            self.pos += 1;
+            self.stream.advance();
             let Some(item) = self.parse_graph_pattern_yield_item() else {
                 self.diags.push(
                     Diag::error("Expected YIELD item after ','").with_primary_label(
@@ -346,8 +350,8 @@ impl<'a> PatternParser<'a> {
     }
 
     fn parse_graph_pattern_yield_item(&mut self) -> Option<YieldItem> {
-        let start_index = self.pos;
-        let start_span = self.current_start().unwrap_or(self.pos);
+        let start_index = self.stream.position();
+        let start_span = self.current_start().unwrap_or(self.stream.position());
 
         let item_end = self.find_expression_end(start_index, |kind| {
             matches!(kind, TokenKind::Comma) || is_query_boundary(kind)
@@ -367,10 +371,11 @@ impl<'a> PatternParser<'a> {
         let expression =
             self.parse_expression_range(start_index, expr_end, "YIELD item expression")?;
 
-        self.pos = item_end;
+        self.stream.set_position(item_end);
 
         let end = self
-            .tokens
+            .stream
+            .tokens()
             .get(item_end.saturating_sub(1))
             .map(|t| t.span.end)
             .unwrap_or_else(|| expression.span().end);
@@ -383,11 +388,12 @@ impl<'a> PatternParser<'a> {
     }
 
     fn find_trailing_alias(&self, start: usize, end: usize) -> (usize, Option<SmolStr>) {
+        let tokens = self.stream.tokens();
         let mut i = start;
         let mut depth = 0usize;
 
         while i < end {
-            let kind = &self.tokens[i].kind;
+            let kind = &tokens[i].kind;
 
             match kind {
                 TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => {
@@ -398,8 +404,7 @@ impl<'a> PatternParser<'a> {
                 }
                 TokenKind::As if depth == 0 => {
                     if i + 2 == end
-                        && let Some(name) = self
-                            .tokens
+                        && let Some(name) = tokens
                             .get(i + 1)
                             .and_then(|t| identifier_from_kind(&t.kind))
                     {
@@ -428,12 +433,13 @@ impl<'a> PatternParser<'a> {
                     format!("expected {context} here"),
                 ),
             );
-            self.pos = end;
+            self.stream.set_position(end);
             return None;
         }
 
-        let result = parse_expression(&self.tokens[start..end]);
-        self.pos = end;
+        let tokens = self.stream.tokens();
+        let result = parse_expression(&tokens[start..end]);
+        self.stream.set_position(end);
 
         match result {
             Ok(expr) => Some(expr),
@@ -448,11 +454,12 @@ impl<'a> PatternParser<'a> {
     where
         F: FnMut(&TokenKind) -> bool,
     {
+        let tokens = self.stream.tokens();
         let mut idx = start;
         let mut depth = 0usize;
 
-        while idx < self.tokens.len() {
-            let kind = &self.tokens[idx].kind;
+        while idx < tokens.len() {
+            let kind = &tokens[idx].kind;
 
             if depth == 0 && should_stop(kind) {
                 break;
@@ -480,7 +487,7 @@ impl<'a> PatternParser<'a> {
     fn consume_path_or_paths(&mut self) -> bool {
         match self.current_kind() {
             Some(TokenKind::Path) | Some(TokenKind::Paths) => {
-                self.pos += 1;
+                self.stream.advance();
                 true
             }
             _ => false,
@@ -503,20 +510,20 @@ impl<'a> PatternParser<'a> {
     where
         F: FnMut(&TokenKind) -> bool,
     {
-        while self.pos < self.tokens.len() {
-            if predicate(&self.tokens[self.pos].kind) {
+        while !self.stream.check(&TokenKind::Eof) {
+            if predicate(&self.stream.current().kind) {
                 break;
             }
-            self.pos += 1;
+            self.stream.advance();
         }
     }
 
     fn checkpoint(&self) -> (usize, usize) {
-        (self.pos, self.diags.len())
+        (self.stream.position(), self.diags.len())
     }
 
     fn restore(&mut self, checkpoint: (usize, usize)) {
-        self.pos = checkpoint.0;
+        self.stream.set_position(checkpoint.0);
         self.diags.truncate(checkpoint.1);
     }
 
@@ -530,23 +537,28 @@ impl<'a> PatternParser<'a> {
     }
 
     fn current_kind(&self) -> Option<&TokenKind> {
-        self.tokens.get(self.pos).map(|t| &t.kind)
+        Some(&self.stream.current().kind)
     }
 
     fn current_start(&self) -> Option<usize> {
-        self.tokens.get(self.pos).map(|t| t.span.start)
+        Some(self.stream.current().span.start)
     }
 
     fn current_span_or(&self, fallback: usize) -> std::ops::Range<usize> {
-        self.tokens
-            .get(self.pos)
-            .map(|t| t.span.clone())
-            .unwrap_or(fallback..fallback)
+        if self.stream.check(&TokenKind::Eof) && self.stream.position() > 0 {
+            fallback..fallback
+        } else {
+            self.stream.current().span.clone()
+        }
     }
 
     fn last_consumed_end(&self, fallback: usize) -> usize {
-        self.tokens
-            .get(self.pos.saturating_sub(1))
+        if self.stream.position() == 0 {
+            return fallback;
+        }
+        self.stream
+            .tokens()
+            .get(self.stream.position().saturating_sub(1))
             .map(|t| t.span.end)
             .unwrap_or(fallback)
     }
