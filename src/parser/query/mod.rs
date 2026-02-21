@@ -187,16 +187,6 @@ pub(super) fn skip_to_query_clause_boundary(stream: &mut crate::parser::base::To
     }
 }
 
-/// Legacy wrapper for skip_to_query_clause_boundary (for legacy functions).
-pub(super) fn skip_to_query_clause_boundary_legacy(tokens: &[Token], pos: &mut usize) {
-    while *pos < tokens.len() {
-        if is_query_clause_boundary(&tokens[*pos].kind) {
-            break;
-        }
-        *pos += 1;
-    }
-}
-
 /// Checks if a token kind can start a query specification.
 pub(super) fn is_query_spec_start(kind: &TokenKind) -> bool {
     matches!(
@@ -244,16 +234,6 @@ pub fn parse_query(stream: &mut crate::parser::base::TokenStream) -> ParseResult
     }
 
     (query_opt, diags)
-}
-
-/// Legacy wrapper for parse_query (for callers that haven't been migrated yet).
-/// Creates a TokenStream from tokens/pos, calls parse_query, and syncs position back.
-pub fn parse_query_legacy(tokens: &[Token], pos: &mut usize) -> ParseResult<Query> {
-    let mut stream = crate::parser::base::TokenStream::new(tokens);
-    stream.set_position(*pos);
-    let result = parse_query(&mut stream);
-    *pos = stream.position();
-    result
 }
 
 // ============================================================================

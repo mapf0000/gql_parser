@@ -12,7 +12,7 @@ use smol_str::SmolStr;
 
 use super::{
     ParseResult, is_query_spec_start, parse_expression_with_diags, parse_set_quantifier_opt,
-    skip_to_query_clause_boundary, skip_to_query_clause_boundary_legacy,
+    skip_to_query_clause_boundary,
 };
 
 // Import functions from sibling modules
@@ -783,7 +783,10 @@ fn parse_graph_pattern_checked(tokens: &[Token], pos: &mut usize) -> ParseResult
                     "pattern parser stalled here",
                 ),
         );
-        skip_to_query_clause_boundary_legacy(tokens, pos);
+        let mut stream = TokenStream::new(tokens);
+        stream.set_position(*pos);
+        skip_to_query_clause_boundary(&mut stream);
+        *pos = stream.position();
         return (None, diags);
     }
 
