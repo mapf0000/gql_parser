@@ -1,10 +1,9 @@
+use crate::common::*;
 use gql_parser::ast::{
-    DetachOption, LinearDataModifyingStatement, PrimitiveDataModifyingStatement,
-    PrimitiveResultStatement, SimpleDataAccessingStatement, SimpleDataModifyingStatement,
-    Statement,
+    DetachOption, PrimitiveDataModifyingStatement, PrimitiveResultStatement,
+    SimpleDataAccessingStatement, SimpleDataModifyingStatement, Statement,
 };
 use gql_parser::parse;
-use crate::common::*;
 
 #[test]
 fn parse_set_statement_is_mutation_start() {
@@ -27,12 +26,14 @@ fn parse_detach_delete_statement_is_mutation_start() {
         panic!("expected mutation statement");
     };
 
-    let LinearDataModifyingStatement::Ambient(ambient) = &stmt.statement else {
-        panic!("expected ambient linear mutation");
-    };
+    assert!(
+        stmt.statement.is_ambient(),
+        "expected ambient linear mutation"
+    );
+
     let Some(SimpleDataAccessingStatement::Modifying(SimpleDataModifyingStatement::Primitive(
         PrimitiveDataModifyingStatement::Delete(delete_stmt),
-    ))) = ambient.statements.first()
+    ))) = stmt.statement.statements.first()
     else {
         panic!("expected DELETE primitive");
     };
@@ -48,13 +49,14 @@ fn parse_focused_use_graph_mutation() {
         panic!("expected mutation statement");
     };
 
-    let LinearDataModifyingStatement::Focused(focused) = &stmt.statement else {
-        panic!("expected focused mutation statement");
-    };
+    assert!(
+        stmt.statement.is_focused(),
+        "expected focused mutation statement"
+    );
 
-    assert_eq!(focused.statements.len(), 1);
+    assert_eq!(stmt.statement.statements.len(), 1);
     assert!(matches!(
-        focused.primitive_result_statement,
+        stmt.statement.primitive_result_statement,
         Some(PrimitiveResultStatement::Return(_))
     ));
 }
@@ -67,17 +69,18 @@ fn parse_mutation_chain_with_query_step_stays_single_statement() {
     let Statement::Mutation(stmt) = &program.statements[0] else {
         panic!("expected mutation statement");
     };
-    let LinearDataModifyingStatement::Ambient(ambient) = &stmt.statement else {
-        panic!("expected ambient mutation statement");
-    };
+    assert!(
+        stmt.statement.is_ambient(),
+        "expected ambient mutation statement"
+    );
 
-    assert_eq!(ambient.statements.len(), 2);
+    assert_eq!(stmt.statement.statements.len(), 2);
     assert!(matches!(
-        ambient.statements[0],
+        stmt.statement.statements[0],
         SimpleDataAccessingStatement::Modifying(_)
     ));
     assert!(matches!(
-        ambient.statements[1],
+        stmt.statement.statements[1],
         SimpleDataAccessingStatement::Query(_)
     ));
 }
@@ -143,36 +146,56 @@ fn parse_match_followed_by_set_is_single_mutation_statement() {
     let program = parse_cleanly("MATCH (n) SET n.age = 30");
 
     // Should be parsed as a single mutation statement
-    assert_eq!(program.statements.len(), 1,
+    assert_eq!(
+        program.statements.len(),
+        1,
         "MATCH...SET should be parsed as one statement, got {} statements",
-        program.statements.len());
+        program.statements.len()
+    );
 
     let Statement::Mutation(stmt) = &program.statements[0] else {
-        panic!("expected mutation statement, got {:?}", program.statements[0]);
+        panic!(
+            "expected mutation statement, got {:?}",
+            program.statements[0]
+        );
     };
 
-    let LinearDataModifyingStatement::Ambient(ambient) = &stmt.statement else {
-        panic!("expected ambient mutation statement");
-    };
+    assert!(
+        stmt.statement.is_ambient(),
+        "expected ambient mutation statement"
+    );
 
     // Should have MATCH as query statement and SET as modifying statement
-    assert_eq!(ambient.statements.len(), 2, "expected MATCH and SET as two sub-statements");
-    assert!(matches!(
-        ambient.statements[0],
-        SimpleDataAccessingStatement::Query(_)
-    ), "first sub-statement should be Query (MATCH)");
-    assert!(matches!(
-        ambient.statements[1],
-        SimpleDataAccessingStatement::Modifying(_)
-    ), "second sub-statement should be Modifying (SET)");
+    assert_eq!(
+        stmt.statement.statements.len(),
+        2,
+        "expected MATCH and SET as two sub-statements"
+    );
+    assert!(
+        matches!(
+            stmt.statement.statements[0],
+            SimpleDataAccessingStatement::Query(_)
+        ),
+        "first sub-statement should be Query (MATCH)"
+    );
+    assert!(
+        matches!(
+            stmt.statement.statements[1],
+            SimpleDataAccessingStatement::Modifying(_)
+        ),
+        "second sub-statement should be Modifying (SET)"
+    );
 }
 
 #[test]
 fn parse_match_followed_by_delete_is_single_mutation_statement() {
     let program = parse_cleanly("MATCH (n) DELETE n");
 
-    assert_eq!(program.statements.len(), 1,
-        "MATCH...DELETE should be parsed as one statement");
+    assert_eq!(
+        program.statements.len(),
+        1,
+        "MATCH...DELETE should be parsed as one statement"
+    );
     assert!(matches!(program.statements[0], Statement::Mutation(_)));
 }
 
@@ -180,7 +203,10 @@ fn parse_match_followed_by_delete_is_single_mutation_statement() {
 fn parse_match_followed_by_remove_is_single_mutation_statement() {
     let program = parse_cleanly("MATCH (n) REMOVE n:Label");
 
-    assert_eq!(program.statements.len(), 1,
-        "MATCH...REMOVE should be parsed as one statement");
+    assert_eq!(
+        program.statements.len(),
+        1,
+        "MATCH...REMOVE should be parsed as one statement"
+    );
     assert!(matches!(program.statements[0], Statement::Mutation(_)));
 }

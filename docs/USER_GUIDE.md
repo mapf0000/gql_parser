@@ -47,8 +47,8 @@ if result.ir.is_none() {
 
 Use visitor APIs when you need custom AST traversal without cloning:
 
-- `AstVisitor`: immutable traversal
-- `AstVisitorMut`: mutable traversal
+- `Visit`: immutable traversal
+- `VisitMut`: mutable traversal
 - `CollectingVisitor`: generic collector
 - `SpanCollector`: collects visited spans
 - `VariableCollector`: collects definitions and references
@@ -56,7 +56,8 @@ Use visitor APIs when you need custom AST traversal without cloning:
 Example:
 
 ```rust
-use gql_parser::{AstVisitor, VariableCollector, parse};
+use gql_parser::ast::{VariableCollector, Visit};
+use gql_parser::parse;
 
 let program = parse("MATCH (n)-[:KNOWS]->(m) RETURN m").ast.unwrap();
 let mut collector = VariableCollector::new();

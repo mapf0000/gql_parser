@@ -13,7 +13,7 @@
 //! # Traverse AST
 //!
 //! ```
-//! use gql_parser::ast::{AstVisitor, VariableCollector};
+//! use gql_parser::ast::{Visit, VariableCollector};
 //! use gql_parser::parse;
 //!
 //! let program = parse("MATCH (n)-[:KNOWS]->(m) RETURN m").ast.unwrap();

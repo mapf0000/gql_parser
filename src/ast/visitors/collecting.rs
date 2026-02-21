@@ -10,12 +10,13 @@ use crate::ast::query::{
     PrimitiveQueryStatement, PrimitiveResultStatement, Query, ReturnItem, ReturnStatement,
     SelectStatement,
 };
-use crate::ast::visitor::{AstVisitor, walk_edge_pattern, walk_element_pattern, walk_expression,
-    walk_filter_statement, walk_for_statement, walk_graph_pattern, walk_label_expression,
-    walk_let_binding, walk_let_statement, walk_match_statement, walk_node_pattern,
-    walk_path_pattern, walk_primitive_query_statement, walk_primitive_result_statement,
-    walk_program, walk_query, walk_query_statement, walk_return_item, walk_return_statement,
-    walk_select_statement, walk_statement,
+use crate::ast::visit::{
+    Visit, walk_edge_pattern, walk_element_pattern, walk_expression, walk_filter_statement,
+    walk_for_statement, walk_graph_pattern, walk_label_expression, walk_let_binding,
+    walk_let_statement, walk_match_statement, walk_node_pattern, walk_path_pattern,
+    walk_primitive_query_statement, walk_primitive_result_statement, walk_program, walk_query,
+    walk_query_statement, walk_return_item, walk_return_statement, walk_select_statement,
+    walk_statement,
 };
 
 /// Borrowed AST node view used by [`CollectingVisitor`].
@@ -80,7 +81,7 @@ where
     }
 }
 
-impl<T, F> AstVisitor for CollectingVisitor<T, F>
+impl<T, F> Visit for CollectingVisitor<T, F>
 where
     F: for<'a> FnMut(AstNode<'a>) -> Option<T>,
 {
@@ -152,10 +153,7 @@ where
         walk_edge_pattern(self, pattern)
     }
 
-    fn visit_label_expression(
-        &mut self,
-        expression: &LabelExpression,
-    ) -> ControlFlow<Self::Break> {
+    fn visit_label_expression(&mut self, expression: &LabelExpression) -> ControlFlow<Self::Break> {
         self.maybe_collect(AstNode::LabelExpression(expression));
         walk_label_expression(self, expression)
     }
@@ -170,10 +168,7 @@ where
         walk_let_statement(self, statement)
     }
 
-    fn visit_let_binding(
-        &mut self,
-        binding: &LetVariableDefinition,
-    ) -> ControlFlow<Self::Break> {
+    fn visit_let_binding(&mut self, binding: &LetVariableDefinition) -> ControlFlow<Self::Break> {
         self.maybe_collect(AstNode::LetBinding(binding));
         walk_let_binding(self, binding)
     }
@@ -206,7 +201,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::visitor::AstVisitor;
+    use crate::ast::visit::Visit;
     use crate::ast::visitors::collecting::{AstNode, CollectingVisitor};
     use crate::parse;
 

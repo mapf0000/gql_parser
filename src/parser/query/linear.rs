@@ -7,10 +7,11 @@ use crate::ast::query::*;
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
 use crate::parser::InternalParseResult;
+use crate::parser::base::TokenStream;
 
 use super::primitive::parse_primitive_query_statement;
-use super::result::parse_return_statement;
 use super::primitive::parse_use_graph_clause;
+use super::result::parse_return_statement;
 
 /// Parse result with optional value and diagnostics.
 pub(super) type ParseResult<T> = InternalParseResult<T>;
@@ -60,7 +61,10 @@ fn parse_linear_query(tokens: &[Token], pos: &mut usize) -> ParseResult<LinearQu
 
     // Check for optional USE clause
     let use_graph = if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Use) {
-        let (use_graph_opt, mut use_diags) = parse_use_graph_clause(tokens, pos);
+        let mut stream = TokenStream::new(tokens);
+        stream.set_position(*pos);
+        let (use_graph_opt, mut use_diags) = parse_use_graph_clause(&mut stream);
+        *pos = stream.position();
         diags.append(&mut use_diags);
         use_graph_opt
     } else {
@@ -101,7 +105,6 @@ fn parse_linear_query(tokens: &[Token], pos: &mut usize) -> ParseResult<LinearQu
     )
 }
 
-
 /// Helper to parse query statements (primitive + optional result).
 fn parse_query_statements(
     tokens: &[Token],
@@ -125,7 +128,10 @@ fn parse_query_statements(
 
         // Check for result statement (RETURN or FINISH)
         if matches!(tokens[*pos].kind, TokenKind::Return) {
-            let (return_opt, mut return_diags) = parse_return_statement(tokens, pos);
+            let mut stream = TokenStream::new(tokens);
+            stream.set_position(*pos);
+            let (return_opt, mut return_diags) = parse_return_statement(&mut stream);
+            *pos = stream.position();
             diags.append(&mut return_diags);
 
             if let Some(ret) = return_opt {
@@ -142,7 +148,10 @@ fn parse_query_statements(
         }
 
         // Try to parse primitive statement
-        let (stmt_opt, mut stmt_diags) = parse_primitive_query_statement(tokens, pos);
+        let mut stream = TokenStream::new(tokens);
+        stream.set_position(*pos);
+        let (stmt_opt, mut stmt_diags) = parse_primitive_query_statement(&mut stream);
+        *pos = stream.position();
         diags.append(&mut stmt_diags);
 
         match stmt_opt {

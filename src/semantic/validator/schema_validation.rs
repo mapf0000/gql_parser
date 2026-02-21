@@ -119,7 +119,11 @@ fn validate_linear_query_schema(
                                 match stmt {
                                     MatchStatement::Simple(simple) => {
                                         for path in &simple.pattern.paths.patterns {
-                                            validate_path_pattern_schema(path, snapshot, diagnostics);
+                                            validate_path_pattern_schema(
+                                                path,
+                                                snapshot,
+                                                diagnostics,
+                                            );
                                         }
                                     }
                                     MatchStatement::Optional(nested_optional) => {
@@ -213,7 +217,7 @@ fn validate_path_term_schema(
     snapshot: &dyn crate::semantic::schema_catalog::SchemaSnapshot,
     diagnostics: &mut Vec<Diag>,
 ) {
-    use crate::semantic::diag::SemanticDiagBuilder;
+    use crate::semantic::diag::unknown_reference;
 
     // Each term has factors
     for factor in &term.factors {
@@ -226,14 +230,11 @@ fn validate_path_term_schema(
                     if let Some(label_expr) = &node.label_expression {
                         for label_name in extract_label_names(label_expr) {
                             if snapshot.node_type(&label_name).is_none() {
-                                diagnostics.push(
-                                    SemanticDiagBuilder::unknown_reference(
-                                        "label",
-                                        &label_name,
-                                        node.span.clone(),
-                                    )
-                                    .build(),
-                                );
+                                diagnostics.push(unknown_reference(
+                                    "label",
+                                    &label_name,
+                                    node.span.clone(),
+                                ));
                             }
                         }
                     }
@@ -245,14 +246,11 @@ fn validate_path_term_schema(
                     {
                         for label_name in extract_label_names(label_expr) {
                             if snapshot.edge_type(&label_name).is_none() {
-                                diagnostics.push(
-                                    SemanticDiagBuilder::unknown_reference(
-                                        "edge label",
-                                        &label_name,
-                                        full.span.clone(),
-                                    )
-                                    .build(),
-                                );
+                                diagnostics.push(unknown_reference(
+                                    "edge label",
+                                    &label_name,
+                                    full.span.clone(),
+                                ));
                             }
                         }
                     }

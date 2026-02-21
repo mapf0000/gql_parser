@@ -285,13 +285,9 @@ fn extract_pattern_variables(
                 && let Some(existing) = symbol_table.lookup(&var_name)
             {
                 // Emit variable shadowing warning
-                use crate::semantic::diag::SemanticDiagBuilder;
-                let diag = SemanticDiagBuilder::variable_shadowing(
-                    &var_name,
-                    span.clone(),
-                    existing.declared_at.clone(),
-                )
-                .build();
+                use crate::semantic::diag::variable_shadowing;
+                let diag =
+                    variable_shadowing(&var_name, span.clone(), existing.declared_at.clone());
                 diagnostics.push(diag);
             }
 
@@ -379,13 +375,9 @@ fn extract_element_variables(
                 if validator.config.warn_on_shadowing
                     && let Some(existing) = symbol_table.lookup(&var_name)
                 {
-                    use crate::semantic::diag::SemanticDiagBuilder;
-                    let diag = SemanticDiagBuilder::variable_shadowing(
-                        &var_name,
-                        span.clone(),
-                        existing.declared_at.clone(),
-                    )
-                    .build();
+                    use crate::semantic::diag::variable_shadowing;
+                    let diag =
+                        variable_shadowing(&var_name, span.clone(), existing.declared_at.clone());
                     diagnostics.push(diag);
                 }
 
@@ -402,13 +394,9 @@ fn extract_element_variables(
                 if validator.config.warn_on_shadowing
                     && let Some(existing) = symbol_table.lookup(&var_name)
                 {
-                    use crate::semantic::diag::SemanticDiagBuilder;
-                    let diag = SemanticDiagBuilder::variable_shadowing(
-                        &var_name,
-                        span.clone(),
-                        existing.declared_at.clone(),
-                    )
-                    .build();
+                    use crate::semantic::diag::variable_shadowing;
+                    let diag =
+                        variable_shadowing(&var_name, span.clone(), existing.declared_at.clone());
                     diagnostics.push(diag);
                 }
 
@@ -425,7 +413,7 @@ fn analyze_let_statement(
     symbol_table: &mut SymbolTable,
     diagnostics: &mut Vec<Diag>,
 ) {
-    use crate::semantic::diag::SemanticDiagBuilder;
+    use crate::semantic::diag::variable_shadowing;
 
     for binding in &let_stmt.bindings {
         let var_name = binding.variable.name.to_string();
@@ -435,12 +423,7 @@ fn analyze_let_statement(
             && let Some(existing) = symbol_table.lookup(&var_name)
         {
             // Emit variable shadowing warning
-            let diag = SemanticDiagBuilder::variable_shadowing(
-                &var_name,
-                span.clone(),
-                existing.declared_at.clone(),
-            )
-            .build();
+            let diag = variable_shadowing(&var_name, span.clone(), existing.declared_at.clone());
             diagnostics.push(diag);
         }
 
@@ -456,7 +439,7 @@ fn analyze_for_statement(
     diagnostics: &mut Vec<Diag>,
 ) {
     use crate::ast::query::ForOrdinalityOrOffset;
-    use crate::semantic::diag::SemanticDiagBuilder;
+    use crate::semantic::diag::variable_shadowing;
 
     let var_name = for_stmt.item.binding_variable.name.to_string();
     let span = for_stmt.item.binding_variable.span.clone();
@@ -465,12 +448,7 @@ fn analyze_for_statement(
         && let Some(existing) = symbol_table.lookup(&var_name)
     {
         // Emit variable shadowing warning
-        let diag = SemanticDiagBuilder::variable_shadowing(
-            &var_name,
-            span.clone(),
-            existing.declared_at.clone(),
-        )
-        .build();
+        let diag = variable_shadowing(&var_name, span.clone(), existing.declared_at.clone());
         diagnostics.push(diag);
     }
 
@@ -489,12 +467,11 @@ fn analyze_for_statement(
             && let Some(existing) = symbol_table.lookup(&ord_var_name)
         {
             // Emit variable shadowing warning for ordinality/offset variable
-            let diag = SemanticDiagBuilder::variable_shadowing(
+            let diag = variable_shadowing(
                 &ord_var_name,
                 ord_span.clone(),
                 existing.declared_at.clone(),
-            )
-            .build();
+            );
             diagnostics.push(diag);
         }
 
@@ -509,8 +486,6 @@ fn analyze_mutation(
     symbol_table: &mut SymbolTable,
     diagnostics: &mut Vec<Diag>,
 ) -> ScopeId {
-    
-
     // Push a statement-local mutation scope.
     let statement_scope_id = symbol_table.push_scope(ScopeKind::Query);
 
@@ -597,7 +572,7 @@ fn analyze_insert_pattern(
     symbol_table: &mut SymbolTable,
     diagnostics: &mut Vec<Diag>,
 ) {
-    use crate::semantic::diag::SemanticDiagBuilder;
+    use crate::semantic::diag::variable_shadowing;
 
     // Walk all insert path patterns
     for path in &pattern.paths {
@@ -615,12 +590,11 @@ fn analyze_insert_pattern(
                         if validator.config.warn_on_shadowing
                             && let Some(existing) = symbol_table.lookup(&var_name)
                         {
-                            let diag = SemanticDiagBuilder::variable_shadowing(
+                            let diag = variable_shadowing(
                                 &var_name,
                                 span.clone(),
                                 existing.declared_at.clone(),
-                            )
-                            .build();
+                            );
                             diagnostics.push(diag);
                         }
 
@@ -645,12 +619,11 @@ fn analyze_insert_pattern(
                         if validator.config.warn_on_shadowing
                             && let Some(existing) = symbol_table.lookup(&var_name)
                         {
-                            let diag = SemanticDiagBuilder::variable_shadowing(
+                            let diag = variable_shadowing(
                                 &var_name,
                                 span.clone(),
                                 existing.declared_at.clone(),
-                            )
-                            .build();
+                            );
                             diagnostics.push(diag);
                         }
 

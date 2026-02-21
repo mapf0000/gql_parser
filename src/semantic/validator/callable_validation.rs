@@ -3,11 +3,16 @@
 //! This module validates function and procedure calls against their signatures,
 //! including arity checking and parameter validation.
 
-use crate::ast::expression::{AggregateFunction, Expression, FunctionCall, FunctionName, GeneralSetFunctionType};
+use crate::ast::expression::{
+    AggregateFunction, Expression, FunctionCall, FunctionName, GeneralSetFunctionType,
+};
+use crate::ast::procedure::{NamedProcedureCall, ProcedureCall};
 use crate::ast::program::Program;
-use crate::ast::procedure::{ProcedureCall, NamedProcedureCall};
 use crate::ast::query::PrimitiveQueryStatement;
-use crate::ast::visitor::{walk_expression, walk_program, walk_primitive_query_statement, walk_linear_query, AstVisitor, VisitResult};
+use crate::ast::visit::{
+    Visit, VisitResult, walk_expression, walk_linear_query, walk_primitive_query_statement,
+    walk_program,
+};
 use crate::diag::Diag;
 
 use super::SemanticValidator;
@@ -24,7 +29,10 @@ pub(super) fn run_callable_validation(
     diagnostics: &mut Vec<Diag>,
 ) {
     eprintln!("DEBUG: run_callable_validation called");
-    eprintln!("DEBUG: metadata_provider is_some: {}", validator.metadata_provider.is_some());
+    eprintln!(
+        "DEBUG: metadata_provider is_some: {}",
+        validator.metadata_provider.is_some()
+    );
 
     let mut visitor = CallableValidationVisitor {
         validator,
@@ -56,12 +64,13 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
         eprintln!("DEBUG: Looking up callable: {}", name);
 
         // Check built-ins first (direct function call - zero cost)
-        use crate::semantic::callable::{lookup_builtin_callable, CallableKind};
+        use crate::semantic::callable::{CallableKind, lookup_builtin_callable};
         let signature = lookup_builtin_callable(name, CallableKind::Procedure)
             .or_else(|| lookup_builtin_callable(name, CallableKind::Function))
             // Then check metadata provider for UDFs (if configured)
             .or_else(|| {
-                self.validator.metadata_provider
+                self.validator
+                    .metadata_provider
                     .and_then(|m| m.lookup_callable(name))
             });
 
@@ -87,7 +96,8 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
 
         // Validate arity if arguments provided
         if let Some(arguments) = &call.arguments {
-            let args: Vec<&Expression> = arguments.arguments.iter().map(|a| &a.expression).collect();
+            let args: Vec<&Expression> =
+                arguments.arguments.iter().map(|a| &a.expression).collect();
 
             // Use metadata provider for validation if available, otherwise do basic arity check
             let validation_result = if let Some(metadata) = self.validator.metadata_provider {
@@ -120,14 +130,11 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
 
             if let Err(e) = validation_result {
                 self.diagnostics.push(
-                    crate::diag::Diag::new(
-                        crate::diag::DiagSeverity::Error,
-                        format!("{}", e),
-                    )
-                    .with_label(crate::diag::DiagLabel::primary(
-                        call.span.clone(),
-                        "invalid call",
-                    )),
+                    crate::diag::Diag::new(crate::diag::DiagSeverity::Error, format!("{}", e))
+                        .with_label(crate::diag::DiagLabel::primary(
+                            call.span.clone(),
+                            "invalid call",
+                        )),
                 );
             }
         }
@@ -178,12 +185,13 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
         let name = function_name_to_string(&call.name);
 
         // Check built-ins first (direct function call - zero cost)
-        use crate::semantic::callable::{lookup_builtin_callable, CallableKind};
+        use crate::semantic::callable::{CallableKind, lookup_builtin_callable};
         let signature = lookup_builtin_callable(name, CallableKind::Function)
             .or_else(|| lookup_builtin_callable(name, CallableKind::AggregateFunction))
             // Then check metadata provider for UDFs (if configured)
             .or_else(|| {
-                self.validator.metadata_provider
+                self.validator
+                    .metadata_provider
                     .and_then(|m| m.lookup_callable(name))
             });
 
@@ -238,21 +246,18 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
 
         if let Err(e) = validation_result {
             self.diagnostics.push(
-                crate::diag::Diag::new(
-                    crate::diag::DiagSeverity::Error,
-                    format!("{}", e),
-                )
-                .with_label(crate::diag::DiagLabel::primary(
-                    call.span.clone(),
-                    "invalid call",
-                )),
+                crate::diag::Diag::new(crate::diag::DiagSeverity::Error, format!("{}", e))
+                    .with_label(crate::diag::DiagLabel::primary(
+                        call.span.clone(),
+                        "invalid call",
+                    )),
             );
         }
     }
 
     /// Validates an aggregate function call against the metadata provider.
     fn validate_aggregate_function(&mut self, agg: &AggregateFunction) {
-        use crate::semantic::callable::{lookup_builtin_callable, CallableKind};
+        use crate::semantic::callable::{CallableKind, lookup_builtin_callable};
 
         match agg {
             AggregateFunction::CountStar { span } => {
@@ -260,7 +265,8 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
                 // Check built-ins first, then UDFs
                 let signature = lookup_builtin_callable("count", CallableKind::AggregateFunction)
                     .or_else(|| {
-                        self.validator.metadata_provider
+                        self.validator
+                            .metadata_provider
                             .and_then(|m| m.lookup_callable("count"))
                     });
 
@@ -268,7 +274,8 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
                     let args: Vec<&Expression> = vec![];
 
                     // Use metadata provider for validation if available, otherwise do basic arity check
-                    let validation_result = if let Some(metadata) = self.validator.metadata_provider {
+                    let validation_result = if let Some(metadata) = self.validator.metadata_provider
+                    {
                         metadata.validate_callable_invocation(&signature, &args)
                     } else {
                         // Basic arity check
@@ -288,10 +295,9 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
                                 crate::diag::DiagSeverity::Error,
                                 format!("{}", e),
                             )
-                            .with_label(crate::diag::DiagLabel::primary(
-                                span.clone(),
-                                "invalid aggregate",
-                            )),
+                            .with_label(
+                                crate::diag::DiagLabel::primary(span.clone(), "invalid aggregate"),
+                            ),
                         );
                     }
                 }
@@ -312,7 +318,8 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
                 // Check built-ins first, then UDFs
                 let signature = lookup_builtin_callable(name, CallableKind::AggregateFunction)
                     .or_else(|| {
-                        self.validator.metadata_provider
+                        self.validator
+                            .metadata_provider
                             .and_then(|m| m.lookup_callable(name))
                     });
 
@@ -320,7 +327,8 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
                     let args: Vec<&Expression> = vec![general_func.expression.as_ref()];
 
                     // Use metadata provider for validation if available, otherwise do basic arity check
-                    let validation_result = if let Some(metadata) = self.validator.metadata_provider {
+                    let validation_result = if let Some(metadata) = self.validator.metadata_provider
+                    {
                         metadata.validate_callable_invocation(&signature, &args)
                     } else {
                         // Basic arity check
@@ -340,10 +348,12 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
                                 crate::diag::DiagSeverity::Error,
                                 format!("{}", e),
                             )
-                            .with_label(crate::diag::DiagLabel::primary(
-                                general_func.span.clone(),
-                                "invalid aggregate",
-                            )),
+                            .with_label(
+                                crate::diag::DiagLabel::primary(
+                                    general_func.span.clone(),
+                                    "invalid aggregate",
+                                ),
+                            ),
                         );
                     }
                 }
@@ -357,14 +367,18 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
     }
 }
 
-impl<'v, 'm> AstVisitor for CallableValidationVisitor<'v, 'm> {
+impl<'v, 'm> Visit for CallableValidationVisitor<'v, 'm> {
     type Break = ();
 
     fn visit_linear_query(&mut self, query: &crate::ast::query::LinearQuery) -> VisitResult<()> {
         eprintln!("DEBUG: visit_linear_query called");
         eprintln!(
             "DEBUG: Query type: {}, primitive_statements count: {}",
-            if query.use_graph.is_some() { "Focused" } else { "Ambient" },
+            if query.use_graph.is_some() {
+                "Focused"
+            } else {
+                "Ambient"
+            },
             query.primitive_statements.len()
         );
         walk_linear_query(self, query)

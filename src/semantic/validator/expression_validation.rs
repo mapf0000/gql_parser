@@ -233,8 +233,7 @@ fn validate_mutation_expressions(
     diagnostics: &mut Vec<Diag>,
 ) {
     use crate::ast::mutation::{
-        PrimitiveDataModifyingStatement,
-        SimpleDataAccessingStatement, SimpleDataModifyingStatement,
+        PrimitiveDataModifyingStatement, SimpleDataAccessingStatement, SimpleDataModifyingStatement,
     };
 
     let statements = &mutation.statements;
@@ -455,11 +454,9 @@ fn validate_boolean_expression(
         }
         Expression::Literal(lit, span) if !matches!(lit, Literal::Null) => {
             // Non-boolean, non-null literal in boolean context
-            use crate::semantic::diag::SemanticDiagBuilder;
-            let diag =
-                SemanticDiagBuilder::type_mismatch("Boolean", &format!("{:?}", lit), span.clone())
-                    .with_note("Condition expressions should evaluate to boolean")
-                    .build();
+            use crate::semantic::diag::type_mismatch;
+            let diag = type_mismatch("Boolean", &format!("{:?}", lit), span.clone())
+                .with_note("Condition expressions should evaluate to boolean");
             diagnostics.push(diag);
         }
         Expression::Comparison(..)
@@ -511,11 +508,9 @@ fn validate_case_result_compatibility<'a>(
         let first_type = literal_types[0].0;
         for (type_name, span) in &literal_types[1..] {
             if *type_name != first_type {
-                use crate::semantic::diag::SemanticDiagBuilder;
-                let diag =
-                    SemanticDiagBuilder::type_mismatch(first_type, type_name, (*span).clone())
-                        .with_note("All CASE result branches should have compatible types")
-                        .build();
+                use crate::semantic::diag::type_mismatch;
+                let diag = type_mismatch(first_type, type_name, (*span).clone())
+                    .with_note("All CASE result branches should have compatible types");
                 diagnostics.push(diag);
             }
         }

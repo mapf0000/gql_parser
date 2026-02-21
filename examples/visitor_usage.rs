@@ -1,6 +1,6 @@
 //! Visitor usage example.
 
-use gql_parser::ast::{AstNode, AstVisitor, CollectingVisitor, SpanCollector, VariableCollector};
+use gql_parser::ast::{AstNode, CollectingVisitor, SpanCollector, VariableCollector, Visit};
 use gql_parser::parse;
 
 fn main() {

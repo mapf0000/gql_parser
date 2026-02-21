@@ -76,7 +76,8 @@ let result = parse_and_validate("MATCH (n:Person) RETURN n");
 ### AST Traversal
 
 ```rust
-use gql_parser::{AstVisitor, VariableCollector, parse};
+use gql_parser::ast::{VariableCollector, Visit};
+use gql_parser::parse;
 
 let program = parse("MATCH (n)-[:KNOWS]->(m) RETURN m").ast.unwrap();
 let mut collector = VariableCollector::new();

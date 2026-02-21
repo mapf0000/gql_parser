@@ -4,7 +4,7 @@ use crate::ast::query::{
 };
 use crate::ast::{Program, Statement};
 use crate::diag::{Diag, DiagSeverity};
-use crate::semantic::diag::SemanticDiagBuilder;
+use crate::semantic::diag::aggregation_error;
 
 /// Pass 5: Context Validation - Checks clause usage in appropriate contexts.
 pub(super) fn run_context_validation(
@@ -132,13 +132,10 @@ fn validate_select_aggregation(
 
         for gb_expr in &group_by_expressions {
             if expression_contains_aggregation(gb_expr) {
-                diagnostics.push(
-                    SemanticDiagBuilder::aggregation_error(
-                        "Aggregation functions not allowed in GROUP BY clause",
-                        gb_expr.span().clone(),
-                    )
-                    .build()
-                );
+                diagnostics.push(aggregation_error(
+                    "Aggregation functions not allowed in GROUP BY clause",
+                    gb_expr.span().clone(),
+                ));
             }
         }
     }
@@ -160,11 +157,11 @@ fn validate_select_aggregation(
                 if !expr_appears_in_group_by {
                     if validator.config.strict_mode {
                         diagnostics.push(
-                            SemanticDiagBuilder::aggregation_error(
+                            aggregation_error(
                                 "Non-aggregated expression must appear in GROUP BY clause when mixing with aggregation",
                                 non_agg_expr.span()
                             )
-                            .build()
+                            
                         );
                     } else {
                         // In non-strict mode, just warn
@@ -181,11 +178,11 @@ fn validate_select_aggregation(
             // No GROUP BY but we have mixed aggregation and non-aggregation
             if validator.config.strict_mode {
                 diagnostics.push(
-                    SemanticDiagBuilder::aggregation_error(
+                    aggregation_error(
                         "GROUP BY clause required when mixing aggregated and non-aggregated expressions",
                         select.span.clone()
                     )
-                    .build()
+                    
                 );
             } else {
                 // In non-strict mode, just warn

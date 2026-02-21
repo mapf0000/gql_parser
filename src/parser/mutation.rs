@@ -9,6 +9,7 @@ use crate::ast::query::{
 use crate::diag::Diag;
 use crate::lexer::token::{Token, TokenKind};
 use crate::parser::InternalParseResult;
+use crate::parser::base::TokenStream;
 use crate::parser::procedure::parse_call_procedure_statement;
 use crate::parser::query::{
     parse_expression_with_diags, parse_primitive_query_statement, parse_return_statement,
@@ -33,7 +34,10 @@ pub fn parse_linear_data_modifying_statement(
 
     // Check for optional USE clause
     let use_graph_clause = if matches!(tokens[*pos].kind, TokenKind::Use) {
-        let (use_graph_clause_opt, mut use_diags) = parse_use_graph_clause(tokens, pos);
+        let mut stream = TokenStream::new(tokens);
+        stream.set_position(*pos);
+        let (use_graph_clause_opt, mut use_diags) = parse_use_graph_clause(&mut stream);
+        *pos = stream.position();
         diags.append(&mut use_diags);
         use_graph_clause_opt
     } else {
@@ -73,7 +77,6 @@ pub fn parse_linear_data_modifying_statement(
         diags,
     )
 }
-
 
 fn parse_linear_data_modifying_body(
     tokens: &[Token],
@@ -151,7 +154,10 @@ fn parse_simple_data_accessing_statement(
     }
 
     let checkpoint = *pos;
-    let (query_opt, mut query_diags) = parse_primitive_query_statement(tokens, pos);
+    let mut stream = TokenStream::new(tokens);
+    stream.set_position(*pos);
+    let (query_opt, mut query_diags) = parse_primitive_query_statement(&mut stream);
+    *pos = stream.position();
     if let Some(query_stmt) = query_opt {
         return (
             Some(SimpleDataAccessingStatement::Query(Box::new(query_stmt))),
@@ -1207,7 +1213,10 @@ fn parse_primitive_result_statement(
 
     match tokens[*pos].kind {
         TokenKind::Return => {
-            let (return_opt, diags) = parse_return_statement(tokens, pos);
+            let mut stream = TokenStream::new(tokens);
+            stream.set_position(*pos);
+            let (return_opt, diags) = parse_return_statement(&mut stream);
+            *pos = stream.position();
             (return_opt.map(PrimitiveResultStatement::Return), diags)
         }
         TokenKind::Finish => {

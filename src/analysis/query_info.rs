@@ -12,7 +12,7 @@ use crate::ast::query::{
     PrimitiveResultStatement, Query, SelectFromClause, SelectItemList, SelectSourceItem,
     SetOperator,
 };
-use crate::ast::visitor::AstVisitor;
+use crate::ast::visit::Visit;
 use crate::ast::{Expression, Span, Statement, VariableCollector};
 
 /// Stable clause identifier in a linear query pipeline.
@@ -251,8 +251,7 @@ impl QueryInfoAnalyzer {
                 );
             }
             PrimitiveQueryStatement::Filter(filter_statement) => {
-                let metadata =
-                    ExpressionMetadata::from_expressions([&filter_statement.condition]);
+                let metadata = ExpressionMetadata::from_expressions([&filter_statement.condition]);
 
                 self.push_clause(
                     pipeline_id,
@@ -302,7 +301,8 @@ impl QueryInfoAnalyzer {
                     }
                 }
 
-                let metadata = ExpressionMetadata::from_expressions([&for_statement.item.collection]);
+                let metadata =
+                    ExpressionMetadata::from_expressions([&for_statement.item.collection]);
 
                 self.push_clause(
                     pipeline_id,
@@ -362,7 +362,8 @@ impl QueryInfoAnalyzer {
                 }
 
                 let mut roots = Vec::new();
-                let graph_pattern_count = collect_select_expression_roots(select_statement, &mut roots);
+                let graph_pattern_count =
+                    collect_select_expression_roots(select_statement, &mut roots);
                 let metadata = ExpressionMetadata::from_expressions(roots);
                 uses.extend(metadata.uses);
 
@@ -446,7 +447,9 @@ impl ExpressionMetadata {
         for expression in expressions {
             let info = ExpressionInfo::analyze(expression);
             metadata.uses.extend(info.variable_references);
-            metadata.property_references.extend(info.property_references);
+            metadata
+                .property_references
+                .extend(info.property_references);
             metadata.contains_aggregate |= info.contains_aggregate;
         }
 
@@ -457,7 +460,10 @@ impl ExpressionMetadata {
 fn variable_sets_from_match(statement: &MatchStatement) -> (BTreeSet<SmolStr>, BTreeSet<SmolStr>) {
     let mut collector = VariableCollector::new();
     let _ = collector.visit_match_statement(statement);
-    (collector.definitions().clone(), collector.references().clone())
+    (
+        collector.definitions().clone(),
+        collector.references().clone(),
+    )
 }
 
 fn variable_sets_from_call(
@@ -490,7 +496,10 @@ fn variable_sets_from_call(
     (definitions, uses)
 }
 
-fn collect_match_expression_roots<'a>(statement: &'a MatchStatement, roots: &mut Vec<&'a Expression>) {
+fn collect_match_expression_roots<'a>(
+    statement: &'a MatchStatement,
+    roots: &mut Vec<&'a Expression>,
+) {
     match statement {
         MatchStatement::Simple(simple) => {
             collect_pattern_expression_roots(&simple.pattern, roots);
@@ -509,7 +518,10 @@ fn collect_match_expression_roots<'a>(statement: &'a MatchStatement, roots: &mut
     }
 }
 
-fn collect_call_expression_roots<'a>(statement: &'a CallProcedureStatement, roots: &mut Vec<&'a Expression>) {
+fn collect_call_expression_roots<'a>(
+    statement: &'a CallProcedureStatement,
+    roots: &mut Vec<&'a Expression>,
+) {
     match &statement.call {
         ProcedureCall::Inline(_) => {}
         ProcedureCall::Named(named) => {

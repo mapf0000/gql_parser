@@ -10,8 +10,8 @@ use crate::ast::query::{
     EdgePattern, ForOrdinalityOrOffset, ForStatement, LetVariableDefinition, NodePattern,
     PathPattern,
 };
-use crate::ast::visitor::{
-    AstVisitor, walk_edge_pattern, walk_expression, walk_for_statement, walk_let_binding,
+use crate::ast::visit::{
+    Visit, walk_edge_pattern, walk_expression, walk_for_statement, walk_let_binding,
     walk_node_pattern, walk_path_pattern,
 };
 
@@ -59,7 +59,7 @@ impl VariableCollector {
     }
 }
 
-impl AstVisitor for VariableCollector {
+impl Visit for VariableCollector {
     type Break = ();
 
     fn visit_expression(&mut self, expression: &Expression) -> ControlFlow<Self::Break> {
@@ -70,10 +70,7 @@ impl AstVisitor for VariableCollector {
         walk_expression(self, expression)
     }
 
-    fn visit_let_binding(
-        &mut self,
-        binding: &LetVariableDefinition,
-    ) -> ControlFlow<Self::Break> {
+    fn visit_let_binding(&mut self, binding: &LetVariableDefinition) -> ControlFlow<Self::Break> {
         self.define(&binding.variable.name);
         walk_let_binding(self, binding)
     }
@@ -122,7 +119,7 @@ impl AstVisitor for VariableCollector {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::visitor::AstVisitor;
+    use crate::ast::visit::Visit;
     use crate::ast::visitors::variable::VariableCollector;
     use crate::parse;
 

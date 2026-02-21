@@ -9,8 +9,8 @@ use crate::ast::query::{
     PrimitiveQueryStatement, PrimitiveResultStatement, Query, ReturnItem, ReturnStatement,
     SelectStatement,
 };
-use crate::ast::visitor::{
-    AstVisitor, walk_edge_pattern, walk_element_pattern, walk_expression, walk_filter_statement,
+use crate::ast::visit::{
+    Visit, walk_edge_pattern, walk_element_pattern, walk_expression, walk_filter_statement,
     walk_for_statement, walk_graph_pattern, walk_label_expression, walk_let_binding,
     walk_let_statement, walk_match_statement, walk_node_pattern, walk_path_pattern,
     walk_primitive_query_statement, walk_primitive_result_statement, walk_program, walk_query,
@@ -60,7 +60,7 @@ impl SpanCollector {
     }
 }
 
-impl AstVisitor for SpanCollector {
+impl Visit for SpanCollector {
     type Break = ();
 
     fn visit_program(&mut self, program: &Program) -> ControlFlow<Self::Break> {
@@ -146,10 +146,7 @@ impl AstVisitor for SpanCollector {
         walk_edge_pattern(self, pattern)
     }
 
-    fn visit_label_expression(
-        &mut self,
-        expression: &LabelExpression,
-    ) -> ControlFlow<Self::Break> {
+    fn visit_label_expression(&mut self, expression: &LabelExpression) -> ControlFlow<Self::Break> {
         self.push_span(expression.span().clone());
         walk_label_expression(self, expression)
     }
@@ -164,10 +161,7 @@ impl AstVisitor for SpanCollector {
         walk_let_statement(self, statement)
     }
 
-    fn visit_let_binding(
-        &mut self,
-        binding: &LetVariableDefinition,
-    ) -> ControlFlow<Self::Break> {
+    fn visit_let_binding(&mut self, binding: &LetVariableDefinition) -> ControlFlow<Self::Break> {
         self.push_span(binding.span.clone());
         walk_let_binding(self, binding)
     }

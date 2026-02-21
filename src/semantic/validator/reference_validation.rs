@@ -58,10 +58,9 @@ fn validate_query_references(
                     &use_graph.graph
                     && metadata.validate_graph_exists(name).is_err()
                 {
-                    use crate::semantic::diag::SemanticDiagBuilder;
-                    let diag = SemanticDiagBuilder::unknown_reference("graph", name, span.clone())
-                        .with_note("Graph not found in metadata")
-                        .build();
+                    use crate::semantic::diag::unknown_reference;
+                    let diag = unknown_reference("graph", name, span.clone())
+                        .with_note("Graph not found in metadata");
                     diagnostics.push(diag);
                 }
                 // Note: Complex USE GRAPH expressions (functions, computations)
@@ -84,8 +83,6 @@ fn validate_mutation_references(
     metadata: &dyn crate::semantic::metadata_provider::MetadataProvider,
     diagnostics: &mut Vec<Diag>,
 ) {
-    
-
     // Check for USE GRAPH clause in focused mutations
     if let Some(use_graph_clause) = &mutation.use_graph_clause {
         // Extract graph name from USE GRAPH expression (if it's a simple reference)
@@ -93,10 +90,9 @@ fn validate_mutation_references(
             &use_graph_clause.graph
             && metadata.validate_graph_exists(name.as_str()).is_err()
         {
-            use crate::semantic::diag::SemanticDiagBuilder;
-            let diag = SemanticDiagBuilder::unknown_reference("graph", name.as_str(), span.clone())
-                .with_note("Graph not found in metadata")
-                .build();
+            use crate::semantic::diag::unknown_reference;
+            let diag = unknown_reference("graph", name.as_str(), span.clone())
+                .with_note("Graph not found in metadata");
             diagnostics.push(diag);
         }
     }

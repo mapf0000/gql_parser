@@ -12,7 +12,9 @@ mod session;
 mod span;
 mod transaction;
 pub mod types;
-pub mod visitor;
+pub mod visit;
+mod visit_macros;
+pub mod visit_mut;
 pub mod visitors;
 
 // Re-export span types
@@ -75,24 +77,24 @@ pub use references::{
 
 // Re-export query types
 pub use query::{
-    CommonTableExpression, CompositeQuery, FilterStatement,
-    ForItem, ForOrdinalityOrOffset, ForStatement, GraphPattern, GroupByClause, GroupingElement,
-    HavingClause, LetStatement, LetVariableDefinition, LimitClause, LinearQuery, MatchStatement,
-    NullOrdering, OffsetClause, OptionalMatchStatement, OptionalOperand, OrderByAndPageStatement,
-    OrderByClause, OrderingSpecification, PrimitiveQueryStatement, PrimitiveResultStatement, Query,
-    ReturnItem, ReturnItemList, ReturnStatement, SelectFromClause, SelectItem, SelectItemList,
+    CommonTableExpression, CompositeQuery, FilterStatement, ForItem, ForOrdinalityOrOffset,
+    ForStatement, GraphPattern, GroupByClause, GroupingElement, HavingClause, LetStatement,
+    LetVariableDefinition, LimitClause, LinearQuery, MatchStatement, NullOrdering, OffsetClause,
+    OptionalMatchStatement, OptionalOperand, OrderByAndPageStatement, OrderByClause,
+    OrderingSpecification, PrimitiveQueryStatement, PrimitiveResultStatement, Query, ReturnItem,
+    ReturnItemList, ReturnStatement, SelectFromClause, SelectItem, SelectItemList,
     SelectSourceItem, SelectStatement, SetOperator, SetQuantifier, SimpleMatchStatement,
     SortSpecification, UseGraphClause, WhereClause, WithClause,
 };
 
 // Re-export visitor infrastructure and concrete visitors.
-pub use visitor::{AstVisitor, AstVisitorMut, VisitResult};
+pub use visit::{Visit, VisitResult};
+pub use visit_mut::VisitMut;
 pub use visitors::{AstNode, CollectingVisitor, SpanCollector, VariableCollector};
 
 // Re-export mutation types
 pub use mutation::{
-    CallDataModifyingProcedureStatement, DeleteItem,
-    DeleteItemList, DeleteStatement, DetachOption,
+    CallDataModifyingProcedureStatement, DeleteItem, DeleteItemList, DeleteStatement, DetachOption,
     InsertEdgePattern, InsertEdgePointingLeft, InsertEdgePointingRight, InsertEdgeUndirected,
     InsertElementPattern, InsertElementPatternFiller, InsertGraphPattern, InsertNodePattern,
     InsertPathPattern, InsertStatement, LinearDataModifyingStatement,

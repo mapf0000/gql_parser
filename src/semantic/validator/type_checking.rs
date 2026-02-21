@@ -7,7 +7,7 @@ use crate::ast::program::{Program, Statement};
 use crate::ast::query::{LinearQuery, PrimitiveQueryStatement, Query};
 use crate::diag::Diag;
 use crate::ir::TypeTable;
-use crate::semantic::diag::SemanticDiagBuilder;
+use crate::semantic::diag::type_mismatch;
 
 /// Pass 6: Type Checking - Checks type compatibility in operations.
 pub(super) fn run_type_checking(
@@ -68,14 +68,11 @@ fn check_linear_query_types(linear_query: &LinearQuery, diagnostics: &mut Vec<Di
 
                 // Check that the condition is likely boolean
                 if is_definitely_non_boolean(&filter.condition) {
-                    diagnostics.push(
-                        SemanticDiagBuilder::type_mismatch(
-                            "boolean",
-                            "non-boolean",
-                            filter.condition.span(),
-                        )
-                        .build(),
-                    );
+                    diagnostics.push(type_mismatch(
+                        "boolean",
+                        "non-boolean",
+                        filter.condition.span(),
+                    ));
                 }
             }
             PrimitiveQueryStatement::Select(select) => match &select.select_items {
@@ -94,7 +91,7 @@ fn check_linear_query_types(linear_query: &LinearQuery, diagnostics: &mut Vec<Di
 /// Checks type compatibility in an expression.
 fn check_expression_types(expr: &crate::ast::expression::Expression, diagnostics: &mut Vec<Diag>) {
     use crate::ast::expression::{BinaryOperator, Expression};
-    use crate::semantic::diag::SemanticDiagBuilder;
+    use crate::semantic::diag::type_mismatch;
 
     match expr {
         // Binary arithmetic operations require numeric operands
@@ -126,16 +123,10 @@ fn check_expression_types(expr: &crate::ast::expression::Expression, diagnostics
 
                     // Simple literal type checking
                     if is_definitely_string(left) {
-                        diagnostics.push(
-                            SemanticDiagBuilder::type_mismatch("numeric", "string", left.span())
-                                .build(),
-                        );
+                        diagnostics.push(type_mismatch("numeric", "string", left.span()));
                     }
                     if is_definitely_string(right) {
-                        diagnostics.push(
-                            SemanticDiagBuilder::type_mismatch("numeric", "string", right.span())
-                                .build(),
-                        );
+                        diagnostics.push(type_mismatch("numeric", "string", right.span()));
                     }
                 }
                 BinaryOperator::Concatenate => {
@@ -165,10 +156,7 @@ fn check_expression_types(expr: &crate::ast::expression::Expression, diagnostics
                 | crate::ast::expression::UnaryOperator::Minus => {
                     // Unary +/- require numeric type
                     if is_definitely_string(operand) {
-                        diagnostics.push(
-                            SemanticDiagBuilder::type_mismatch("numeric", "string", operand.span())
-                                .build(),
-                        );
+                        diagnostics.push(type_mismatch("numeric", "string", operand.span()));
                     }
                 }
                 crate::ast::expression::UnaryOperator::Not => {
@@ -351,9 +339,7 @@ fn check_mutation_types(
     mutation: &crate::ast::mutation::LinearDataModifyingStatement,
     diagnostics: &mut Vec<Diag>,
 ) {
-    use crate::ast::mutation::{
-        SimpleDataAccessingStatement, SimpleDataModifyingStatement,
-    };
+    use crate::ast::mutation::{SimpleDataAccessingStatement, SimpleDataModifyingStatement};
 
     let statements = &mutation.statements;
 

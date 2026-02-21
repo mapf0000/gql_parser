@@ -8,9 +8,10 @@
 
 use crate::ast::query::*;
 use crate::diag::Diag;
-use crate::lexer::token::{Token, TokenKind};
+use crate::lexer::token::TokenKind;
+use crate::parser::base::TokenStream;
 
-use super::{parse_expression_with_diags, ParseResult};
+use super::{ParseResult, parse_expression_with_diags};
 
 // ============================================================================
 // Ordering and Pagination (Task 21)
@@ -18,32 +19,29 @@ use super::{parse_expression_with_diags, ParseResult};
 
 /// Parses ORDER BY and pagination statement.
 pub(super) fn parse_order_by_and_page_statement(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<OrderByAndPageStatement> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
+    let start = stream.current().span.start;
 
-    let order_by = if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Order) {
-        let (order_opt, mut order_diags) = parse_order_by_clause(tokens, pos);
+    let order_by = if stream.check(&TokenKind::Order) {
+        let (order_opt, mut order_diags) = parse_order_by_clause(stream);
         diags.append(&mut order_diags);
         order_opt
     } else {
         None
     };
 
-    let offset = if *pos < tokens.len()
-        && matches!(tokens[*pos].kind, TokenKind::Offset | TokenKind::Skip)
-    {
-        let (offset_opt, mut offset_diags) = parse_offset_clause(tokens, pos);
+    let offset = if stream.check(&TokenKind::Offset) || stream.check(&TokenKind::Skip) {
+        let (offset_opt, mut offset_diags) = parse_offset_clause(stream);
         diags.append(&mut offset_diags);
         offset_opt
     } else {
         None
     };
 
-    let limit = if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Limit) {
-        let (limit_opt, mut limit_diags) = parse_limit_clause(tokens, pos);
+    let limit = if stream.check(&TokenKind::Limit) {
+        let (limit_opt, mut limit_diags) = parse_limit_clause(stream);
         diags.append(&mut limit_diags);
         limit_opt
     } else {
@@ -54,10 +52,7 @@ pub(super) fn parse_order_by_and_page_statement(
         return (None, diags);
     }
 
-    let end = tokens
-        .get(pos.saturating_sub(1))
-        .map(|t| t.span.end)
-        .unwrap_or(start);
+    let end = stream.previous_span().end;
 
     (
         Some(OrderByAndPageStatement {
@@ -71,28 +66,23 @@ pub(super) fn parse_order_by_and_page_statement(
 }
 
 /// Parses ORDER BY clause.
-pub(super) fn parse_order_by_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<OrderByClause> {
+pub(super) fn parse_order_by_clause(stream: &mut TokenStream) -> ParseResult<OrderByClause> {
     let mut diags = Vec::new();
 
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Order) {
+    if !stream.check(&TokenKind::Order) {
         return (None, diags);
     }
 
-    let start = tokens[*pos].span.start;
-    *pos += 1;
+    let start = stream.current().span.start;
+    stream.advance();
 
     // Expect BY
-    if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::By) {
-        *pos += 1;
+    if stream.check(&TokenKind::By) {
+        stream.advance();
     } else {
         diags.push(
-            Diag::error("Expected BY after ORDER").with_primary_label(
-                tokens
-                    .get(*pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(start..start),
-                "expected 'BY' here",
-            ),
+            Diag::error("Expected BY after ORDER")
+                .with_primary_label(stream.current().span.clone(), "expected 'BY' here"),
         );
         return (None, diags);
     }
@@ -101,7 +91,7 @@ pub(super) fn parse_order_by_clause(tokens: &[Token], pos: &mut usize) -> ParseR
     let mut sort_specifications = Vec::new();
 
     loop {
-        let (spec_opt, mut spec_diags) = parse_sort_specification(tokens, pos);
+        let (spec_opt, mut spec_diags) = parse_sort_specification(stream);
         diags.append(&mut spec_diags);
 
         match spec_opt {
@@ -110,8 +100,8 @@ pub(super) fn parse_order_by_clause(tokens: &[Token], pos: &mut usize) -> ParseR
         }
 
         // Check for comma
-        if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Comma) {
-            *pos += 1;
+        if stream.check(&TokenKind::Comma) {
+            stream.advance();
         } else {
             break;
         }
@@ -119,13 +109,8 @@ pub(super) fn parse_order_by_clause(tokens: &[Token], pos: &mut usize) -> ParseR
 
     if sort_specifications.is_empty() {
         diags.push(
-            Diag::error("Expected sort specification after ORDER BY").with_primary_label(
-                tokens
-                    .get(*pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(start..start),
-                "expected expression here",
-            ),
+            Diag::error("Expected sort specification after ORDER BY")
+                .with_primary_label(stream.current().span.clone(), "expected expression here"),
         );
         return (None, diags);
     }
@@ -145,12 +130,15 @@ pub(super) fn parse_order_by_clause(tokens: &[Token], pos: &mut usize) -> ParseR
 }
 
 /// Parses a single sort specification.
-fn parse_sort_specification(tokens: &[Token], pos: &mut usize) -> ParseResult<SortSpecification> {
+fn parse_sort_specification(stream: &mut TokenStream) -> ParseResult<SortSpecification> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
+    let start = stream.current().span.start;
 
-    // Parse sort key expression
-    let (key_opt, mut key_diags) = parse_expression_with_diags(tokens, pos);
+    // Parse sort key expression - need to use legacy interface temporarily
+    let tokens = stream.tokens();
+    let mut pos = stream.position();
+    let (key_opt, mut key_diags) = parse_expression_with_diags(tokens, &mut pos);
+    stream.set_position(pos);
     diags.append(&mut key_diags);
 
     let key = match key_opt {
@@ -159,15 +147,30 @@ fn parse_sort_specification(tokens: &[Token], pos: &mut usize) -> ParseResult<So
     };
 
     // Parse optional ordering (ASC/DESC)
-    let ordering = if *pos < tokens.len() {
-        match &tokens[*pos].kind {
-            TokenKind::Asc | TokenKind::Ascending => {
-                *pos += 1;
-                Some(OrderingSpecification::Ascending)
+    let ordering = match stream.current().kind {
+        TokenKind::Asc | TokenKind::Ascending => {
+            stream.advance();
+            Some(OrderingSpecification::Ascending)
+        }
+        TokenKind::Desc | TokenKind::Descending => {
+            stream.advance();
+            Some(OrderingSpecification::Descending)
+        }
+        _ => None,
+    };
+
+    // Parse optional NULLS FIRST/LAST
+    let null_ordering = if stream.check(&TokenKind::Nulls) {
+        stream.advance();
+
+        match stream.current().kind {
+            TokenKind::First => {
+                stream.advance();
+                Some(NullOrdering::NullsFirst)
             }
-            TokenKind::Desc | TokenKind::Descending => {
-                *pos += 1;
-                Some(OrderingSpecification::Descending)
+            TokenKind::Last => {
+                stream.advance();
+                Some(NullOrdering::NullsLast)
             }
             _ => None,
         }
@@ -175,33 +178,7 @@ fn parse_sort_specification(tokens: &[Token], pos: &mut usize) -> ParseResult<So
         None
     };
 
-    // Parse optional NULLS FIRST/LAST
-    let null_ordering = if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Nulls) {
-        *pos += 1;
-
-        if *pos < tokens.len() {
-            match &tokens[*pos].kind {
-                TokenKind::First => {
-                    *pos += 1;
-                    Some(NullOrdering::NullsFirst)
-                }
-                TokenKind::Last => {
-                    *pos += 1;
-                    Some(NullOrdering::NullsLast)
-                }
-                _ => None,
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    let end = tokens
-        .get(pos.saturating_sub(1))
-        .map(|t| t.span.end)
-        .unwrap_or(start);
+    let end = stream.previous_span().end;
 
     (
         Some(SortSpecification {
@@ -215,40 +192,35 @@ fn parse_sort_specification(tokens: &[Token], pos: &mut usize) -> ParseResult<So
 }
 
 /// Parses LIMIT clause.
-pub(super) fn parse_limit_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<LimitClause> {
+pub(super) fn parse_limit_clause(stream: &mut TokenStream) -> ParseResult<LimitClause> {
     let mut diags = Vec::new();
 
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Limit) {
+    if !stream.check(&TokenKind::Limit) {
         return (None, diags);
     }
 
-    let start = tokens[*pos].span.start;
-    *pos += 1;
+    let start = stream.current().span.start;
+    stream.advance();
 
-    // Parse count expression
-    let (count_opt, mut count_diags) = parse_expression_with_diags(tokens, pos);
+    // Parse count expression - need to use legacy interface temporarily
+    let tokens = stream.tokens();
+    let mut pos = stream.position();
+    let (count_opt, mut count_diags) = parse_expression_with_diags(tokens, &mut pos);
+    stream.set_position(pos);
     diags.append(&mut count_diags);
 
     let count = match count_opt {
         Some(c) => c,
         None => {
             diags.push(
-                Diag::error("Expected count expression after LIMIT").with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start..start),
-                    "expected expression here",
-                ),
+                Diag::error("Expected count expression after LIMIT")
+                    .with_primary_label(stream.current().span.clone(), "expected expression here"),
             );
             return (None, diags);
         }
     };
 
-    let end = tokens
-        .get(pos.saturating_sub(1))
-        .map(|t| t.span.end)
-        .unwrap_or(start);
+    let end = stream.previous_span().end;
 
     (
         Some(LimitClause {
@@ -260,24 +232,23 @@ pub(super) fn parse_limit_clause(tokens: &[Token], pos: &mut usize) -> ParseResu
 }
 
 /// Parses OFFSET/SKIP clause.
-pub(super) fn parse_offset_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<OffsetClause> {
+pub(super) fn parse_offset_clause(stream: &mut TokenStream) -> ParseResult<OffsetClause> {
     let mut diags = Vec::new();
 
-    if *pos >= tokens.len() {
+    let use_skip_keyword = stream.check(&TokenKind::Skip);
+
+    if !stream.check(&TokenKind::Offset) && !use_skip_keyword {
         return (None, diags);
     }
 
-    let use_skip_keyword = matches!(tokens[*pos].kind, TokenKind::Skip);
+    let start = stream.current().span.start;
+    stream.advance();
 
-    if !matches!(tokens[*pos].kind, TokenKind::Offset | TokenKind::Skip) {
-        return (None, diags);
-    }
-
-    let start = tokens[*pos].span.start;
-    *pos += 1;
-
-    // Parse count expression
-    let (count_opt, mut count_diags) = parse_expression_with_diags(tokens, pos);
+    // Parse count expression - need to use legacy interface temporarily
+    let tokens = stream.tokens();
+    let mut pos = stream.position();
+    let (count_opt, mut count_diags) = parse_expression_with_diags(tokens, &mut pos);
+    stream.set_position(pos);
     diags.append(&mut count_diags);
 
     let count = match count_opt {
@@ -289,22 +260,14 @@ pub(super) fn parse_offset_clause(tokens: &[Token], pos: &mut usize) -> ParseRes
                 "Expected count expression after OFFSET"
             };
             diags.push(
-                Diag::error(msg).with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start..start),
-                    "expected expression here",
-                ),
+                Diag::error(msg)
+                    .with_primary_label(stream.current().span.clone(), "expected expression here"),
             );
             return (None, diags);
         }
     };
 
-    let end = tokens
-        .get(pos.saturating_sub(1))
-        .map(|t| t.span.end)
-        .unwrap_or(start);
+    let end = stream.previous_span().end;
 
     (
         Some(OffsetClause {
@@ -321,28 +284,23 @@ pub(super) fn parse_offset_clause(tokens: &[Token], pos: &mut usize) -> ParseRes
 // ============================================================================
 
 /// Parses GROUP BY clause.
-pub(super) fn parse_group_by_clause(tokens: &[Token], pos: &mut usize) -> ParseResult<GroupByClause> {
+pub(super) fn parse_group_by_clause(stream: &mut TokenStream) -> ParseResult<GroupByClause> {
     let mut diags = Vec::new();
 
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Group) {
+    if !stream.check(&TokenKind::Group) {
         return (None, diags);
     }
 
-    let start = tokens[*pos].span.start;
-    *pos += 1;
+    let start = stream.current().span.start;
+    stream.advance();
 
     // Expect BY
-    if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::By) {
-        *pos += 1;
+    if stream.check(&TokenKind::By) {
+        stream.advance();
     } else {
         diags.push(
-            Diag::error("Expected BY after GROUP").with_primary_label(
-                tokens
-                    .get(*pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(start..start),
-                "expected 'BY' here",
-            ),
+            Diag::error("Expected BY after GROUP")
+                .with_primary_label(stream.current().span.clone(), "expected 'BY' here"),
         );
         return (None, diags);
     }
@@ -351,7 +309,7 @@ pub(super) fn parse_group_by_clause(tokens: &[Token], pos: &mut usize) -> ParseR
     let mut elements = Vec::new();
 
     loop {
-        let (elem_opt, mut elem_diags) = parse_grouping_element(tokens, pos);
+        let (elem_opt, mut elem_diags) = parse_grouping_element(stream);
         diags.append(&mut elem_diags);
 
         match elem_opt {
@@ -360,8 +318,8 @@ pub(super) fn parse_group_by_clause(tokens: &[Token], pos: &mut usize) -> ParseR
         }
 
         // Check for comma
-        if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Comma) {
-            *pos += 1;
+        if stream.check(&TokenKind::Comma) {
+            stream.advance();
         } else {
             break;
         }
@@ -369,21 +327,13 @@ pub(super) fn parse_group_by_clause(tokens: &[Token], pos: &mut usize) -> ParseR
 
     if elements.is_empty() {
         diags.push(
-            Diag::error("Expected grouping element after GROUP BY").with_primary_label(
-                tokens
-                    .get(*pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(start..start),
-                "expected expression here",
-            ),
+            Diag::error("Expected grouping element after GROUP BY")
+                .with_primary_label(stream.current().span.clone(), "expected expression here"),
         );
         return (None, diags);
     }
 
-    let end = tokens
-        .get(pos.saturating_sub(1))
-        .map(|t| t.span.end)
-        .unwrap_or(start);
+    let end = stream.previous_span().end;
 
     (
         Some(GroupByClause {
@@ -395,21 +345,23 @@ pub(super) fn parse_group_by_clause(tokens: &[Token], pos: &mut usize) -> ParseR
 }
 
 /// Parses a grouping element (expression or empty set).
-fn parse_grouping_element(tokens: &[Token], pos: &mut usize) -> ParseResult<GroupingElement> {
-    if *pos >= tokens.len() {
-        return (None, vec![]);
-    }
-
+fn parse_grouping_element(stream: &mut TokenStream) -> ParseResult<GroupingElement> {
     // Check for empty grouping set ()
-    if matches!(tokens[*pos].kind, TokenKind::LParen) {
-        let next_pos = *pos + 1;
-        if next_pos < tokens.len() && matches!(tokens[next_pos].kind, TokenKind::RParen) {
-            *pos += 2;
+    if stream.check(&TokenKind::LParen) {
+        let next_pos = stream.position() + 1;
+        if next_pos < stream.tokens().len()
+            && matches!(stream.tokens()[next_pos].kind, TokenKind::RParen)
+        {
+            stream.advance(); // consume (
+            stream.advance(); // consume )
             return (Some(GroupingElement::EmptyGroupingSet), vec![]);
         }
     }
 
-    // Parse expression
-    let (expr_opt, diags) = parse_expression_with_diags(tokens, pos);
+    // Parse expression - need to use legacy interface temporarily
+    let tokens = stream.tokens();
+    let mut pos = stream.position();
+    let (expr_opt, diags) = parse_expression_with_diags(tokens, &mut pos);
+    stream.set_position(pos);
     (expr_opt.map(GroupingElement::Expression), diags)
 }

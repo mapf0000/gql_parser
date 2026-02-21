@@ -6,7 +6,7 @@ use std::ops::ControlFlow;
 use smol_str::SmolStr;
 
 use crate::ast::expression::{AggregateFunction, BooleanValue, FunctionName, Literal};
-use crate::ast::visitor::{AstVisitor, walk_expression};
+use crate::ast::visit::{Visit, walk_expression};
 use crate::ast::{Expression, Span};
 
 /// A property reference extracted from an expression tree.
@@ -95,7 +95,7 @@ impl ExpressionInfoCollector {
     }
 }
 
-impl AstVisitor for ExpressionInfoCollector {
+impl Visit for ExpressionInfoCollector {
     type Break = ();
 
     fn visit_expression(&mut self, expression: &Expression) -> ControlFlow<Self::Break> {

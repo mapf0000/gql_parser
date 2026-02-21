@@ -61,8 +61,8 @@ Major nodes store `Span` values (`Range<usize>`), and `Spanned<T>` is available 
 
 Use visitor APIs for traversal:
 
-- `AstVisitor`
-- `AstVisitorMut`
-- walk helpers in `ast::visitor`
+- `Visit`
+- `VisitMut`
+- walk helpers in `ast::visit` and `ast::visit_mut`
 
 These support early exit via `ControlFlow`.

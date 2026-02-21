@@ -340,7 +340,7 @@ fn validate_primitive_data_modifying_statement(
     diagnostics: &mut Vec<Diag>,
 ) {
     use crate::ast::mutation::PrimitiveDataModifyingStatement;
-    use crate::semantic::diag::SemanticDiagBuilder;
+    use crate::semantic::diag::{aggregation_error, undefined_variable};
 
     let scope_to_check = statement_scope_id(symbol_table, scope_metadata, statement_id);
 
@@ -363,12 +363,14 @@ fn validate_primitive_data_modifying_statement(
                 match item {
                     SetItem::Property(prop_item) => {
                         // Check element variable is in scope
-                        if symbol_table.lookup_from(scope_to_check, prop_item.element.as_str()).is_none() {
-                            let diag = SemanticDiagBuilder::undefined_variable(
+                        if symbol_table
+                            .lookup_from(scope_to_check, prop_item.element.as_str())
+                            .is_none()
+                        {
+                            let diag = undefined_variable(
                                 prop_item.element.as_str(),
                                 prop_item.span.clone(),
-                            )
-                            .build();
+                            );
                             diagnostics.push(diag);
                         }
                         // Validate value expression
@@ -386,11 +388,10 @@ fn validate_primitive_data_modifying_statement(
                             .lookup_from(scope_to_check, all_props_item.element.as_str())
                             .is_none()
                         {
-                            let diag = SemanticDiagBuilder::undefined_variable(
+                            let diag = undefined_variable(
                                 all_props_item.element.as_str(),
                                 all_props_item.span.clone(),
-                            )
-                            .build();
+                            );
                             diagnostics.push(diag);
                         }
                         // Validate property value expressions in the property specification
@@ -410,11 +411,10 @@ fn validate_primitive_data_modifying_statement(
                             .lookup_from(scope_to_check, label_item.element.as_str())
                             .is_none()
                         {
-                            let diag = SemanticDiagBuilder::undefined_variable(
+                            let diag = undefined_variable(
                                 label_item.element.as_str(),
                                 label_item.span.clone(),
-                            )
-                            .build();
+                            );
                             diagnostics.push(diag);
                         }
                     }
@@ -428,12 +428,14 @@ fn validate_primitive_data_modifying_statement(
                 match item {
                     RemoveItem::Property(prop_item) => {
                         // Check element variable is in scope
-                        if symbol_table.lookup_from(scope_to_check, prop_item.element.as_str()).is_none() {
-                            let diag = SemanticDiagBuilder::undefined_variable(
+                        if symbol_table
+                            .lookup_from(scope_to_check, prop_item.element.as_str())
+                            .is_none()
+                        {
+                            let diag = undefined_variable(
                                 prop_item.element.as_str(),
                                 prop_item.span.clone(),
-                            )
-                            .build();
+                            );
                             diagnostics.push(diag);
                         }
                     }
@@ -443,11 +445,10 @@ fn validate_primitive_data_modifying_statement(
                             .lookup_from(scope_to_check, label_item.element.as_str())
                             .is_none()
                         {
-                            let diag = SemanticDiagBuilder::undefined_variable(
+                            let diag = undefined_variable(
                                 label_item.element.as_str(),
                                 label_item.span.clone(),
-                            )
-                            .build();
+                            );
                             diagnostics.push(diag);
                         }
                     }
@@ -598,12 +599,11 @@ fn validate_primitive_statement_variables(
 
             // ISO GQL: Check for illegal aggregation in WHERE clause
             if expression_contains_aggregation(&filter.condition) {
-                use crate::semantic::diag::SemanticDiagBuilder;
-                let diag = SemanticDiagBuilder::aggregation_error(
+                use crate::semantic::diag::{aggregation_error, undefined_variable};
+                let diag = aggregation_error(
                     "Aggregation functions not allowed in WHERE clause (use HAVING instead)",
                     filter.condition.span().clone(),
-                )
-                .build();
+                );
                 diagnostics.push(diag);
             }
         }
@@ -700,7 +700,9 @@ fn validate_primitive_statement_variables(
                         );
                     }
                     crate::ast::query::SelectFromClause::GraphAndQuerySpecification {
-                        graph, query, ..
+                        graph,
+                        query,
+                        ..
                     } => {
                         validate_expression_variables(
                             graph,
@@ -734,7 +736,9 @@ fn validate_primitive_statement_variables(
                                     );
                                 }
                                 crate::ast::query::SelectSourceItem::GraphAndQuery {
-                                    graph, query, ..
+                                    graph,
+                                    query,
+                                    ..
                                 } => {
                                     validate_expression_variables(
                                         graph,
@@ -754,7 +758,8 @@ fn validate_primitive_statement_variables(
                                     );
                                 }
                                 crate::ast::query::SelectSourceItem::Expression {
-                                    expression, ..
+                                    expression,
+                                    ..
                                 } => {
                                     validate_expression_variables(
                                         expression,
@@ -832,12 +837,10 @@ fn validate_primitive_statement_variables(
                                 .lookup_from(scope_to_check, var.name.as_ref())
                                 .is_none()
                             {
-                                use crate::semantic::diag::SemanticDiagBuilder;
-                                let diag = SemanticDiagBuilder::undefined_variable(
-                                    &var.name,
-                                    var.span.clone(),
-                                )
-                                .build();
+                                use crate::semantic::diag::{
+                                    aggregation_error, undefined_variable,
+                                };
+                                let diag = undefined_variable(&var.name, var.span.clone());
                                 diagnostics.push(diag);
                             }
                         }
@@ -945,7 +948,7 @@ fn validate_return_aggregation(
     diagnostics: &mut Vec<Diag>,
 ) {
     use crate::ast::query::ReturnItemList;
-    use crate::semantic::diag::SemanticDiagBuilder;
+    use crate::semantic::diag::{aggregation_error, undefined_variable};
 
     // Check if mixing aggregated and non-aggregated expressions
     let (has_aggregation, non_aggregated_expressions) = match &return_stmt.items {
@@ -969,11 +972,10 @@ fn validate_return_aggregation(
     // RETURN doesn't have GROUP BY, so this is an error in strict mode
     if has_aggregation && !non_aggregated_expressions.is_empty() && validator.config.strict_mode {
         for expr in non_aggregated_expressions {
-            let diag = SemanticDiagBuilder::aggregation_error(
+            let diag = aggregation_error(
                 "Cannot mix aggregated and non-aggregated expressions in RETURN without GROUP BY",
                 expr.span().clone(),
-            )
-            .build();
+            );
             diagnostics.push(diag);
         }
     }
@@ -995,7 +997,7 @@ fn validate_expression_variables(
     diagnostics: &mut Vec<Diag>,
 ) {
     use crate::ast::expression::Expression;
-    use crate::semantic::diag::SemanticDiagBuilder;
+    use crate::semantic::diag::{aggregation_error, undefined_variable};
 
     match expression {
         Expression::VariableReference(var_name, span) => {
@@ -1005,8 +1007,7 @@ fn validate_expression_variables(
             // Perform lookup from the correct scope
             if symbol_table.lookup_from(scope_to_check, var_name).is_none() {
                 // Generate undefined variable diagnostic
-                let diag = SemanticDiagBuilder::undefined_variable(var_name.as_str(), span.clone())
-                    .build();
+                let diag = undefined_variable(var_name.as_str(), span.clone());
                 diagnostics.push(diag);
             }
         }
@@ -1456,7 +1457,9 @@ fn validate_insert_statement(
                     // Validate property value expressions in edges
                     let filler_opt = match edge_pattern {
                         crate::ast::mutation::InsertEdgePattern::PointingLeft(edge) => &edge.filler,
-                        crate::ast::mutation::InsertEdgePattern::PointingRight(edge) => &edge.filler,
+                        crate::ast::mutation::InsertEdgePattern::PointingRight(edge) => {
+                            &edge.filler
+                        }
                         crate::ast::mutation::InsertEdgePattern::Undirected(edge) => &edge.filler,
                     };
 
@@ -1508,12 +1511,11 @@ fn check_where_clause_aggregation(
     diagnostics: &mut Vec<Diag>,
 ) {
     if expression_contains_aggregation(where_expr) {
-        use crate::semantic::diag::SemanticDiagBuilder;
-        let diag = SemanticDiagBuilder::aggregation_error(
+        use crate::semantic::diag::{aggregation_error, undefined_variable};
+        let diag = aggregation_error(
             "Aggregation functions not allowed in WHERE clause (use HAVING instead)",
             where_expr.span().clone(),
-        )
-        .build();
+        );
         diagnostics.push(diag);
     }
 }
@@ -1526,17 +1528,16 @@ fn check_nested_aggregation(
     diagnostics: &mut Vec<Diag>,
 ) {
     use crate::ast::expression::{AggregateFunction, Expression};
-    use crate::semantic::diag::SemanticDiagBuilder;
+    use crate::semantic::diag::{aggregation_error, undefined_variable};
 
     match expr {
         Expression::AggregateFunction(agg_func) => {
             if in_aggregate {
                 // Nested aggregation detected!
-                let diag = SemanticDiagBuilder::aggregation_error(
+                let diag = aggregation_error(
                     "Nested aggregation functions are not allowed",
                     expr.span().clone(),
-                )
-                .build();
+                );
                 diagnostics.push(diag);
                 return; // Don't recurse further
             }
@@ -1678,7 +1679,7 @@ fn validate_having_clause(
     group_by: &Option<crate::ast::query::GroupByClause>,
     diagnostics: &mut Vec<Diag>,
 ) {
-    use crate::semantic::diag::SemanticDiagBuilder;
+    use crate::semantic::diag::{aggregation_error, undefined_variable};
 
     // Collect non-aggregated expressions in HAVING
     let non_agg_exprs = collect_non_aggregated_expressions(condition);
@@ -1693,11 +1694,10 @@ fn validate_having_clause(
                 .any(|gb_expr| expressions_equivalent(expr, gb_expr));
 
             if !found_in_group_by {
-                let diag = SemanticDiagBuilder::aggregation_error(
+                let diag = aggregation_error(
                     "Non-aggregated expression in HAVING must appear in GROUP BY",
                     expr.span().clone(),
-                )
-                .build();
+                );
                 diagnostics.push(diag);
             }
         }
@@ -1705,11 +1705,10 @@ fn validate_having_clause(
         // HAVING without GROUP BY - only aggregates allowed
         if !non_agg_exprs.is_empty() && validator.config.strict_mode {
             for expr in non_agg_exprs {
-                let diag = SemanticDiagBuilder::aggregation_error(
+                let diag = aggregation_error(
                     "HAVING clause requires GROUP BY when using non-aggregated expressions",
                     expr.span().clone(),
-                )
-                .build();
+                );
                 diagnostics.push(diag);
             }
         }

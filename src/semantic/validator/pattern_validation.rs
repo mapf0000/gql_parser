@@ -16,7 +16,7 @@ use crate::ast::query::{
     PathPrimary, PathTerm, PrimitiveQueryStatement, Query,
 };
 use crate::diag::Diag;
-use crate::semantic::diag::SemanticDiagBuilder;
+use crate::semantic::diag::disconnected_pattern;
 
 /// Main entry point for pattern validation pass.
 ///
@@ -120,9 +120,9 @@ fn validate_match_pattern_connectivity(
         // Check if all variables were reached
         for var in &all_variables {
             if !visited.contains(var) {
-                let diag = SemanticDiagBuilder::disconnected_pattern(pattern.span.clone())
+                let diag = disconnected_pattern(pattern.span.clone())
                     .with_note(format!("Variable '{}' is not connected to the rest of the pattern. Consider adding an edge connecting it, or use a separate MATCH clause.", var))
-                    .build();
+                    ;
                 diagnostics.push(diag);
             }
         }
@@ -279,8 +279,7 @@ fn validate_mutation_patterns(
     diagnostics: &mut Vec<Diag>,
 ) {
     use crate::ast::mutation::{
-        PrimitiveDataModifyingStatement,
-        SimpleDataAccessingStatement, SimpleDataModifyingStatement,
+        PrimitiveDataModifyingStatement, SimpleDataAccessingStatement, SimpleDataModifyingStatement,
     };
 
     let statements = &mutation.statements;

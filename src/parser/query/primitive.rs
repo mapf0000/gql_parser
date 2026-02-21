@@ -10,90 +10,100 @@
 use crate::ast::query::*;
 use crate::ast::references::BindingVariable;
 use crate::diag::Diag;
-use crate::lexer::token::{Token, TokenKind};
+use crate::lexer::token::TokenKind;
+use crate::parser::base::TokenStream;
 use crate::parser::patterns::parse_graph_pattern;
 use crate::parser::procedure::parse_call_procedure_statement;
 use crate::parser::types::parse_value_type_prefix;
 use smol_str::SmolStr;
 
 use super::{
-    parse_expression_with_diags, is_query_clause_boundary, skip_to_query_clause_boundary,
-    ParseResult,
+    ParseResult, is_query_clause_boundary, parse_expression_with_diags,
+    skip_to_query_clause_boundary,
 };
 
 // Import functions from sibling modules that are needed by parse_primitive_query_statement
-use super::result::parse_select_statement;
 use super::pagination::parse_order_by_and_page_statement;
+use super::result::parse_select_statement;
 
 /// Parses a primitive query statement.
 pub(crate) fn parse_primitive_query_statement(
-    tokens: &[Token],
-    pos: &mut usize,
+    stream: &mut TokenStream,
 ) -> ParseResult<PrimitiveQueryStatement> {
-    if *pos >= tokens.len() {
+    if stream.check(&TokenKind::Eof) {
         return (None, vec![]);
     }
 
-    match &tokens[*pos].kind {
+    let result = match &stream.current().kind {
         TokenKind::Match => {
-            let (match_opt, diags) = parse_match_statement(tokens, pos);
+            let (match_opt, diags) = parse_match_statement(stream);
             (match_opt.map(PrimitiveQueryStatement::Match), diags)
         }
         TokenKind::Call => {
-            let (call_opt, diags) = parse_call_procedure_statement(tokens, pos);
+            // Call procedure still uses legacy interface
+            let tokens = stream.tokens();
+            let mut pos = stream.position();
+            let (call_opt, diags) = parse_call_procedure_statement(tokens, &mut pos);
+            stream.set_position(pos);
             (call_opt.map(PrimitiveQueryStatement::Call), diags)
         }
         TokenKind::Optional => {
-            if matches!(tokens.get(*pos + 1).map(|t| &t.kind), Some(TokenKind::Call)) {
-                let (call_opt, diags) = parse_call_procedure_statement(tokens, pos);
+            if matches!(stream.peek().map(|t| &t.kind), Some(TokenKind::Call)) {
+                // Call procedure still uses legacy interface
+                let tokens = stream.tokens();
+                let mut pos = stream.position();
+                let (call_opt, diags) = parse_call_procedure_statement(tokens, &mut pos);
+                stream.set_position(pos);
                 (call_opt.map(PrimitiveQueryStatement::Call), diags)
             } else {
-                let (match_opt, diags) = parse_match_statement(tokens, pos);
+                let (match_opt, diags) = parse_match_statement(stream);
                 (match_opt.map(PrimitiveQueryStatement::Match), diags)
             }
         }
         TokenKind::Filter => {
-            let (filter_opt, diags) = parse_filter_statement(tokens, pos);
+            let (filter_opt, diags) = parse_filter_statement(stream);
             (filter_opt.map(PrimitiveQueryStatement::Filter), diags)
         }
         TokenKind::Let => {
-            let (let_opt, diags) = parse_let_statement(tokens, pos);
+            let (let_opt, diags) = parse_let_statement(stream);
             (let_opt.map(PrimitiveQueryStatement::Let), diags)
         }
         TokenKind::For => {
-            let (for_opt, diags) = parse_for_statement(tokens, pos);
+            let (for_opt, diags) = parse_for_statement(stream);
             (for_opt.map(PrimitiveQueryStatement::For), diags)
         }
         TokenKind::Order => {
-            let (order_opt, diags) = parse_order_by_and_page_statement(tokens, pos);
+            let (order_opt, diags) = parse_order_by_and_page_statement(stream);
             (
                 order_opt.map(PrimitiveQueryStatement::OrderByAndPage),
                 diags,
             )
         }
         TokenKind::Limit | TokenKind::Offset | TokenKind::Skip => {
-            let (order_opt, diags) = parse_order_by_and_page_statement(tokens, pos);
+            let (order_opt, diags) = parse_order_by_and_page_statement(stream);
             (
                 order_opt.map(PrimitiveQueryStatement::OrderByAndPage),
                 diags,
             )
         }
         TokenKind::Select => {
-            let (select_opt, diags) = parse_select_statement(tokens, pos);
+            let (select_opt, diags) = parse_select_statement(stream);
             (
                 select_opt.map(|select| PrimitiveQueryStatement::Select(Box::new(select))),
                 diags,
             )
         }
         TokenKind::With => {
-            let (select_opt, diags) = parse_select_statement(tokens, pos);
+            let (select_opt, diags) = parse_select_statement(stream);
             (
                 select_opt.map(|select| PrimitiveQueryStatement::Select(Box::new(select))),
                 diags,
             )
         }
         _ => (None, vec![]),
-    }
+    };
+
+    result
 }
 
 // ============================================================================
@@ -101,43 +111,35 @@ pub(crate) fn parse_primitive_query_statement(
 // ============================================================================
 
 /// Parses a USE clause.
-pub(crate) fn parse_use_graph_clause(
-    tokens: &[Token],
-    pos: &mut usize,
-) -> ParseResult<UseGraphClause> {
+pub(crate) fn parse_use_graph_clause(stream: &mut TokenStream) -> ParseResult<UseGraphClause> {
     let mut diags = Vec::new();
 
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Use) {
+    if !stream.check(&TokenKind::Use) {
         return (None, diags);
     }
 
-    let start = tokens[*pos].span.start;
-    *pos += 1;
+    let start = stream.current().span.start;
+    stream.advance();
 
-    // Parse graph expression
-    let (graph_opt, mut expr_diags) = parse_expression_with_diags(tokens, pos);
+    // Parse graph expression - need to use legacy interface temporarily
+    let tokens = stream.tokens();
+    let mut pos = stream.position();
+    let (graph_opt, mut expr_diags) = parse_expression_with_diags(tokens, &mut pos);
+    stream.set_position(pos);
     diags.append(&mut expr_diags);
 
     let graph = match graph_opt {
         Some(g) => g,
         None => {
             diags.push(
-                Diag::error("Expected graph expression after USE").with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start..start),
-                    "expected expression here",
-                ),
+                Diag::error("Expected graph expression after USE")
+                    .with_primary_label(stream.current().span.clone(), "expected expression here"),
             );
             return (None, diags);
         }
     };
 
-    let end = tokens
-        .get(pos.saturating_sub(1))
-        .map(|t| t.span.end)
-        .unwrap_or(start);
+    let end = stream.previous_span().end;
 
     (
         Some(UseGraphClause {
@@ -153,16 +155,12 @@ pub(crate) fn parse_use_graph_clause(
 // ============================================================================
 
 /// Parses a MATCH statement (simple or optional).
-fn parse_match_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<MatchStatement> {
-    if *pos >= tokens.len() {
-        return (None, vec![]);
-    }
-
-    if matches!(tokens[*pos].kind, TokenKind::Optional) {
-        let (opt_match, diags) = parse_optional_match_statement(tokens, pos);
+fn parse_match_statement(stream: &mut TokenStream) -> ParseResult<MatchStatement> {
+    if stream.check(&TokenKind::Optional) {
+        let (opt_match, diags) = parse_optional_match_statement(stream);
         (opt_match.map(MatchStatement::Optional), diags)
-    } else if matches!(tokens[*pos].kind, TokenKind::Match) {
-        let (simple_match, diags) = parse_simple_match_statement(tokens, pos);
+    } else if stream.check(&TokenKind::Match) {
+        let (simple_match, diags) = parse_simple_match_statement(stream);
         (
             simple_match.map(|simple| MatchStatement::Simple(Box::new(simple))),
             diags,
@@ -173,34 +171,26 @@ fn parse_match_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<Match
 }
 
 /// Parses a simple MATCH statement.
-fn parse_simple_match_statement(
-    tokens: &[Token],
-    pos: &mut usize,
-) -> ParseResult<SimpleMatchStatement> {
+fn parse_simple_match_statement(stream: &mut TokenStream) -> ParseResult<SimpleMatchStatement> {
     let mut diags = Vec::new();
 
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Match) {
+    if !stream.check(&TokenKind::Match) {
         return (None, diags);
     }
 
-    let start = tokens[*pos].span.start;
-    *pos += 1;
+    let start = stream.current().span.start;
+    stream.advance();
 
     // Parse graph pattern with integration-level progress guarantees.
-    let (pattern_opt, mut pattern_diags) = parse_graph_pattern_checked(tokens, pos);
+    let (pattern_opt, mut pattern_diags) = parse_graph_pattern_checked(stream);
     diags.append(&mut pattern_diags);
 
     let pattern = match pattern_opt {
         Some(p) => p,
         None => {
             diags.push(
-                Diag::error("Expected graph pattern after MATCH").with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start..start),
-                    "expected pattern here",
-                ),
+                Diag::error("Expected graph pattern after MATCH")
+                    .with_primary_label(stream.current().span.clone(), "expected pattern here"),
             );
             return (None, diags);
         }
@@ -218,43 +208,32 @@ fn parse_simple_match_statement(
 }
 
 /// Parses an OPTIONAL MATCH statement.
-fn parse_optional_match_statement(
-    tokens: &[Token],
-    pos: &mut usize,
-) -> ParseResult<OptionalMatchStatement> {
+fn parse_optional_match_statement(stream: &mut TokenStream) -> ParseResult<OptionalMatchStatement> {
     let mut diags = Vec::new();
 
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Optional) {
+    if !stream.check(&TokenKind::Optional) {
         return (None, diags);
     }
 
-    let start = tokens[*pos].span.start;
-    *pos += 1;
+    let start = stream.current().span.start;
+    stream.advance();
 
     // Parse optional operand
-    let (operand_opt, mut operand_diags) = parse_optional_operand(tokens, pos);
+    let (operand_opt, mut operand_diags) = parse_optional_operand(stream);
     diags.append(&mut operand_diags);
 
     let operand = match operand_opt {
         Some(op) => op,
         None => {
             diags.push(
-                Diag::error("Expected MATCH, '{', or '(' after OPTIONAL").with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start..start),
-                    "expected operand here",
-                ),
+                Diag::error("Expected MATCH, '{', or '(' after OPTIONAL")
+                    .with_primary_label(stream.current().span.clone(), "expected operand here"),
             );
             return (None, diags);
         }
     };
 
-    let end = tokens
-        .get(pos.saturating_sub(1))
-        .map(|t| t.span.end)
-        .unwrap_or(start);
+    let end = stream.previous_span().end;
 
     (
         Some(OptionalMatchStatement {
@@ -266,15 +245,11 @@ fn parse_optional_match_statement(
 }
 
 /// Parses an optional operand (MATCH, block, or parenthesized block).
-fn parse_optional_operand(tokens: &[Token], pos: &mut usize) -> ParseResult<OptionalOperand> {
-    if *pos >= tokens.len() {
-        return (None, vec![]);
-    }
-
-    match &tokens[*pos].kind {
+fn parse_optional_operand(stream: &mut TokenStream) -> ParseResult<OptionalOperand> {
+    match &stream.current().kind {
         TokenKind::Match => {
-            *pos += 1;
-            let (pattern_opt, diags) = parse_graph_pattern_checked(tokens, pos);
+            stream.advance();
+            let (pattern_opt, diags) = parse_graph_pattern_checked(stream);
             (
                 pattern_opt.map(|pattern| OptionalOperand::Match {
                     pattern: Box::new(pattern),
@@ -283,35 +258,30 @@ fn parse_optional_operand(tokens: &[Token], pos: &mut usize) -> ParseResult<Opti
             )
         }
         TokenKind::LBrace => {
-            *pos += 1;
-            let (statements, mut diags) = parse_match_statement_block(tokens, pos);
+            stream.advance();
+            let (statements, mut diags) = parse_match_statement_block(stream);
 
-            if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::RBrace) {
-                *pos += 1;
+            if stream.check(&TokenKind::RBrace) {
+                stream.advance();
             } else {
                 diags.push(
-                    Diag::error("Expected '}' to close OPTIONAL block").with_primary_label(
-                        tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(0..0),
-                        "expected '}' here",
-                    ),
+                    Diag::error("Expected '}' to close OPTIONAL block")
+                        .with_primary_label(stream.current().span.clone(), "expected '}' here"),
                 );
             }
 
             (Some(OptionalOperand::Block { statements }), diags)
         }
         TokenKind::LParen => {
-            *pos += 1;
-            let (statements, mut diags) = parse_match_statement_block(tokens, pos);
+            stream.advance();
+            let (statements, mut diags) = parse_match_statement_block(stream);
 
-            if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::RParen) {
-                *pos += 1;
+            if stream.check(&TokenKind::RParen) {
+                stream.advance();
             } else {
                 diags.push(
                     Diag::error("Expected ')' to close OPTIONAL parenthesized block")
-                        .with_primary_label(
-                            tokens.get(*pos).map(|t| t.span.clone()).unwrap_or(0..0),
-                            "expected ')' here",
-                        ),
+                        .with_primary_label(stream.current().span.clone(), "expected ')' here"),
                 );
             }
 
@@ -325,19 +295,15 @@ fn parse_optional_operand(tokens: &[Token], pos: &mut usize) -> ParseResult<Opti
 }
 
 /// Parses a match statement block (multiple MATCH statements).
-fn parse_match_statement_block(
-    tokens: &[Token],
-    pos: &mut usize,
-) -> (Vec<MatchStatement>, Vec<Diag>) {
+fn parse_match_statement_block(stream: &mut TokenStream) -> (Vec<MatchStatement>, Vec<Diag>) {
     let mut statements = Vec::new();
     let mut diags = Vec::new();
 
-    while *pos < tokens.len() {
-        if matches!(tokens[*pos].kind, TokenKind::RBrace | TokenKind::RParen) {
-            break;
-        }
-
-        let (stmt_opt, mut stmt_diags) = parse_match_statement(tokens, pos);
+    while !stream.check(&TokenKind::RBrace)
+        && !stream.check(&TokenKind::RParen)
+        && !stream.check(&TokenKind::Eof)
+    {
+        let (stmt_opt, mut stmt_diags) = parse_match_statement(stream);
         diags.append(&mut stmt_diags);
 
         match stmt_opt {
@@ -350,34 +316,33 @@ fn parse_match_statement_block(
 }
 
 /// Wrapper for graph-pattern parsing with progress and diagnostic guarantees.
-fn parse_graph_pattern_checked(tokens: &[Token], pos: &mut usize) -> ParseResult<GraphPattern> {
-    let start = *pos;
-    let (pattern_opt, mut diags) = parse_graph_pattern(tokens, pos);
+fn parse_graph_pattern_checked(stream: &mut TokenStream) -> ParseResult<GraphPattern> {
+    let start = stream.position();
 
-    if pattern_opt.is_some() && *pos == start {
+    // Need to use legacy interface for parse_graph_pattern
+    let tokens = stream.tokens();
+    let mut pos = stream.position();
+    let (pattern_opt, mut diags) = parse_graph_pattern(tokens, &mut pos);
+    stream.set_position(pos);
+
+    if pattern_opt.is_some() && stream.position() == start {
         diags.push(
             Diag::error("Graph pattern parser succeeded without consuming input")
-                .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start..start),
-                    "pattern parser stalled here",
-                ),
+                .with_primary_label(stream.current().span.clone(), "pattern parser stalled here"),
         );
-        skip_to_query_clause_boundary(tokens, pos);
+
+        // Skip to boundary using legacy interface
+        let tokens = stream.tokens();
+        let mut pos = stream.position();
+        skip_to_query_clause_boundary(tokens, &mut pos);
+        stream.set_position(pos);
         return (None, diags);
     }
 
-    if pattern_opt.is_none() && *pos == start && diags.is_empty() {
+    if pattern_opt.is_none() && stream.position() == start && diags.is_empty() {
         diags.push(
-            Diag::error("Expected graph pattern").with_primary_label(
-                tokens
-                    .get(*pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(start..start),
-                "expected pattern here",
-            ),
+            Diag::error("Expected graph pattern")
+                .with_primary_label(stream.current().span.clone(), "expected pattern here"),
         );
     }
 
@@ -389,48 +354,43 @@ fn parse_graph_pattern_checked(tokens: &[Token], pos: &mut usize) -> ParseResult
 // ============================================================================
 
 /// Parses a FILTER statement.
-fn parse_filter_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<FilterStatement> {
+fn parse_filter_statement(stream: &mut TokenStream) -> ParseResult<FilterStatement> {
     let mut diags = Vec::new();
 
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Filter) {
+    if !stream.check(&TokenKind::Filter) {
         return (None, diags);
     }
 
-    let start = tokens[*pos].span.start;
-    *pos += 1;
+    let start = stream.current().span.start;
+    stream.advance();
 
     // Check for optional WHERE keyword
-    let where_optional = if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Where) {
-        *pos += 1;
+    let where_optional = if stream.check(&TokenKind::Where) {
+        stream.advance();
         true
     } else {
         false
     };
 
-    // Parse condition expression
-    let (condition_opt, mut cond_diags) = parse_expression_with_diags(tokens, pos);
+    // Parse condition expression - need to use legacy interface temporarily
+    let tokens = stream.tokens();
+    let mut pos = stream.position();
+    let (condition_opt, mut cond_diags) = parse_expression_with_diags(tokens, &mut pos);
+    stream.set_position(pos);
     diags.append(&mut cond_diags);
 
     let condition = match condition_opt {
         Some(c) => c,
         None => {
             diags.push(
-                Diag::error("Expected search condition after FILTER").with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start..start),
-                    "expected condition here",
-                ),
+                Diag::error("Expected search condition after FILTER")
+                    .with_primary_label(stream.current().span.clone(), "expected condition here"),
             );
             return (None, diags);
         }
     };
 
-    let end = tokens
-        .get(pos.saturating_sub(1))
-        .map(|t| t.span.end)
-        .unwrap_or(start);
+    let end = stream.previous_span().end;
 
     (
         Some(FilterStatement {
@@ -447,21 +407,21 @@ fn parse_filter_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<Filt
 // ============================================================================
 
 /// Parses a LET statement.
-fn parse_let_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<LetStatement> {
+fn parse_let_statement(stream: &mut TokenStream) -> ParseResult<LetStatement> {
     let mut diags = Vec::new();
 
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::Let) {
+    if !stream.check(&TokenKind::Let) {
         return (None, diags);
     }
 
-    let start = tokens[*pos].span.start;
-    *pos += 1;
+    let start = stream.current().span.start;
+    stream.advance();
 
     // Parse variable definitions (comma-separated)
     let mut bindings = Vec::new();
 
     loop {
-        let (binding_opt, mut binding_diags) = parse_let_variable_definition(tokens, pos);
+        let (binding_opt, mut binding_diags) = parse_let_variable_definition(stream);
         diags.append(&mut binding_diags);
 
         match binding_opt {
@@ -470,8 +430,8 @@ fn parse_let_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<LetStat
         }
 
         // Check for comma (more bindings)
-        if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Comma) {
-            *pos += 1;
+        if stream.check(&TokenKind::Comma) {
+            stream.advance();
         } else {
             break;
         }
@@ -480,10 +440,7 @@ fn parse_let_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<LetStat
     if bindings.is_empty() {
         diags.push(
             Diag::error("Expected variable definition after LET").with_primary_label(
-                tokens
-                    .get(*pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(start..start),
+                stream.current().span.clone(),
                 "expected variable definition here",
             ),
         );
@@ -502,99 +459,88 @@ fn parse_let_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<LetStat
 }
 
 /// Parses a LET variable definition.
-fn parse_let_variable_definition(
-    tokens: &[Token],
-    pos: &mut usize,
-) -> ParseResult<LetVariableDefinition> {
+fn parse_let_variable_definition(stream: &mut TokenStream) -> ParseResult<LetVariableDefinition> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
+    let start = stream.current().span.start;
 
     // Parse variable name
-    let variable = match tokens.get(*pos) {
-        Some(token) => match &token.kind {
-            TokenKind::Identifier(name) => {
-                *pos += 1;
-                BindingVariable {
-                    name: name.clone(),
-                    span: token.span.clone(),
-                }
-            }
-            kind if kind.is_non_reserved_identifier_keyword() => {
-                *pos += 1;
-                BindingVariable {
-                    name: SmolStr::new(kind.to_string()),
-                    span: token.span.clone(),
-                }
-            }
-            _ => {
-                diags.push(
-                    Diag::error("Expected variable name in LET definition")
-                        .with_primary_label(token.span.clone(), "expected identifier here"),
-                );
-                return (None, diags);
-            }
-        },
-        None => return (None, diags),
+    let variable = match &stream.current().kind {
+        TokenKind::Identifier(name) => {
+            let var = BindingVariable {
+                name: name.clone(),
+                span: stream.current().span.clone(),
+            };
+            stream.advance();
+            var
+        }
+        kind if kind.is_non_reserved_identifier_keyword() => {
+            let var = BindingVariable {
+                name: SmolStr::new(kind.to_string()),
+                span: stream.current().span.clone(),
+            };
+            stream.advance();
+            var
+        }
+        _ => {
+            diags.push(
+                Diag::error("Expected variable name in LET definition")
+                    .with_primary_label(stream.current().span.clone(), "expected identifier here"),
+            );
+            return (None, diags);
+        }
     };
 
     // Parse optional type annotation
-    let type_annotation =
-        if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::DoubleColon) {
-            *pos += 1;
-            match parse_value_type_prefix(&tokens[*pos..]) {
-                Ok((value_type, consumed)) => {
-                    *pos += consumed;
-                    Some(value_type)
-                }
-                Err(err) => {
-                    diags.push(*err);
-                    None
-                }
+    let type_annotation = if stream.check(&TokenKind::DoubleColon) {
+        stream.advance();
+
+        // Need to use legacy interface for type parsing
+        let tokens = stream.tokens();
+        let pos = stream.position();
+        match parse_value_type_prefix(&tokens[pos..]) {
+            Ok((value_type, consumed)) => {
+                stream.set_position(pos + consumed);
+                Some(value_type)
             }
-        } else {
-            None
-        };
+            Err(err) => {
+                diags.push(*err);
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     // Expect '='
-    if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Eq) {
-        *pos += 1;
+    if stream.check(&TokenKind::Eq) {
+        stream.advance();
     } else {
         diags.push(
-            Diag::error("Expected '=' in LET variable definition").with_primary_label(
-                tokens
-                    .get(*pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(start..start),
-                "expected '=' here",
-            ),
+            Diag::error("Expected '=' in LET variable definition")
+                .with_primary_label(stream.current().span.clone(), "expected '=' here"),
         );
         return (None, diags);
     }
 
-    // Parse value expression
-    let (value_opt, mut value_diags) = parse_expression_with_diags(tokens, pos);
+    // Parse value expression - need to use legacy interface temporarily
+    let tokens = stream.tokens();
+    let mut pos = stream.position();
+    let (value_opt, mut value_diags) = parse_expression_with_diags(tokens, &mut pos);
+    stream.set_position(pos);
     diags.append(&mut value_diags);
 
     let value = match value_opt {
         Some(v) => v,
         None => {
             diags.push(
-                Diag::error("Expected value expression in LET definition").with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start..start),
-                    "expected expression here",
-                ),
+                Diag::error("Expected value expression in LET definition")
+                    .with_primary_label(stream.current().span.clone(), "expected expression here"),
             );
             return (None, diags);
         }
     };
 
-    let end = tokens
-        .get(pos.saturating_sub(1))
-        .map(|t| t.span.end)
-        .unwrap_or(start);
+    let end = stream.previous_span().end;
 
     (
         Some(LetVariableDefinition {
@@ -612,18 +558,18 @@ fn parse_let_variable_definition(
 // ============================================================================
 
 /// Parses a FOR statement.
-fn parse_for_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<ForStatement> {
+fn parse_for_statement(stream: &mut TokenStream) -> ParseResult<ForStatement> {
     let mut diags = Vec::new();
 
-    if *pos >= tokens.len() || !matches!(tokens[*pos].kind, TokenKind::For) {
+    if !stream.check(&TokenKind::For) {
         return (None, diags);
     }
 
-    let start = tokens[*pos].span.start;
-    *pos += 1;
+    let start = stream.current().span.start;
+    stream.advance();
 
     // Parse FOR item
-    let (item_opt, mut item_diags) = parse_for_item(tokens, pos);
+    let (item_opt, mut item_diags) = parse_for_item(stream);
     diags.append(&mut item_diags);
 
     let item = match item_opt {
@@ -631,10 +577,7 @@ fn parse_for_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<ForStat
         None => {
             diags.push(
                 Diag::error("Expected FOR item specification").with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start..start),
+                    stream.current().span.clone(),
                     "expected 'variable IN expression' here",
                 ),
             );
@@ -643,21 +586,16 @@ fn parse_for_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<ForStat
     };
 
     // Parse optional WITH ORDINALITY/OFFSET
-    let ordinality_or_offset = if *pos < tokens.len()
-        && matches!(tokens[*pos].kind, TokenKind::With)
-    {
-        *pos += 1;
-        let (ordinality_opt, mut ordinality_diags) = parse_for_ordinality_or_offset(tokens, pos);
+    let ordinality_or_offset = if stream.check(&TokenKind::With) {
+        stream.advance();
+        let (ordinality_opt, mut ordinality_diags) = parse_for_ordinality_or_offset(stream);
         diags.append(&mut ordinality_diags);
         ordinality_opt
     } else {
         None
     };
 
-    let end = tokens
-        .get(pos.saturating_sub(1))
-        .map(|t| t.span.end)
-        .unwrap_or(start);
+    let end = stream.previous_span().end;
 
     (
         Some(ForStatement {
@@ -670,78 +608,67 @@ fn parse_for_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<ForStat
 }
 
 /// Parses a FOR item (variable IN collection).
-fn parse_for_item(tokens: &[Token], pos: &mut usize) -> ParseResult<ForItem> {
+fn parse_for_item(stream: &mut TokenStream) -> ParseResult<ForItem> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
+    let start = stream.current().span.start;
 
     // Parse binding variable
-    let binding_variable = match tokens.get(*pos) {
-        Some(token) => match &token.kind {
-            TokenKind::Identifier(name) => {
-                *pos += 1;
-                BindingVariable {
-                    name: name.clone(),
-                    span: token.span.clone(),
-                }
-            }
-            kind if kind.is_non_reserved_identifier_keyword() => {
-                *pos += 1;
-                BindingVariable {
-                    name: SmolStr::new(kind.to_string()),
-                    span: token.span.clone(),
-                }
-            }
-            _ => {
-                diags.push(
-                    Diag::error("Expected variable name in FOR statement")
-                        .with_primary_label(token.span.clone(), "expected identifier here"),
-                );
-                return (None, diags);
-            }
-        },
-        None => return (None, diags),
+    let binding_variable = match &stream.current().kind {
+        TokenKind::Identifier(name) => {
+            let var = BindingVariable {
+                name: name.clone(),
+                span: stream.current().span.clone(),
+            };
+            stream.advance();
+            var
+        }
+        kind if kind.is_non_reserved_identifier_keyword() => {
+            let var = BindingVariable {
+                name: SmolStr::new(kind.to_string()),
+                span: stream.current().span.clone(),
+            };
+            stream.advance();
+            var
+        }
+        _ => {
+            diags.push(
+                Diag::error("Expected variable name in FOR statement")
+                    .with_primary_label(stream.current().span.clone(), "expected identifier here"),
+            );
+            return (None, diags);
+        }
     };
 
     // Expect IN keyword
-    if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::In) {
-        *pos += 1;
+    if stream.check(&TokenKind::In) {
+        stream.advance();
     } else {
         diags.push(
-            Diag::error("Expected IN keyword in FOR statement").with_primary_label(
-                tokens
-                    .get(*pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(start..start),
-                "expected 'IN' here",
-            ),
+            Diag::error("Expected IN keyword in FOR statement")
+                .with_primary_label(stream.current().span.clone(), "expected 'IN' here"),
         );
         return (None, diags);
     }
 
-    // Parse collection expression
-    let (collection_opt, mut coll_diags) = parse_expression_with_diags(tokens, pos);
+    // Parse collection expression - need to use legacy interface temporarily
+    let tokens = stream.tokens();
+    let mut pos = stream.position();
+    let (collection_opt, mut coll_diags) = parse_expression_with_diags(tokens, &mut pos);
+    stream.set_position(pos);
     diags.append(&mut coll_diags);
 
     let collection = match collection_opt {
         Some(c) => c,
         None => {
             diags.push(
-                Diag::error("Expected collection expression in FOR statement").with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start..start),
-                    "expected expression here",
-                ),
+                Diag::error("Expected collection expression in FOR statement")
+                    .with_primary_label(stream.current().span.clone(), "expected expression here"),
             );
             return (None, diags);
         }
     };
 
-    let end = tokens
-        .get(pos.saturating_sub(1))
-        .map(|t| t.span.end)
-        .unwrap_or(start);
+    let end = stream.previous_span().end;
 
     (
         Some(ForItem {
@@ -754,75 +681,56 @@ fn parse_for_item(tokens: &[Token], pos: &mut usize) -> ParseResult<ForItem> {
 }
 
 /// Parses WITH ORDINALITY or WITH OFFSET clause.
-fn parse_for_ordinality_or_offset(
-    tokens: &[Token],
-    pos: &mut usize,
-) -> ParseResult<ForOrdinalityOrOffset> {
+fn parse_for_ordinality_or_offset(stream: &mut TokenStream) -> ParseResult<ForOrdinalityOrOffset> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
+    let start = stream.current().span.start;
 
-    if *pos >= tokens.len() {
-        diags.push(
-            Diag::error("Expected ORDINALITY or OFFSET after WITH")
-                .with_primary_label(start..start, "expected ORDINALITY or OFFSET here"),
-        );
-        return (None, diags);
-    }
-
-    let expects_ordinality = match &tokens[*pos].kind {
+    let expects_ordinality = match &stream.current().kind {
         TokenKind::Ordinality => {
-            *pos += 1;
+            stream.advance();
             true
         }
         TokenKind::Offset => {
-            *pos += 1;
+            stream.advance();
             false
         }
         _ => {
             diags.push(
                 Diag::error("Expected ORDINALITY or OFFSET after WITH").with_primary_label(
-                    tokens[*pos].span.clone(),
+                    stream.current().span.clone(),
                     "expected ORDINALITY or OFFSET here",
                 ),
             );
-            skip_to_query_clause_boundary(tokens, pos);
+
+            // Skip to boundary using legacy interface
+            let tokens = stream.tokens();
+            let mut pos = stream.position();
+            skip_to_query_clause_boundary(tokens, &mut pos);
+            stream.set_position(pos);
             return (None, diags);
         }
     };
 
     // AS is optional in this clause.
-    if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::As) {
-        *pos += 1;
+    if stream.check(&TokenKind::As) {
+        stream.advance();
     }
 
-    let Some(token) = tokens.get(*pos) else {
-        let keyword = if expects_ordinality {
-            "ORDINALITY"
-        } else {
-            "OFFSET"
-        };
-        diags.push(
-            Diag::error(format!("Expected variable name after WITH {keyword}"))
-                .with_primary_label(start..start, "expected identifier here"),
-        );
-        return (None, diags);
-    };
-
-    let variable = match &token.kind {
+    let variable = match &stream.current().kind {
         TokenKind::Identifier(name) => {
             let variable = BindingVariable {
                 name: name.clone(),
-                span: token.span.clone(),
+                span: stream.current().span.clone(),
             };
-            *pos += 1;
+            stream.advance();
             variable
         }
         kind if kind.is_non_reserved_identifier_keyword() => {
             let variable = BindingVariable {
                 name: SmolStr::new(kind.to_string()),
-                span: token.span.clone(),
+                span: stream.current().span.clone(),
             };
-            *pos += 1;
+            stream.advance();
             variable
         }
         _ => {
@@ -833,10 +741,14 @@ fn parse_for_ordinality_or_offset(
             };
             diags.push(
                 Diag::error(format!("Expected variable name after WITH {keyword}"))
-                    .with_primary_label(token.span.clone(), "expected identifier here"),
+                    .with_primary_label(stream.current().span.clone(), "expected identifier here"),
             );
-            if !is_query_clause_boundary(&token.kind) {
-                skip_to_query_clause_boundary(tokens, pos);
+            if !is_query_clause_boundary(&stream.current().kind) {
+                // Skip to boundary using legacy interface
+                let tokens = stream.tokens();
+                let mut pos = stream.position();
+                skip_to_query_clause_boundary(tokens, &mut pos);
+                stream.set_position(pos);
             }
             return (None, diags);
         }
