@@ -12,7 +12,7 @@ use smol_str::SmolStr;
 
 use super::{
     ParseResult, is_query_spec_start, parse_expression_with_diags, parse_set_quantifier_opt,
-    skip_to_query_clause_boundary,
+    skip_to_query_clause_boundary, skip_to_query_clause_boundary_legacy,
 };
 
 // Import functions from sibling modules
@@ -58,11 +58,8 @@ pub(super) fn parse_select_statement(stream: &mut TokenStream) -> ParseResult<Se
         .unwrap_or_else(|| stream.current().span.start);
     stream.advance();
 
-    // Parse optional quantifier - need to use legacy interface temporarily
-    let tokens = stream.tokens();
-    let mut pos = stream.position();
-    let quantifier = parse_set_quantifier_opt(tokens, &mut pos);
-    stream.set_position(pos);
+    // Parse optional quantifier
+    let quantifier = parse_set_quantifier_opt(stream);
 
     // Parse select items
     let (items_opt, mut items_diags) = parse_select_items(stream);
@@ -194,11 +191,7 @@ fn parse_with_clause(stream: &mut TokenStream) -> ParseResult<WithClause> {
                 );
             }
             if stream.position() == item_start {
-                // Skip to boundary using legacy interface
-                let tokens = stream.tokens();
-                let mut pos = stream.position();
-                skip_to_query_clause_boundary(tokens, &mut pos);
-                stream.set_position(pos);
+                skip_to_query_clause_boundary(stream);
             }
             break;
         };
@@ -304,21 +297,15 @@ fn parse_common_table_expression(stream: &mut TokenStream) -> ParseResult<Common
 
     let query_start = stream.position();
 
-    // Need to use legacy interface for parse_query
-    let tokens = stream.tokens();
-    let mut pos = stream.position();
-    let (query_opt, mut query_diags) = parse_query(tokens, &mut pos);
-    stream.set_position(pos);
+    // Parse query using TokenStream
+    let (query_opt, mut query_diags) = parse_query(stream);
     diags.append(&mut query_diags);
 
     let query = match query_opt {
         Some(query) => query,
         None => {
             if stream.position() == query_start {
-                let tokens = stream.tokens();
-                let mut pos = stream.position();
-                skip_to_query_clause_boundary(tokens, &mut pos);
-                stream.set_position(pos);
+                skip_to_query_clause_boundary(stream);
             }
             return (None, diags);
         }
@@ -477,11 +464,7 @@ fn parse_select_from_clause(stream: &mut TokenStream) -> ParseResult<SelectFromC
                     );
                 }
                 if stream.position() == source_start {
-                    // Skip to boundary using legacy interface
-                    let tokens = stream.tokens();
-                    let mut pos = stream.position();
-                    skip_to_query_clause_boundary(tokens, &mut pos);
-                    stream.set_position(pos);
+                    skip_to_query_clause_boundary(stream);
                 }
                 return (None, diags);
             }
@@ -546,11 +529,8 @@ fn parse_select_source_item(stream: &mut TokenStream) -> ParseResult<SelectSourc
     if is_query_spec_start(&stream.current().kind) {
         let query_start = stream.position();
 
-        // Need to use legacy interface for parse_query
-        let tokens = stream.tokens();
-        let mut pos = stream.position();
-        let (query_opt, mut query_diags) = parse_query(tokens, &mut pos);
-        stream.set_position(pos);
+        // Parse query using TokenStream
+        let (query_opt, mut query_diags) = parse_query(stream);
         diags.append(&mut query_diags);
 
         if let Some(query) = query_opt {
@@ -569,11 +549,7 @@ fn parse_select_source_item(stream: &mut TokenStream) -> ParseResult<SelectSourc
         }
 
         if stream.position() == query_start {
-            // Skip to boundary using legacy interface
-            let tokens = stream.tokens();
-            let mut pos = stream.position();
-            skip_to_query_clause_boundary(tokens, &mut pos);
-            stream.set_position(pos);
+            skip_to_query_clause_boundary(stream);
         }
         return (None, diags);
     }
@@ -595,11 +571,8 @@ fn parse_select_source_item(stream: &mut TokenStream) -> ParseResult<SelectSourc
     if is_query_spec_start(&stream.current().kind) {
         let query_start = stream.position();
 
-        // Need to use legacy interface for parse_query
-        let tokens = stream.tokens();
-        let mut pos = stream.position();
-        let (query_opt, mut query_diags) = parse_query(tokens, &mut pos);
-        stream.set_position(pos);
+        // Parse query using TokenStream
+        let (query_opt, mut query_diags) = parse_query(stream);
         diags.append(&mut query_diags);
 
         if let Some(query) = query_opt {
@@ -619,11 +592,7 @@ fn parse_select_source_item(stream: &mut TokenStream) -> ParseResult<SelectSourc
         }
 
         if stream.position() == query_start {
-            // Skip to boundary using legacy interface
-            let tokens = stream.tokens();
-            let mut pos = stream.position();
-            skip_to_query_clause_boundary(tokens, &mut pos);
-            stream.set_position(pos);
+            skip_to_query_clause_boundary(stream);
         }
 
         diags.push(
@@ -772,11 +741,7 @@ fn parse_from_graph_match_list(stream: &mut TokenStream) -> (Vec<GraphPattern>, 
                         .with_primary_label(match_span, "expected graph pattern here"),
                 );
                 if stream.position() == pattern_start {
-                    // Skip to boundary using legacy interface
-                    let tokens = stream.tokens();
-                    let mut pos = stream.position();
-                    skip_to_query_clause_boundary(tokens, &mut pos);
-                    stream.set_position(pos);
+                    skip_to_query_clause_boundary(stream);
                 }
                 break;
             }
@@ -790,11 +755,7 @@ fn parse_from_graph_match_list(stream: &mut TokenStream) -> (Vec<GraphPattern>, 
                     Diag::error("Expected MATCH after ',' in FROM clause")
                         .with_primary_label(comma_span, "expected MATCH here"),
                 );
-                // Skip to boundary using legacy interface
-                let tokens = stream.tokens();
-                let mut pos = stream.position();
-                skip_to_query_clause_boundary(tokens, &mut pos);
-                stream.set_position(pos);
+                skip_to_query_clause_boundary(stream);
                 break;
             }
             continue;
@@ -822,7 +783,7 @@ fn parse_graph_pattern_checked(tokens: &[Token], pos: &mut usize) -> ParseResult
                     "pattern parser stalled here",
                 ),
         );
-        skip_to_query_clause_boundary(tokens, pos);
+        skip_to_query_clause_boundary_legacy(tokens, pos);
         return (None, diags);
     }
 
@@ -928,11 +889,8 @@ pub(crate) fn parse_return_statement(stream: &mut TokenStream) -> ParseResult<Re
     let start = stream.current().span.start;
     stream.advance();
 
-    // Parse optional quantifier - need to use legacy interface temporarily
-    let tokens = stream.tokens();
-    let mut pos = stream.position();
-    let quantifier = parse_set_quantifier_opt(tokens, &mut pos);
-    stream.set_position(pos);
+    // Parse optional quantifier
+    let quantifier = parse_set_quantifier_opt(stream);
 
     // Parse return items
     let (items_opt, mut items_diags) = parse_return_items(stream);

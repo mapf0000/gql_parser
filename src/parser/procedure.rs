@@ -23,7 +23,7 @@ use crate::parser::InternalParseResult;
 use crate::parser::expression::parse_expression;
 use crate::parser::mutation::parse_linear_data_modifying_statement;
 use crate::parser::program::parse_catalog_statement_kind;
-use crate::parser::query::parse_query;
+use crate::parser::query::parse_query_legacy;
 use crate::parser::references::{parse_procedure_reference, parse_schema_reference};
 use crate::parser::types::{
     parse_binding_table_reference_value_type, parse_graph_reference_value_type, parse_value_type,
@@ -1525,7 +1525,7 @@ fn parse_statement(tokens: &[Token], pos: &mut usize) -> ParseResult<ProcedureSt
     // Query candidate
     if !matches!(start_kind, TokenKind::Create | TokenKind::Drop) {
         let mut query_pos = start;
-        let (query_opt, query_diags) = parse_query(tokens, &mut query_pos);
+        let (query_opt, query_diags) = parse_query_legacy(tokens, &mut query_pos);
         if let Some(query) = query_opt {
             candidates.push((
                 query_pos,

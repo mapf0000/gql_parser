@@ -5,7 +5,7 @@
 
 use crate::ast::query::*;
 use crate::diag::Diag;
-use crate::lexer::token::{Token, TokenKind};
+use crate::lexer::token::TokenKind;
 use crate::parser::InternalParseResult;
 use crate::parser::base::TokenStream;
 
@@ -17,17 +17,17 @@ use super::result::parse_return_statement;
 pub(super) type ParseResult<T> = InternalParseResult<T>;
 
 /// Parses a linear query and wraps it in Query enum.
-pub(super) fn parse_linear_query_as_query(tokens: &[Token], pos: &mut usize) -> ParseResult<Query> {
+pub(super) fn parse_linear_query_as_query(stream: &mut TokenStream) -> ParseResult<Query> {
     // Check for parenthesized query
-    if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::LParen) {
-        let start = tokens[*pos].span.start;
-        *pos += 1;
+    if stream.check(&TokenKind::LParen) {
+        let start = stream.current().span.start;
+        stream.advance();
 
-        let (query_opt, mut diags) = super::parse_composite_query(tokens, pos);
+        let (query_opt, mut diags) = super::parse_composite_query(stream);
 
-        if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::RParen) {
-            let end = tokens[*pos].span.end;
-            *pos += 1;
+        if stream.check(&TokenKind::RParen) {
+            let end = stream.current().span.end;
+            stream.advance();
 
             if let Some(query) = query_opt {
                 return (
@@ -38,10 +38,7 @@ pub(super) fn parse_linear_query_as_query(tokens: &[Token], pos: &mut usize) -> 
         } else {
             diags.push(
                 Diag::error("Expected ')' to close parenthesized query").with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start..start),
+                    stream.current().span.clone(),
                     "expected ')' here",
                 ),
             );
@@ -50,21 +47,18 @@ pub(super) fn parse_linear_query_as_query(tokens: &[Token], pos: &mut usize) -> 
         return (None, diags);
     }
 
-    let (linear_opt, diags) = parse_linear_query(tokens, pos);
+    let (linear_opt, diags) = parse_linear_query(stream);
     (linear_opt.map(Query::Linear), diags)
 }
 
 /// Parses a linear query statement.
-fn parse_linear_query(tokens: &[Token], pos: &mut usize) -> ParseResult<LinearQuery> {
+fn parse_linear_query(stream: &mut TokenStream) -> ParseResult<LinearQuery> {
     let mut diags = Vec::new();
-    let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
+    let start = stream.current().span.start;
 
     // Check for optional USE clause
-    let use_graph = if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Use) {
-        let mut stream = TokenStream::new(tokens);
-        stream.set_position(*pos);
-        let (use_graph_opt, mut use_diags) = parse_use_graph_clause(&mut stream);
-        *pos = stream.position();
+    let use_graph = if stream.check(&TokenKind::Use) {
+        let (use_graph_opt, mut use_diags) = parse_use_graph_clause(stream);
         diags.append(&mut use_diags);
         use_graph_opt
     } else {
@@ -73,7 +67,7 @@ fn parse_linear_query(tokens: &[Token], pos: &mut usize) -> ParseResult<LinearQu
 
     // Parse primitive statements and result statement
     let (primitive_statements, result_statement, has_query_body, mut stmt_diags, end) =
-        parse_query_statements(tokens, pos, start);
+        parse_query_statements(stream, start);
     diags.append(&mut stmt_diags);
 
     if !has_query_body {
@@ -84,10 +78,7 @@ fn parse_linear_query(tokens: &[Token], pos: &mut usize) -> ParseResult<LinearQu
         };
         diags.push(
             Diag::error(error_msg).with_primary_label(
-                tokens
-                    .get(*pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(start..start),
+                stream.current().span.clone(),
                 "expected query statement here",
             ),
         );
@@ -107,9 +98,8 @@ fn parse_linear_query(tokens: &[Token], pos: &mut usize) -> ParseResult<LinearQu
 
 /// Helper to parse query statements (primitive + optional result).
 fn parse_query_statements(
-    tokens: &[Token],
-    pos: &mut usize,
-    start: usize,
+    stream: &mut TokenStream,
+    _start: usize,
 ) -> (
     Vec<PrimitiveQueryStatement>,
     Option<Box<PrimitiveResultStatement>>,
@@ -122,16 +112,13 @@ fn parse_query_statements(
     let mut result_statement = None;
 
     loop {
-        if *pos >= tokens.len() {
+        if stream.check(&TokenKind::Eof) {
             break;
         }
 
         // Check for result statement (RETURN or FINISH)
-        if matches!(tokens[*pos].kind, TokenKind::Return) {
-            let mut stream = TokenStream::new(tokens);
-            stream.set_position(*pos);
-            let (return_opt, mut return_diags) = parse_return_statement(&mut stream);
-            *pos = stream.position();
+        if stream.check(&TokenKind::Return) {
+            let (return_opt, mut return_diags) = parse_return_statement(stream);
             diags.append(&mut return_diags);
 
             if let Some(ret) = return_opt {
@@ -140,18 +127,15 @@ fn parse_query_statements(
             break;
         }
 
-        if matches!(tokens[*pos].kind, TokenKind::Finish) {
-            let span = tokens[*pos].span.clone();
-            *pos += 1;
+        if stream.check(&TokenKind::Finish) {
+            let span = stream.current().span.clone();
+            stream.advance();
             result_statement = Some(Box::new(PrimitiveResultStatement::Finish(span)));
             break;
         }
 
         // Try to parse primitive statement
-        let mut stream = TokenStream::new(tokens);
-        stream.set_position(*pos);
-        let (stmt_opt, mut stmt_diags) = parse_primitive_query_statement(&mut stream);
-        *pos = stream.position();
+        let (stmt_opt, mut stmt_diags) = parse_primitive_query_statement(stream);
         diags.append(&mut stmt_diags);
 
         match stmt_opt {
@@ -160,7 +144,7 @@ fn parse_query_statements(
         }
     }
 
-    let end = tokens.get(*pos).map(|t| t.span.start).unwrap_or(start);
+    let end = stream.current().span.start;
     let has_query_body = !primitive_statements.is_empty() || result_statement.is_some();
     (
         primitive_statements,

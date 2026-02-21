@@ -331,11 +331,8 @@ fn parse_graph_pattern_checked(stream: &mut TokenStream) -> ParseResult<GraphPat
                 .with_primary_label(stream.current().span.clone(), "pattern parser stalled here"),
         );
 
-        // Skip to boundary using legacy interface
-        let tokens = stream.tokens();
-        let mut pos = stream.position();
-        skip_to_query_clause_boundary(tokens, &mut pos);
-        stream.set_position(pos);
+        // Skip to boundary
+        skip_to_query_clause_boundary(stream);
         return (None, diags);
     }
 
@@ -702,10 +699,7 @@ fn parse_for_ordinality_or_offset(stream: &mut TokenStream) -> ParseResult<ForOr
             );
 
             // Skip to boundary using legacy interface
-            let tokens = stream.tokens();
-            let mut pos = stream.position();
-            skip_to_query_clause_boundary(tokens, &mut pos);
-            stream.set_position(pos);
+            skip_to_query_clause_boundary(stream);
             return (None, diags);
         }
     };
@@ -743,11 +737,7 @@ fn parse_for_ordinality_or_offset(stream: &mut TokenStream) -> ParseResult<ForOr
                     .with_primary_label(stream.current().span.clone(), "expected identifier here"),
             );
             if !is_query_clause_boundary(&stream.current().kind) {
-                // Skip to boundary using legacy interface
-                let tokens = stream.tokens();
-                let mut pos = stream.position();
-                skip_to_query_clause_boundary(tokens, &mut pos);
-                stream.set_position(pos);
+                skip_to_query_clause_boundary(stream);
             }
             return (None, diags);
         }

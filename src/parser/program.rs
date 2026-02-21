@@ -19,7 +19,7 @@ use crate::parser::mutation::parse_linear_data_modifying_statement;
 use crate::parser::procedure::{
     parse_call_procedure_statement, parse_nested_procedure_specification,
 };
-use crate::parser::query::parse_query;
+use crate::parser::query::parse_query_legacy;
 use crate::parser::references as reference_parser;
 use smol_str::SmolStr;
 
@@ -335,7 +335,7 @@ fn parse_statement(class: StatementClass, tokens: &[Token]) -> StatementParseOut
 
 fn parse_query_statement(tokens: &[Token]) -> StatementParseOutcome {
     let mut pos = 0usize;
-    let (query_opt, diags) = parse_query(tokens, &mut pos);
+    let (query_opt, diags) = parse_query_legacy(tokens, &mut pos);
 
     match query_opt {
         Some(query) => {

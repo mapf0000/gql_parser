@@ -178,7 +178,17 @@ pub(super) fn is_query_clause_boundary(kind: &TokenKind) -> bool {
 }
 
 /// Skips tokens until a query clause boundary is found.
-pub(super) fn skip_to_query_clause_boundary(tokens: &[Token], pos: &mut usize) {
+pub(super) fn skip_to_query_clause_boundary(stream: &mut crate::parser::base::TokenStream) {
+    while !stream.check(&TokenKind::Eof) {
+        if is_query_clause_boundary(&stream.current().kind) {
+            break;
+        }
+        stream.advance();
+    }
+}
+
+/// Legacy wrapper for skip_to_query_clause_boundary (for legacy functions).
+pub(super) fn skip_to_query_clause_boundary_legacy(tokens: &[Token], pos: &mut usize) {
     while *pos < tokens.len() {
         if is_query_clause_boundary(&tokens[*pos].kind) {
             break;
@@ -216,19 +226,16 @@ pub(super) fn is_query_spec_start(kind: &TokenKind) -> bool {
 /// Parses a query statement (top-level entry point).
 ///
 /// This handles composite queries, linear queries, and parenthesized queries.
-pub fn parse_query(tokens: &[Token], pos: &mut usize) -> ParseResult<Query> {
-    let start_pos = *pos;
-    let (query_opt, mut diags) = parse_composite_query(tokens, pos);
+pub fn parse_query(stream: &mut crate::parser::base::TokenStream) -> ParseResult<Query> {
+    let start_pos = stream.position();
+    let (query_opt, mut diags) = parse_composite_query(stream);
 
     // Parser contract: a successful parse must always consume input.
-    if *pos == start_pos {
+    if stream.position() == start_pos {
         if diags.is_empty() {
             diags.push(
                 Diag::error("Expected query statement").with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map(|t| t.span.clone())
-                        .unwrap_or(start_pos..start_pos),
+                    stream.current().span.clone(),
                     "expected query statement here",
                 ),
             );
@@ -237,6 +244,16 @@ pub fn parse_query(tokens: &[Token], pos: &mut usize) -> ParseResult<Query> {
     }
 
     (query_opt, diags)
+}
+
+/// Legacy wrapper for parse_query (for callers that haven't been migrated yet).
+/// Creates a TokenStream from tokens/pos, calls parse_query, and syncs position back.
+pub fn parse_query_legacy(tokens: &[Token], pos: &mut usize) -> ParseResult<Query> {
+    let mut stream = crate::parser::base::TokenStream::new(tokens);
+    stream.set_position(*pos);
+    let result = parse_query(&mut stream);
+    *pos = stream.position();
+    result
 }
 
 // ============================================================================
@@ -250,11 +267,11 @@ pub fn parse_query(tokens: &[Token], pos: &mut usize) -> ParseResult<Query> {
 /// compositeQueryStatement:
 ///     linearQueryStatement (setOperator linearQueryStatement)*
 /// ```
-fn parse_composite_query(tokens: &[Token], pos: &mut usize) -> ParseResult<Query> {
+fn parse_composite_query(stream: &mut crate::parser::base::TokenStream) -> ParseResult<Query> {
     let mut diags = Vec::new();
 
     // Parse first linear query
-    let (left_opt, mut left_diags) = linear::parse_linear_query_as_query(tokens, pos);
+    let (left_opt, mut left_diags) = linear::parse_linear_query_as_query(stream);
     diags.append(&mut left_diags);
 
     let mut left = match left_opt {
@@ -263,27 +280,27 @@ fn parse_composite_query(tokens: &[Token], pos: &mut usize) -> ParseResult<Query
     };
 
     // Parse set operators and additional queries (left-associative)
-    while *pos < tokens.len() {
+    while !stream.check(&TokenKind::Eof) {
         // Check for set operator
-        let op_pos = *pos;
-        let operator_opt = match &tokens[*pos].kind {
+        let _op_span = stream.current().span.clone();
+        let operator_opt = match &stream.current().kind {
             TokenKind::Union => {
-                *pos += 1;
-                let quantifier = parse_set_quantifier_opt(tokens, pos).unwrap_or_default();
+                stream.advance();
+                let quantifier = parse_set_quantifier_opt(stream).unwrap_or_default();
                 Some(SetOperator::Union { quantifier })
             }
             TokenKind::Except => {
-                *pos += 1;
-                let quantifier = parse_set_quantifier_opt(tokens, pos).unwrap_or_default();
+                stream.advance();
+                let quantifier = parse_set_quantifier_opt(stream).unwrap_or_default();
                 Some(SetOperator::Except { quantifier })
             }
             TokenKind::Intersect => {
-                *pos += 1;
-                let quantifier = parse_set_quantifier_opt(tokens, pos).unwrap_or_default();
+                stream.advance();
+                let quantifier = parse_set_quantifier_opt(stream).unwrap_or_default();
                 Some(SetOperator::Intersect { quantifier })
             }
             TokenKind::Otherwise => {
-                *pos += 1;
+                stream.advance();
                 Some(SetOperator::Otherwise)
             }
             _ => None,
@@ -295,7 +312,7 @@ fn parse_composite_query(tokens: &[Token], pos: &mut usize) -> ParseResult<Query
         };
 
         // Parse right operand
-        let (right_opt, mut right_diags) = linear::parse_linear_query_as_query(tokens, pos);
+        let (right_opt, mut right_diags) = linear::parse_linear_query_as_query(stream);
         diags.append(&mut right_diags);
 
         let right = match right_opt {
@@ -304,10 +321,7 @@ fn parse_composite_query(tokens: &[Token], pos: &mut usize) -> ParseResult<Query
                 diags.push(
                     Diag::error(format!("Expected query after {:?} operator", operator))
                         .with_primary_label(
-                            tokens
-                                .get(*pos)
-                                .map(|t| t.span.clone())
-                                .unwrap_or(op_pos..op_pos),
+                            stream.current().span.clone(),
                             "expected query here",
                         ),
                 );
@@ -329,20 +343,16 @@ fn parse_composite_query(tokens: &[Token], pos: &mut usize) -> ParseResult<Query
 
 /// Parses optional set quantifier (ALL or DISTINCT).
 /// Returns Some(quantifier) if ALL or DISTINCT keyword is present, None otherwise.
-pub(super) fn parse_set_quantifier_opt(tokens: &[Token], pos: &mut usize) -> Option<SetQuantifier> {
-    if *pos < tokens.len() {
-        match &tokens[*pos].kind {
-            TokenKind::All => {
-                *pos += 1;
-                Some(SetQuantifier::All)
-            }
-            TokenKind::Distinct => {
-                *pos += 1;
-                Some(SetQuantifier::Distinct)
-            }
-            _ => None,
+pub(super) fn parse_set_quantifier_opt(stream: &mut crate::parser::base::TokenStream) -> Option<SetQuantifier> {
+    match &stream.current().kind {
+        TokenKind::All => {
+            stream.advance();
+            Some(SetQuantifier::All)
         }
-    } else {
-        None
+        TokenKind::Distinct => {
+            stream.advance();
+            Some(SetQuantifier::Distinct)
+        }
+        _ => None,
     }
 }
