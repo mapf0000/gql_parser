@@ -15,6 +15,7 @@ fn validate_case(source: &str) -> ValidationOutcome {
     validator.validate(parse_result.ast.as_ref().unwrap())
 }
 
+#[allow(dead_code)]
 fn validate_case_with_config(source: &str, config: ValidationConfig) -> ValidationOutcome {
     let parse_result = parse(source);
     assert!(parse_result.ast.is_some(), "Failed to parse: {}", source);

@@ -46,6 +46,7 @@ pub fn format_diagnostics(diags: &[miette::Report]) -> String {
 }
 
 /// Format Diag diagnostics for display in assertion messages.
+#[allow(dead_code)]
 pub fn format_diag_diagnostics(diags: &[Diag]) -> String {
     diags
         .iter()
@@ -84,6 +85,7 @@ pub fn assert_no_parse_errors(result: &ParseResult, source: &str) {
 /// let outcome = validator.validate(&program);
 /// assert_no_validation_errors(&outcome);
 /// ```
+#[allow(dead_code)]
 pub fn assert_no_validation_errors(outcome: &ValidationOutcome) {
     let errors: Vec<_> = outcome
         .diagnostics
@@ -109,6 +111,7 @@ pub fn assert_no_validation_errors(outcome: &ValidationOutcome) {
 /// let outcome = validator.validate(&program);
 /// assert_has_error_containing(&outcome, "undefined variable");
 /// ```
+#[allow(dead_code)]
 pub fn assert_has_error_containing(outcome: &ValidationOutcome, text: &str) {
     let has_matching_error = outcome.diagnostics.iter().any(|d| {
         d.severity == DiagSeverity::Error && format!("{:?}", d).contains(text)
@@ -132,6 +135,7 @@ pub fn assert_has_error_containing(outcome: &ValidationOutcome, text: &str) {
 /// let outcome = validator.validate(&program);
 /// assert_has_any_error(&outcome);
 /// ```
+#[allow(dead_code)]
 pub fn assert_has_any_error(outcome: &ValidationOutcome) {
     let has_error = outcome
         .diagnostics
@@ -224,6 +228,7 @@ pub fn tokenize_cleanly(source: &str) -> Vec<Token> {
 /// let outcome = parse_and_validate("MATCH (n:Person) RETURN n");
 /// assert_no_validation_errors(&outcome);
 /// ```
+#[allow(dead_code)]
 pub fn parse_and_validate(source: &str) -> ValidationOutcome {
     let parse_result = parse(source);
     let program = parse_result.ast.unwrap_or_else(|| {
@@ -249,6 +254,7 @@ pub fn parse_and_validate(source: &str) -> ValidationOutcome {
 /// let validator = SemanticValidator::new().with_strict_mode(true);
 /// let outcome = parse_and_validate_with("MATCH (n) RETURN n", &validator);
 /// ```
+#[allow(dead_code)]
 pub fn parse_and_validate_with(source: &str, validator: &SemanticValidator) -> ValidationOutcome {
     let parse_result = parse(source);
     let program = parse_result.ast.unwrap_or_else(|| {
@@ -272,6 +278,7 @@ pub fn parse_and_validate_with(source: &str, validator: &SemanticValidator) -> V
 /// ```no_run
 /// parse_and_expect_failure("RETURN undefined_var");
 /// ```
+#[allow(dead_code)]
 pub fn parse_and_expect_failure(source: &str) -> ValidationOutcome {
     let outcome = parse_and_validate(source);
     assert_has_any_error(&outcome);
@@ -289,6 +296,7 @@ pub fn parse_and_expect_failure(source: &str) -> ValidationOutcome {
 /// ```no_run
 /// parse_and_expect_success("MATCH (n:Person) RETURN n");
 /// ```
+#[allow(dead_code)]
 pub fn parse_and_expect_success(source: &str) {
     let outcome = parse_and_validate(source);
     assert_no_validation_errors(&outcome);

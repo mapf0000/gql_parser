@@ -2,7 +2,6 @@ use gql_parser::ast::graph_type::EdgeTypePattern;
 use gql_parser::ast::{
     EdgeReferenceValueType, GraphReferenceValueType, LocalNodeTypeAlias, NodeReferenceValueType,
 };
-use gql_parser::lexer::Lexer;
 use gql_parser::parser::types::{
     parse_edge_reference_value_type, parse_graph_reference_value_type,
     parse_node_reference_value_type,

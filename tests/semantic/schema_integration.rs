@@ -4,14 +4,13 @@ use gql_parser::{
     parse,
     semantic::{
         schema_catalog::{
-            InMemorySchemaSnapshot, GraphRef, SchemaRef,
+            InMemorySchemaSnapshot, GraphRef,
             NodeTypeMeta, PropertyMeta, TypeRef, ConstraintMeta, PropertyConstraint,
             SessionContext, SchemaSnapshot, SchemaSnapshotBuilder,
         },
         metadata_provider::{MockMetadataProvider, MetadataProvider},
         SemanticValidator,
     },
-    ast::types::{ValueType, PredefinedType, CharacterStringType},
 };
 use std::collections::{BTreeMap, HashMap};
 

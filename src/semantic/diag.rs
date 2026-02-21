@@ -88,7 +88,6 @@ impl SemanticDiagKind {
 /// Helper functions for creating common semantic diagnostics.
 ///
 /// These functions return `Diag` directly, avoiding the need for a separate builder layer.
-
 /// Creates an undefined variable diagnostic.
 pub fn undefined_variable(var_name: &str, span: Span) -> Diag {
     Diag::error(format!("Undefined variable '{}'", var_name))

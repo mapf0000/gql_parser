@@ -93,7 +93,7 @@ fn test_union_column_count_mismatch() {
 
     let validator = SemanticValidator::new();
     if let Some(program) = parse_result.ast {
-        let outcome = validator.validate(&program);
+        let _outcome = validator.validate(&program);
         // The validator may or may not catch this at validation time,
         // but we document the expected behavior.
         // For now, we just verify the parse succeeds and validator runs.
@@ -160,7 +160,7 @@ fn test_union_with_expressions() {
 
     let validator = SemanticValidator::new();
     if let Some(program) = parse_result.ast {
-        let outcome = validator.validate(&program);
+        let _outcome = validator.validate(&program);
         // Validator should check type compatibility if type checking is implemented
         // For now, we just verify the structure is valid
     }
@@ -227,7 +227,7 @@ fn test_except_column_count_mismatch() {
 
     let validator = SemanticValidator::new();
     if let Some(program) = parse_result.ast {
-        let outcome = validator.validate(&program);
+        let _outcome = validator.validate(&program);
         // Expected to have column mismatch error if validator implements this check
     }
 }
@@ -369,7 +369,7 @@ fn test_union_except_combination() {
 
     let validator = SemanticValidator::new();
     if let Some(program) = parse_result.ast {
-        let outcome = validator.validate(&program);
+        let _outcome = validator.validate(&program);
         // Validator should handle precedence and associativity correctly
     }
 }
@@ -389,7 +389,7 @@ fn test_union_intersect_combination() {
 
     let validator = SemanticValidator::new();
     if let Some(program) = parse_result.ast {
-        let outcome = validator.validate(&program);
+        let _outcome = validator.validate(&program);
         // Validator should handle precedence correctly
     }
 }
@@ -411,7 +411,7 @@ fn test_parenthesized_set_operations() {
     if parse_result.ast.is_some() {
         let validator = SemanticValidator::new();
         if let Some(program) = parse_result.ast {
-            let outcome = validator.validate(&program);
+            let _outcome = validator.validate(&program);
             // Validator should respect parenthesized precedence
         }
     }
@@ -432,7 +432,7 @@ fn test_except_intersect_combination() {
 
     let validator = SemanticValidator::new();
     if let Some(program) = parse_result.ast {
-        let outcome = validator.validate(&program);
+        let _outcome = validator.validate(&program);
         // Validator should handle precedence correctly
     }
 }
@@ -454,7 +454,7 @@ fn test_all_set_operations_combination() {
 
     let validator = SemanticValidator::new();
     if let Some(program) = parse_result.ast {
-        let outcome = validator.validate(&program);
+        let _outcome = validator.validate(&program);
         // Validator should handle complex precedence and associativity
     }
 }
@@ -500,7 +500,7 @@ fn test_union_with_order_by() {
     if parse_result.ast.is_some() {
         let validator = SemanticValidator::new();
         if let Some(program) = parse_result.ast {
-            let outcome = validator.validate(&program);
+            let _outcome = validator.validate(&program);
             // ORDER BY should be valid if applied to the final result
         }
     }
@@ -521,7 +521,7 @@ fn test_union_with_limit() {
     if parse_result.ast.is_some() {
         let validator = SemanticValidator::new();
         if let Some(program) = parse_result.ast {
-            let outcome = validator.validate(&program);
+            let _outcome = validator.validate(&program);
             // LIMIT should be valid if applied to the final result
         }
     }
@@ -540,7 +540,7 @@ fn test_set_operations_with_aggregation() {
 
     let validator = SemanticValidator::new();
     if let Some(program) = parse_result.ast {
-        let outcome = validator.validate(&program);
+        let _outcome = validator.validate(&program);
         // Both sides return the same column type (aggregate), should be valid
     }
 }
@@ -558,7 +558,7 @@ fn test_set_operations_with_null_values() {
 
     let validator = SemanticValidator::new();
     if let Some(program) = parse_result.ast {
-        let outcome = validator.validate(&program);
+        let _outcome = validator.validate(&program);
         // NULL should be compatible with any type
     }
 }

@@ -4,4 +4,5 @@
 //! and stress testing the parser and validator.
 
 mod edge_cases;
-mod stress;
+#[path = "stress.rs"]
+mod stress_tests;

@@ -485,7 +485,7 @@ fn test_graph_type_with_multiple_constraints() {
     "#;
 
     use gql_parser::parse;
-    use gql_parser::ast::graph_type::{ElementTypeSpecification, GraphTypeConstraint};
+    use gql_parser::ast::graph_type::ElementTypeSpecification;
 
     let result = parse(source);
     assert!(result.diagnostics.is_empty(), "Should parse multiple constraints after property types");

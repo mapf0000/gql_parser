@@ -2004,7 +2004,7 @@ mod tests {
     use super::*;
     use crate::ast::ProcedureReference;
     use crate::ast::query::{
-        LinearQuery, PrimitiveQueryStatement, PrimitiveResultStatement, Query,
+        PrimitiveQueryStatement, PrimitiveResultStatement, Query,
     };
     use crate::lexer::token::TokenKind;
     use crate::lexer::tokenize;

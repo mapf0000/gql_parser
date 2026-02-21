@@ -34,7 +34,7 @@ pub(crate) fn parse_primitive_query_statement(
         return (None, vec![]);
     }
 
-    let result = match &stream.current().kind {
+    match &stream.current().kind {
         TokenKind::Match => {
             let (match_opt, diags) = parse_match_statement(stream);
             (match_opt.map(PrimitiveQueryStatement::Match), diags)
@@ -101,9 +101,7 @@ pub(crate) fn parse_primitive_query_statement(
             )
         }
         _ => (None, vec![]),
-    };
-
-    result
+    }
 }
 
 // ============================================================================

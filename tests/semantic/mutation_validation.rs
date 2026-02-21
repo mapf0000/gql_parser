@@ -15,6 +15,7 @@ fn validate_mutation(source: &str) -> ValidationOutcome {
     validator.validate(parse_result.ast.as_ref().unwrap())
 }
 
+#[allow(dead_code)]
 fn validate_mutation_with_schema(source: &str) -> ValidationOutcome {
     let parse_result = parse(source);
     assert!(parse_result.ast.is_some(), "Failed to parse: {}", source);

@@ -1,9 +1,9 @@
 //! Integration tests for Milestone 4 Callable Catalog functionality.
 
 use gql_parser::semantic::callable::{
-    lookup_builtin_callable, resolve_builtin_signatures, list_builtin_callables,
+    resolve_builtin_signatures,
     CallableKind, CallableSignature, CallableValidator, DefaultCallableValidator,
-    ParameterSignature, Volatility, Nullability,
+    ParameterSignature,
 };
 use gql_parser::semantic::{SemanticValidator, ValidationConfig};
 
@@ -121,7 +121,6 @@ fn test_builtin_function_arity() {
 
 #[test]
 fn test_default_callable_validator_correct_arity() {
-    use gql_parser::ast::Span;
     use gql_parser::semantic::callable::CallSite;
 
     let validator = DefaultCallableValidator::new();
@@ -147,7 +146,6 @@ fn test_default_callable_validator_correct_arity() {
 
 #[test]
 fn test_default_callable_validator_wrong_arity() {
-    use gql_parser::ast::Span;
     use gql_parser::diag::DiagSeverity;
     use gql_parser::semantic::callable::CallSite;
 
@@ -168,7 +166,7 @@ fn test_default_callable_validator_wrong_arity() {
         span: 0..4,
     };
 
-    let diags = validator.validate_call(&call, &[sig.clone()]);
+    let diags = validator.validate_call(&call, std::slice::from_ref(&sig));
     assert_eq!(diags.len(), 1);
     assert_eq!(diags[0].severity, DiagSeverity::Error);
     assert!(diags[0].message.contains("expects"));
@@ -188,7 +186,6 @@ fn test_default_callable_validator_wrong_arity() {
 
 #[test]
 fn test_default_callable_validator_undefined_function() {
-    use gql_parser::ast::Span;
     use gql_parser::diag::DiagSeverity;
     use gql_parser::semantic::callable::CallSite;
 
@@ -210,7 +207,6 @@ fn test_default_callable_validator_undefined_function() {
 
 #[test]
 fn test_default_callable_validator_variadic() {
-    use gql_parser::ast::Span;
     use gql_parser::semantic::callable::CallSite;
 
     let validator = DefaultCallableValidator::new();
@@ -231,7 +227,7 @@ fn test_default_callable_validator_variadic() {
             span: 0..6,
         };
 
-        let diags = validator.validate_call(&call, &[sig.clone()]);
+        let diags = validator.validate_call(&call, std::slice::from_ref(&sig));
         assert!(diags.is_empty(), "Failed for arg_count={}", arg_count);
     }
 }

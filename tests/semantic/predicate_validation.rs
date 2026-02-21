@@ -16,6 +16,7 @@ fn validate_predicate(source: &str) -> ValidationOutcome {
     validator.validate(parse_result.ast.as_ref().unwrap())
 }
 
+#[allow(dead_code)]
 fn validate_predicate_with_config(source: &str, config: ValidationConfig) -> ValidationOutcome {
     let parse_result = parse(source);
     assert!(parse_result.ast.is_some(), "Failed to parse: {}", source);
@@ -83,7 +84,7 @@ fn test_is_null_with_undefined_variable() {
 #[test]
 fn test_is_typed_basic() {
     let source = "LET x = 42 RETURN x IS TYPED INT";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // IS TYPED support depends on implementation
     // Test should at least parse correctly
@@ -93,7 +94,7 @@ fn test_is_typed_basic() {
 #[test]
 fn test_is_typed_string() {
     let source = "MATCH (n:Person) RETURN n.name IS TYPED STRING";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // Should parse correctly
     assert!(parse(source).ast.is_some(), "Failed to parse IS TYPED STRING");
@@ -102,7 +103,7 @@ fn test_is_typed_string() {
 #[test]
 fn test_is_not_typed() {
     let source = "LET x = 42 RETURN x IS NOT TYPED STRING";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // Should parse correctly
     assert!(parse(source).ast.is_some(), "Failed to parse IS NOT TYPED");
@@ -111,7 +112,7 @@ fn test_is_not_typed() {
 #[test]
 fn test_is_typed_with_complex_type() {
     let source = "MATCH (n:Person) RETURN n.tags IS TYPED LIST<STRING>";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // Complex type should parse
     assert!(parse(source).ast.is_some(), "Failed to parse IS TYPED with LIST type");
@@ -120,7 +121,7 @@ fn test_is_typed_with_complex_type() {
 #[test]
 fn test_is_typed_with_property_value() {
     let source = "MATCH (n:Person) RETURN n.age IS TYPED PROPERTY VALUE";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // PROPERTY VALUE is a dynamic type
     assert!(parse(source).ast.is_some(), "Failed to parse IS TYPED PROPERTY VALUE");
@@ -140,7 +141,7 @@ fn test_is_typed_undefined_variable() {
 #[test]
 fn test_is_normalized_basic() {
     let source = "MATCH (n:Person) WHERE n.name IS NORMALIZED RETURN n";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // IS NORMALIZED is for Unicode normalization
     // Should at least parse correctly
@@ -150,7 +151,7 @@ fn test_is_normalized_basic() {
 #[test]
 fn test_is_not_normalized() {
     let source = "MATCH (n:Person) WHERE n.name IS NOT NORMALIZED RETURN n";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     assert!(parse(source).ast.is_some(), "Failed to parse IS NOT NORMALIZED");
 }
@@ -158,7 +159,7 @@ fn test_is_not_normalized() {
 #[test]
 fn test_is_normalized_on_string_literal() {
     let source = "RETURN 'hello' IS NORMALIZED";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     assert!(parse(source).ast.is_some(), "Failed to parse IS NORMALIZED on literal");
 }
@@ -166,7 +167,7 @@ fn test_is_normalized_on_string_literal() {
 #[test]
 fn test_is_normalized_invalid_context() {
     let source = "MATCH (n:Person) WHERE n.age IS NORMALIZED RETURN n";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // IS NORMALIZED should ideally only apply to string types
     // Validation behavior depends on implementation strictness
@@ -234,7 +235,7 @@ fn test_is_directed_multiple_edges() {
 #[test]
 fn test_is_labeled_basic() {
     let source = "MATCH (n) WHERE n IS LABELED :Person RETURN n";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // IS LABELED checks if element has a specific label
     assert!(parse(source).ast.is_some(), "Failed to parse IS LABELED");
@@ -243,7 +244,7 @@ fn test_is_labeled_basic() {
 #[test]
 fn test_is_not_labeled() {
     let source = "MATCH (n) WHERE n IS NOT LABELED :Robot RETURN n";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     assert!(parse(source).ast.is_some(), "Failed to parse IS NOT LABELED");
 }
@@ -251,7 +252,7 @@ fn test_is_not_labeled() {
 #[test]
 fn test_is_labeled_without_specific_label() {
     let source = "MATCH (n) WHERE n IS LABELED RETURN n";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // IS LABELED without specific label checks if element has any label
     assert!(parse(source).ast.is_some(), "Failed to parse IS LABELED without label");
@@ -260,7 +261,7 @@ fn test_is_labeled_without_specific_label() {
 #[test]
 fn test_is_labeled_on_edge() {
     let source = "MATCH (n)-[e]->(m) WHERE e IS LABELED :KNOWS RETURN e";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     assert!(parse(source).ast.is_some(), "Failed to parse IS LABELED on edge");
 }
@@ -268,7 +269,7 @@ fn test_is_labeled_on_edge() {
 #[test]
 fn test_is_labeled_multiple_labels() {
     let source = "MATCH (n) WHERE n IS LABELED :Person AND n IS LABELED :Employee RETURN n";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     assert!(parse(source).ast.is_some(), "Failed to parse multiple IS LABELED");
 }
@@ -287,7 +288,7 @@ fn test_is_labeled_undefined_variable() {
 #[test]
 fn test_is_true_predicate() {
     let source = "MATCH (n:Person) WHERE (n.age > 18) IS TRUE RETURN n";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // IS TRUE checks if expression is exactly TRUE (not UNKNOWN)
     assert!(parse(source).ast.is_some(), "Failed to parse IS TRUE");
@@ -296,7 +297,7 @@ fn test_is_true_predicate() {
 #[test]
 fn test_is_false_predicate() {
     let source = "MATCH (n:Person) WHERE (n.age < 0) IS FALSE RETURN n";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     assert!(parse(source).ast.is_some(), "Failed to parse IS FALSE");
 }
@@ -304,7 +305,7 @@ fn test_is_false_predicate() {
 #[test]
 fn test_is_unknown_predicate() {
     let source = "MATCH (n:Person) WHERE (n.age > 18) IS UNKNOWN RETURN n";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     assert!(parse(source).ast.is_some(), "Failed to parse IS UNKNOWN");
 }
@@ -312,7 +313,7 @@ fn test_is_unknown_predicate() {
 #[test]
 fn test_is_not_true_predicate() {
     let source = "MATCH (n:Person) WHERE (n.active = TRUE) IS NOT TRUE RETURN n";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     assert!(parse(source).ast.is_some(), "Failed to parse IS NOT TRUE");
 }
@@ -320,7 +321,7 @@ fn test_is_not_true_predicate() {
 #[test]
 fn test_is_unknown_with_null_check() {
     let source = "MATCH (n:Person) WHERE (n.name IS NULL) IS UNKNOWN RETURN n";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // This is a bit contrived but should be valid syntax
     assert!(parse(source).ast.is_some(), "Failed to parse nested truth value check");
@@ -331,7 +332,7 @@ fn test_is_unknown_with_null_check() {
 #[test]
 fn test_is_source_of_basic() {
     let source = "MATCH (n:Person)-[e:KNOWS]->(m:Person) WHERE n IS SOURCE OF e RETURN n";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // IS SOURCE OF checks if node is the source of an edge
     assert!(parse(source).ast.is_some(), "Failed to parse IS SOURCE OF");
@@ -340,7 +341,7 @@ fn test_is_source_of_basic() {
 #[test]
 fn test_is_destination_of_basic() {
     let source = "MATCH (n:Person)-[e:KNOWS]->(m:Person) WHERE m IS DESTINATION OF e RETURN m";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     assert!(parse(source).ast.is_some(), "Failed to parse IS DESTINATION OF");
 }
@@ -348,7 +349,7 @@ fn test_is_destination_of_basic() {
 #[test]
 fn test_is_not_source_of() {
     let source = "MATCH (n:Person)-[e:KNOWS]->(m:Person) WHERE m IS NOT SOURCE OF e RETURN m";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     assert!(parse(source).ast.is_some(), "Failed to parse IS NOT SOURCE OF");
 }
@@ -356,7 +357,7 @@ fn test_is_not_source_of() {
 #[test]
 fn test_is_not_destination_of() {
     let source = "MATCH (n:Person)-[e:KNOWS]->(m:Person) WHERE n IS NOT DESTINATION OF e RETURN n";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     assert!(parse(source).ast.is_some(), "Failed to parse IS NOT DESTINATION OF");
 }
@@ -387,7 +388,7 @@ fn test_is_source_of_wrong_type() {
 #[test]
 fn test_all_different_basic() {
     let source = "MATCH (a:Person), (b:Person), (c:Person) WHERE ALL_DIFFERENT(a, b, c) RETURN a, b, c";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // ALL_DIFFERENT checks all arguments are distinct elements
     assert!(parse(source).ast.is_some(), "Failed to parse ALL_DIFFERENT");
@@ -396,7 +397,7 @@ fn test_all_different_basic() {
 #[test]
 fn test_all_different_two_args() {
     let source = "MATCH (a:Person), (b:Person) WHERE ALL_DIFFERENT(a, b) RETURN a, b";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     assert!(parse(source).ast.is_some(), "Failed to parse ALL_DIFFERENT with 2 args");
 }
@@ -404,7 +405,7 @@ fn test_all_different_two_args() {
 #[test]
 fn test_all_different_multiple_paths() {
     let source = "MATCH (a)-[e1]->(b)-[e2]->(c) WHERE ALL_DIFFERENT(e1, e2) RETURN a, b, c";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // ALL_DIFFERENT on edges
     assert!(parse(source).ast.is_some(), "Failed to parse ALL_DIFFERENT on edges");
@@ -413,7 +414,7 @@ fn test_all_different_multiple_paths() {
 #[test]
 fn test_all_different_single_arg() {
     let source = "MATCH (a:Person) WHERE ALL_DIFFERENT(a) RETURN a";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // Single argument is trivially all different
     // Might be considered degenerate but should parse
@@ -434,7 +435,7 @@ fn test_all_different_undefined_variable() {
 #[test]
 fn test_same_predicate_basic() {
     let source = "MATCH (a:Person), (b:Person) WHERE SAME(a, b) RETURN a";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // SAME checks if two elements are the same element
     assert!(parse(source).ast.is_some(), "Failed to parse SAME");
@@ -443,7 +444,7 @@ fn test_same_predicate_basic() {
 #[test]
 fn test_same_predicate_edges() {
     let source = "MATCH (a)-[e1]->(b), (c)-[e2]->(d) WHERE SAME(e1, e2) RETURN a, b";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     assert!(parse(source).ast.is_some(), "Failed to parse SAME on edges");
 }
@@ -451,7 +452,7 @@ fn test_same_predicate_edges() {
 #[test]
 fn test_same_predicate_in_filter() {
     let source = "MATCH (a:Person)-[e1]->(b:Person)-[e2]->(c:Person) WHERE NOT SAME(e1, e2) RETURN a, b, c";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // Ensure edges are different
     assert!(parse(source).ast.is_some(), "Failed to parse NOT SAME");
@@ -469,7 +470,7 @@ fn test_same_predicate_undefined_variable() {
 #[test]
 fn test_same_predicate_complex_pattern() {
     let source = "MATCH (a:Person), (b:Person), (c:Person) WHERE SAME(a, b) OR SAME(b, c) RETURN a, b, c";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     assert!(parse(source).ast.is_some(), "Failed to parse complex SAME pattern");
 }
@@ -532,7 +533,7 @@ fn test_property_exists_computed_property() {
 #[test]
 fn test_property_exists_nested_context() {
     let source = "MATCH (n:Person) WHERE EXISTS { (n)-[:KNOWS]->(m:Person) WHERE PROPERTY_EXISTS(m, verified) } RETURN n";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // PROPERTY_EXISTS inside EXISTS subquery
     assert!(parse(source).ast.is_some(), "Failed to parse PROPERTY_EXISTS in nested context");
@@ -550,7 +551,7 @@ fn test_multiple_predicate_combinations() {
           AND PROPERTY_EXISTS(m, 'salary')
         RETURN n, e, m
     "#;
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // Combination of different predicate types
     assert!(parse(source).ast.is_some(), "Failed to parse multiple predicates");
@@ -567,7 +568,7 @@ fn test_predicates_in_case_expression() {
 #[test]
 fn test_predicates_in_aggregation_context() {
     let source = "MATCH (n:Person) RETURN COUNT(n) FILTER (WHERE n.name IS NOT NULL)";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // Predicate in FILTER clause of aggregation
     assert!(parse(source).ast.is_some(), "Failed to parse predicate in FILTER");
@@ -583,7 +584,7 @@ fn test_predicates_with_subquery() {
         }
         RETURN n
     "#;
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // Predicates inside EXISTS subquery
     assert!(parse(source).ast.is_some(), "Failed to parse predicates in subquery");
@@ -603,7 +604,7 @@ fn test_null_literal_is_null() {
 #[test]
 fn test_nested_predicates() {
     let source = "MATCH (n:Person) WHERE ((n.age IS NOT NULL) IS TRUE) RETURN n";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // Nested predicate structure
     assert!(parse(source).ast.is_some(), "Failed to parse nested predicates");
@@ -621,7 +622,7 @@ fn test_predicate_without_match() {
 #[test]
 fn test_predicate_in_set_clause() {
     let source = "MATCH (n:Person) WHERE n.age > 18 SET n.is_adult = (n.age IS NOT NULL AND n.age >= 18) RETURN n";
-    let outcome = validate_predicate(source);
+    let _outcome = validate_predicate(source);
 
     // Predicate in SET expression
     assert!(parse(source).ast.is_some(), "Failed to parse predicate in SET clause");

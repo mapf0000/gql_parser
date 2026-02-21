@@ -130,7 +130,7 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
 
             if let Err(e) = validation_result {
                 self.diagnostics.push(
-                    crate::diag::Diag::new(crate::diag::DiagSeverity::Error, format!("{}", e))
+                    crate::diag::Diag::new(crate::diag::DiagSeverity::Error, e.to_string())
                         .with_label(crate::diag::DiagLabel::primary(
                             call.span.clone(),
                             "invalid call",
@@ -246,7 +246,7 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
 
         if let Err(e) = validation_result {
             self.diagnostics.push(
-                crate::diag::Diag::new(crate::diag::DiagSeverity::Error, format!("{}", e))
+                crate::diag::Diag::new(crate::diag::DiagSeverity::Error, e.to_string())
                     .with_label(crate::diag::DiagLabel::primary(
                         call.span.clone(),
                         "invalid call",
@@ -293,7 +293,7 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
                         self.diagnostics.push(
                             crate::diag::Diag::new(
                                 crate::diag::DiagSeverity::Error,
-                                format!("{}", e),
+                                e.to_string(),
                             )
                             .with_label(
                                 crate::diag::DiagLabel::primary(span.clone(), "invalid aggregate"),
@@ -346,7 +346,7 @@ impl<'v, 'm> CallableValidationVisitor<'v, 'm> {
                         self.diagnostics.push(
                             crate::diag::Diag::new(
                                 crate::diag::DiagSeverity::Error,
-                                format!("{}", e),
+                                e.to_string(),
                             )
                             .with_label(
                                 crate::diag::DiagLabel::primary(

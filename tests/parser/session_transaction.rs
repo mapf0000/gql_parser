@@ -7,7 +7,6 @@
 //! - Transaction characteristics
 
 use gql_parser::parse;
-use crate::common::*;
 
 // ===== Session Set Parameters =====
 

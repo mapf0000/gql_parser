@@ -4,7 +4,7 @@ use gql_parser::ast::Statement;
 use gql_parser::ast::expression::{Expression, Literal};
 use gql_parser::ast::query::{
     AbbreviatedEdgePattern, EdgeDirection, EdgePattern, ElementPattern, GraphPattern,
-    GraphPatternQuantifier, LabelExpression, LinearQuery, MatchMode, MatchStatement,
+    GraphPatternQuantifier, LabelExpression, MatchMode, MatchStatement,
     OptionalOperand, PathMode, PathPatternExpression, PathPatternPrefix, PathPrimary, PathSearch,
     PrimitiveQueryStatement, PrimitiveResultStatement, Query, SelectFromClause, ShortestPathSearch,
     SimplifiedPathPatternExpression,

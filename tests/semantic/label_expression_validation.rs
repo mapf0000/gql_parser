@@ -9,7 +9,6 @@
 //!
 //! Reference: VAL_TESTS.md Section 2 - Label Expression Validation Tests (HIGH PRIORITY)
 
-use gql_parser::diag::DiagSeverity;
 use gql_parser::parse;
 use gql_parser::semantic::validator::SemanticValidator;
 
@@ -656,8 +655,7 @@ fn test_label_empty_disjunction() {
     let parse_result = parse(source);
 
     // Parser may reject this before semantic validation
-    if parse_result.ast.is_some() {
-        let program = parse_result.ast.unwrap();
+    if let Some(program) = parse_result.ast {
         let validator = SemanticValidator::new();
         let outcome = validator.validate(&program);
 

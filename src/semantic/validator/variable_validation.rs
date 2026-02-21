@@ -340,7 +340,7 @@ fn validate_primitive_data_modifying_statement(
     diagnostics: &mut Vec<Diag>,
 ) {
     use crate::ast::mutation::PrimitiveDataModifyingStatement;
-    use crate::semantic::diag::{aggregation_error, undefined_variable};
+    use crate::semantic::diag::undefined_variable;
 
     let scope_to_check = statement_scope_id(symbol_table, scope_metadata, statement_id);
 
@@ -599,7 +599,7 @@ fn validate_primitive_statement_variables(
 
             // ISO GQL: Check for illegal aggregation in WHERE clause
             if expression_contains_aggregation(&filter.condition) {
-                use crate::semantic::diag::{aggregation_error, undefined_variable};
+                use crate::semantic::diag::aggregation_error;
                 let diag = aggregation_error(
                     "Aggregation functions not allowed in WHERE clause (use HAVING instead)",
                     filter.condition.span().clone(),
@@ -837,9 +837,7 @@ fn validate_primitive_statement_variables(
                                 .lookup_from(scope_to_check, var.name.as_ref())
                                 .is_none()
                             {
-                                use crate::semantic::diag::{
-                                    aggregation_error, undefined_variable,
-                                };
+                                use crate::semantic::diag::undefined_variable;
                                 let diag = undefined_variable(&var.name, var.span.clone());
                                 diagnostics.push(diag);
                             }
@@ -948,7 +946,7 @@ fn validate_return_aggregation(
     diagnostics: &mut Vec<Diag>,
 ) {
     use crate::ast::query::ReturnItemList;
-    use crate::semantic::diag::{aggregation_error, undefined_variable};
+    use crate::semantic::diag::aggregation_error;
 
     // Check if mixing aggregated and non-aggregated expressions
     let (has_aggregation, non_aggregated_expressions) = match &return_stmt.items {
@@ -997,7 +995,7 @@ fn validate_expression_variables(
     diagnostics: &mut Vec<Diag>,
 ) {
     use crate::ast::expression::Expression;
-    use crate::semantic::diag::{aggregation_error, undefined_variable};
+    use crate::semantic::diag::undefined_variable;
 
     match expression {
         Expression::VariableReference(var_name, span) => {
@@ -1420,7 +1418,7 @@ fn validate_expression_variables(
 /// Validates variable references in an INSERT statement.
 /// This includes:
 /// - Property value expressions in node/edge patterns (must reference existing variables)
-/// Note: Node variables themselves can be new or reference existing nodes (implicit creation allowed)
+///   Note: Node variables themselves can be new or reference existing nodes (implicit creation allowed)
 fn validate_insert_statement(
     pattern: &crate::ast::mutation::InsertGraphPattern,
     symbol_table: &SymbolTable,
@@ -1511,7 +1509,7 @@ fn check_where_clause_aggregation(
     diagnostics: &mut Vec<Diag>,
 ) {
     if expression_contains_aggregation(where_expr) {
-        use crate::semantic::diag::{aggregation_error, undefined_variable};
+        use crate::semantic::diag::aggregation_error;
         let diag = aggregation_error(
             "Aggregation functions not allowed in WHERE clause (use HAVING instead)",
             where_expr.span().clone(),
@@ -1528,7 +1526,7 @@ fn check_nested_aggregation(
     diagnostics: &mut Vec<Diag>,
 ) {
     use crate::ast::expression::{AggregateFunction, Expression};
-    use crate::semantic::diag::{aggregation_error, undefined_variable};
+    use crate::semantic::diag::aggregation_error;
 
     match expr {
         Expression::AggregateFunction(agg_func) => {
@@ -1679,7 +1677,7 @@ fn validate_having_clause(
     group_by: &Option<crate::ast::query::GroupByClause>,
     diagnostics: &mut Vec<Diag>,
 ) {
-    use crate::semantic::diag::{aggregation_error, undefined_variable};
+    use crate::semantic::diag::aggregation_error;
 
     // Collect non-aggregated expressions in HAVING
     let non_agg_exprs = collect_non_aggregated_expressions(condition);

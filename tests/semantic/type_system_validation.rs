@@ -215,7 +215,7 @@ fn test_duration_between_function() {
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
-        let errors: Vec<_> = outcome.diagnostics.iter()
+        let _errors: Vec<_> = outcome.diagnostics.iter()
             .filter(|d| d.severity == DiagSeverity::Error && d.message.contains("DURATION_BETWEEN"))
             .collect();
         // Function may or may not be recognized; just ensure no parse errors
@@ -452,7 +452,7 @@ fn test_upper_function() {
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
-        let errors: Vec<_> = outcome.diagnostics.iter()
+        let _errors: Vec<_> = outcome.diagnostics.iter()
             .filter(|d| d.severity == DiagSeverity::Error && d.message.contains("UPPER"))
             .collect();
         // UPPER function may or may not be in catalog
@@ -471,7 +471,7 @@ fn test_lower_function() {
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
-        let errors: Vec<_> = outcome.diagnostics.iter()
+        let _errors: Vec<_> = outcome.diagnostics.iter()
             .filter(|d| d.severity == DiagSeverity::Error && d.message.contains("LOWER"))
             .collect();
         // LOWER function may or may not be in catalog
@@ -490,7 +490,7 @@ fn test_trim_function() {
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
-        let errors: Vec<_> = outcome.diagnostics.iter()
+        let _errors: Vec<_> = outcome.diagnostics.iter()
             .filter(|d| d.severity == DiagSeverity::Error && d.message.contains("TRIM"))
             .collect();
         // TRIM function may or may not be in catalog
@@ -509,7 +509,7 @@ fn test_char_length_function() {
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
-        let errors: Vec<_> = outcome.diagnostics.iter()
+        let _errors: Vec<_> = outcome.diagnostics.iter()
             .filter(|d| d.severity == DiagSeverity::Error && d.message.contains("CHAR_LENGTH"))
             .collect();
         // Function may or may not be in catalog
@@ -646,7 +646,7 @@ fn test_cardinality_function() {
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
-        let errors: Vec<_> = outcome.diagnostics.iter()
+        let _errors: Vec<_> = outcome.diagnostics.iter()
             .filter(|d| d.severity == DiagSeverity::Error && d.message.contains("CARDINALITY"))
             .collect();
         // Function may or may not be in catalog
@@ -665,7 +665,7 @@ fn test_size_function() {
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
-        let errors: Vec<_> = outcome.diagnostics.iter()
+        let _errors: Vec<_> = outcome.diagnostics.iter()
             .filter(|d| d.severity == DiagSeverity::Error && d.message.contains("SIZE"))
             .collect();
         // Function may or may not be in catalog
@@ -685,7 +685,7 @@ fn test_list_element_access() {
 
         if let Some(program) = parse_result.ast {
             let outcome = validator.validate(&program);
-            let errors: Vec<_> = outcome.diagnostics.iter()
+            let _errors: Vec<_> = outcome.diagnostics.iter()
                 .filter(|d| d.severity == DiagSeverity::Error)
                 .collect();
             // Element access validation depends on implementation
@@ -766,7 +766,7 @@ fn test_record_field_access() {
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
-        let errors: Vec<_> = outcome.diagnostics.iter()
+        let _errors: Vec<_> = outcome.diagnostics.iter()
             .filter(|d| d.severity == DiagSeverity::Error)
             .collect();
         // Field access validation depends on type inference
@@ -809,7 +809,7 @@ fn test_cast_string_to_int() {
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
-        let errors: Vec<_> = outcome.diagnostics.iter()
+        let _errors: Vec<_> = outcome.diagnostics.iter()
             .filter(|d| d.severity == DiagSeverity::Error)
             .collect();
         // CAST validation depends on implementation
@@ -828,7 +828,7 @@ fn test_cast_int_to_float() {
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
-        let errors: Vec<_> = outcome.diagnostics.iter()
+        let _errors: Vec<_> = outcome.diagnostics.iter()
             .filter(|d| d.severity == DiagSeverity::Error)
             .collect();
         // Numeric casts should generally be valid
@@ -847,7 +847,7 @@ fn test_cast_float_to_int() {
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
-        let errors: Vec<_> = outcome.diagnostics.iter()
+        let _errors: Vec<_> = outcome.diagnostics.iter()
             .filter(|d| d.severity == DiagSeverity::Error)
             .collect();
         // Numeric casts should generally be valid
@@ -866,7 +866,7 @@ fn test_cast_int_to_string() {
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
-        let errors: Vec<_> = outcome.diagnostics.iter()
+        let _errors: Vec<_> = outcome.diagnostics.iter()
             .filter(|d| d.severity == DiagSeverity::Error)
             .collect();
         // Most casts to string should be valid
@@ -885,7 +885,7 @@ fn test_cast_null_value() {
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
-        let errors: Vec<_> = outcome.diagnostics.iter()
+        let _errors: Vec<_> = outcome.diagnostics.iter()
             .filter(|d| d.severity == DiagSeverity::Error)
             .collect();
         // Casting NULL should be valid
@@ -904,7 +904,7 @@ fn test_cast_between_numeric_types() {
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
-        let errors: Vec<_> = outcome.diagnostics.iter()
+        let _errors: Vec<_> = outcome.diagnostics.iter()
             .filter(|d| d.severity == DiagSeverity::Error)
             .collect();
         // Numeric type casts should be valid
@@ -927,7 +927,7 @@ fn test_is_typed_predicate() {
 
     if let Some(program) = parse_result.ast {
         let outcome = validator.validate(&program);
-        let errors: Vec<_> = outcome.diagnostics.iter()
+        let _errors: Vec<_> = outcome.diagnostics.iter()
             .filter(|d| d.severity == DiagSeverity::Error)
             .collect();
         // IS TYPED predicate may or may not be supported
