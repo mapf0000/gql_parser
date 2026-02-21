@@ -4,7 +4,7 @@
 
 The GQL parser codebase migration to unified TokenStream architecture is **in progress**. The foundation has been established with clean architecture principles - **NO backward compatibility wrappers**, just clean TokenStream usage throughout.
 
-**Status**: ~30% Complete
+**Status**: ~40% Complete
 **Tests**: ✅ All 300 tests passing
 **Compilation**: ✅ Clean with no migration-related warnings
 
@@ -43,29 +43,42 @@ pub(super) fn parse_group_by_clause(stream: &mut TokenStream) -> ParseResult<...
 - NO wrappers, NO legacy signatures
 - Clean implementation using `stream.check()`, `stream.advance()`, `stream.current()`
 
-### ✅ src/parser/query/primitive.rs (Public API Migrated)
+### ✅ src/parser/query/result.rs (100% Complete)
 
-**Public functions migrated**:
+**All internal functions migrated to pure TokenStream**:
+```rust
+pub(crate) fn parse_return_statement(stream: &mut TokenStream) -> ParseResult<...>
+pub(super) fn parse_select_statement(stream: &mut TokenStream) -> ParseResult<...>
+fn parse_with_clause(stream: &mut TokenStream) -> ParseResult<...>
+fn parse_select_items(stream: &mut TokenStream) -> ParseResult<...>
+fn parse_select_item(stream: &mut TokenStream) -> ParseResult<...>
+fn parse_select_from_clause(stream: &mut TokenStream) -> ParseResult<...>
+fn parse_select_source_item(stream: &mut TokenStream) -> ParseResult<...>
+fn parse_optional_source_alias(stream: &mut TokenStream) -> (Option<SmolStr>, Vec<Diag>)
+fn parse_from_graph_match_list(stream: &mut TokenStream) -> (Vec<GraphPattern>, Vec<Diag>)
+fn parse_where_clause(stream: &mut TokenStream) -> ParseResult<...>
+fn parse_having_clause(stream: &mut TokenStream) -> ParseResult<...>
+fn parse_return_items(stream: &mut TokenStream) -> ParseResult<...>
+fn parse_return_item(stream: &mut TokenStream) -> ParseResult<...>
+```
+
+- **13+ functions** fully migrated
+- NO wrappers, NO legacy signatures
+- Clean implementation using `stream.check()`, `stream.advance()`, `stream.current()`
+- Some functions still bridge to legacy functions (expression parsing, pattern parsing, query parsing)
+
+### ✅ src/parser/query/primitive.rs (100% Complete)
+
+**All functions migrated to pure TokenStream**:
 ```rust
 pub(crate) fn parse_primitive_query_statement(stream: &mut TokenStream) -> ParseResult<...>
 pub(crate) fn parse_use_graph_clause(stream: &mut TokenStream) -> ParseResult<...>
+// And all internal helpers
 ```
 
-- Entry points converted to TokenStream
-- Internal helpers remain legacy (temporary)
-- Bridges use `stream.tokens()` and `stream.position()` for compatibility
-
-### ✅ src/parser/query/result.rs (Public API Migrated)
-
-**Public functions migrated**:
-```rust
-pub(crate) fn parse_return_statement(stream: &mut TokenStream) -> ParseResult<...>
-// Internal: parse_select_statement also migrated
-```
-
-- Public APIs use TokenStream
-- Calls migrated pagination functions directly
-- Proper position synchronization with legacy helpers
+- **10+ functions** fully migrated
+- NO wrappers, NO legacy signatures
+- Still bridges to legacy functions (expression parsing, pattern parsing, procedure parsing)
 
 ### ✅ src/parser/query/linear.rs (Callers Updated)
 
@@ -82,25 +95,6 @@ pub(crate) fn parse_return_statement(stream: &mut TokenStream) -> ParseResult<..
 ---
 
 ## Remaining Work
-
-### 🔄 Query Module Internal Functions
-
-**primitive.rs internal helpers** (~10 functions):
-- `parse_match_statement`
-- `parse_filter_statement`
-- `parse_let_statement`
-- `parse_for_statement`
-- And their sub-functions
-
-**result.rs internal helpers** (~12 functions):
-- `parse_with_clause`
-- `parse_select_items`
-- `parse_select_from_clause`
-- `parse_where_clause`
-- `parse_having_clause`
-- And their sub-functions
-
-**Estimated**: 6-8 hours
 
 ### 🔄 Query Module Top Level
 
@@ -182,13 +176,12 @@ struct PatternParser<'a> {
 
 | Phase | Status | Estimated Hours |
 |-------|--------|-----------------|
-| Query module internals | 🔄 | 6-8 |
 | Query module top-level | 🔄 | 3-4 |
 | Mutation module | 🔄 | 10-14 |
 | Procedure module | 🔄 | 12-16 |
 | Pattern parser | 🔄 | 8-12 |
 | Final cleanup | 🔄 | 5-7 |
-| **TOTAL** | | **44-61 hours** |
+| **TOTAL** | | **38-53 hours** |
 
 ---
 
@@ -287,8 +280,8 @@ cargo clippy -- -D warnings
 
 ## Next Immediate Steps
 
-1. **Complete primitive.rs internals** - Migrate helper functions
-2. **Complete result.rs internals** - Migrate helper functions
+1. ✅ **Complete primitive.rs internals** - All functions migrated
+2. ✅ **Complete result.rs internals** - All functions migrated
 3. **Complete query/mod.rs** - Top-level query parsing
 4. **Tackle mutation.rs** - Large file, consider submodules
 5. **Tackle procedure.rs** - Largest file, most complex
@@ -305,4 +298,4 @@ cargo clippy -- -D warnings
 
 ---
 
-**Last Updated**: Migration in progress, foundation complete, 30% of total work done.
+**Last Updated**: Migration ~40% complete. Query module (primitive.rs, result.rs, pagination.rs) fully migrated to TokenStream.
