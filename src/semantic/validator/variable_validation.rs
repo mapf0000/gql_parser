@@ -136,19 +136,8 @@ fn validate_mutation_variables(
     statement_id: usize,
     diagnostics: &mut Vec<Diag>,
 ) {
-    use crate::ast::mutation::LinearDataModifyingStatement;
-
-    let (statements, result_statement) = match mutation {
-        LinearDataModifyingStatement::Focused(focused) => {
-            (&focused.statements, &focused.primitive_result_statement)
-        }
-        LinearDataModifyingStatement::Ambient(ambient) => {
-            (&ambient.statements, &ambient.primitive_result_statement)
-        }
-    };
-
     // Validate all simple data-accessing statements (query and mutation statements)
-    for stmt in statements {
+    for stmt in &mutation.statements {
         validate_simple_data_accessing_statement(
             validator,
             stmt,
@@ -160,7 +149,7 @@ fn validate_mutation_variables(
     }
 
     // Validate RETURN statement if present
-    if let Some(result_stmt) = result_statement {
+    if let Some(result_stmt) = &mutation.primitive_result_statement {
         validate_result_statement_variables(
             validator,
             result_stmt,
@@ -174,7 +163,7 @@ fn validate_mutation_variables(
 
 /// Validates variable references in a simple data-accessing statement.
 fn validate_simple_data_accessing_statement(
-    validator: &super::SemanticValidator,
+    _validator: &super::SemanticValidator,
     statement: &crate::ast::mutation::SimpleDataAccessingStatement,
     symbol_table: &SymbolTable,
     scope_metadata: &super::ScopeMetadata,
@@ -490,23 +479,8 @@ fn validate_linear_query_variables(
     next_statement_id: &mut usize,
     diagnostics: &mut Vec<Diag>,
 ) {
-    use crate::ast::query::{AmbientLinearQuery, FocusedLinearQuery};
-
-    let (primitive_statements, result_statement) = match linear_query {
-        crate::ast::query::LinearQuery::Focused(FocusedLinearQuery {
-            primitive_statements,
-            result_statement,
-            ..
-        }) => (primitive_statements, result_statement),
-        crate::ast::query::LinearQuery::Ambient(AmbientLinearQuery {
-            primitive_statements,
-            result_statement,
-            ..
-        }) => (primitive_statements, result_statement),
-    };
-
     // Validate all primitive statements
-    for stmt in primitive_statements {
+    for stmt in &linear_query.primitive_statements {
         validate_primitive_statement_variables(
             validator,
             stmt,
@@ -519,7 +493,7 @@ fn validate_linear_query_variables(
     }
 
     // Validate RETURN statement variables
-    if let Some(result_stmt) = result_statement {
+    if let Some(result_stmt) = &linear_query.result_statement {
         validate_result_statement_variables(
             validator,
             result_stmt.as_ref(),

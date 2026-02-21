@@ -49,10 +49,7 @@ fn check_query_types(query: &Query, diagnostics: &mut Vec<Diag>) {
 
 /// Checks types in a linear query.
 fn check_linear_query_types(linear_query: &LinearQuery, diagnostics: &mut Vec<Diag>) {
-    let primitive_statements = match linear_query {
-        LinearQuery::Focused(focused) => &focused.primitive_statements,
-        LinearQuery::Ambient(ambient) => &ambient.primitive_statements,
-    };
+    let primitive_statements = &linear_query.primitive_statements;
 
     // Check types in each statement
     for statement in primitive_statements {
@@ -355,13 +352,10 @@ fn check_mutation_types(
     diagnostics: &mut Vec<Diag>,
 ) {
     use crate::ast::mutation::{
-        LinearDataModifyingStatement, SimpleDataAccessingStatement, SimpleDataModifyingStatement,
+        SimpleDataAccessingStatement, SimpleDataModifyingStatement,
     };
 
-    let statements = match mutation {
-        LinearDataModifyingStatement::Focused(focused) => &focused.statements,
-        LinearDataModifyingStatement::Ambient(ambient) => &ambient.statements,
-    };
+    let statements = &mutation.statements;
 
     for statement in statements {
         match statement {

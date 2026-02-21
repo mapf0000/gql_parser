@@ -416,14 +416,16 @@ mod tests {
             panic!("expected query statement");
         };
 
-        let crate::ast::Query::Linear(crate::ast::LinearQuery::Ambient(ambient)) =
-            &query_statement.query
-        else {
-            panic!("expected ambient query");
+        let crate::ast::Query::Linear(linear_query) = &query_statement.query else {
+            panic!("expected linear query");
         };
 
+        if linear_query.use_graph.is_some() {
+            panic!("expected ambient query");
+        }
+
         let crate::ast::PrimitiveQueryStatement::Match(match_statement) =
-            &ambient.primitive_statements[0]
+            &linear_query.primitive_statements[0]
         else {
             panic!("expected MATCH statement");
         };

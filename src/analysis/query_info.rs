@@ -142,38 +142,27 @@ impl QueryInfoAnalyzer {
     fn analyze_linear_query(&mut self, query: &LinearQuery, pipeline_id: usize) {
         let mut position = 0;
 
-        match query {
-            LinearQuery::Focused(focused) => {
-                let metadata = ExpressionMetadata::from_expressions([&focused.use_graph.graph]);
-                self.push_clause(
-                    pipeline_id,
-                    &mut position,
-                    ClauseKind::UseGraph,
-                    focused.use_graph.span.clone(),
-                    BTreeSet::new(),
-                    metadata.uses,
-                    metadata.property_references,
-                    metadata.contains_aggregate,
-                    0,
-                );
+        if let Some(use_graph) = &query.use_graph {
+            let metadata = ExpressionMetadata::from_expressions([&use_graph.graph]);
+            self.push_clause(
+                pipeline_id,
+                &mut position,
+                ClauseKind::UseGraph,
+                use_graph.span.clone(),
+                BTreeSet::new(),
+                metadata.uses,
+                metadata.property_references,
+                metadata.contains_aggregate,
+                0,
+            );
+        }
 
-                for primitive in &focused.primitive_statements {
-                    self.analyze_primitive_clause(primitive, pipeline_id, &mut position);
-                }
+        for primitive in &query.primitive_statements {
+            self.analyze_primitive_clause(primitive, pipeline_id, &mut position);
+        }
 
-                if let Some(result) = &focused.result_statement {
-                    self.analyze_result_clause(result, pipeline_id, &mut position);
-                }
-            }
-            LinearQuery::Ambient(ambient) => {
-                for primitive in &ambient.primitive_statements {
-                    self.analyze_primitive_clause(primitive, pipeline_id, &mut position);
-                }
-
-                if let Some(result) = &ambient.result_statement {
-                    self.analyze_result_clause(result, pipeline_id, &mut position);
-                }
-            }
+        if let Some(result) = &query.result_statement {
+            self.analyze_result_clause(result, pipeline_id, &mut position);
         }
     }
 

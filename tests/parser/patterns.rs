@@ -15,7 +15,7 @@ use gql_parser::parse;
 use gql_parser::parser::patterns::{parse_graph_pattern, parse_graph_pattern_binding_table};
 use crate::common::*;
 
-fn parse_ambient_query(source: &str) -> gql_parser::ast::query::AmbientLinearQuery {
+fn parse_ambient_query(source: &str) -> gql_parser::ast::query::LinearQuery {
     let result = parse(source);
     assert!(
         result.diagnostics.is_empty(),
@@ -29,10 +29,11 @@ fn parse_ambient_query(source: &str) -> gql_parser::ast::query::AmbientLinearQue
     let Statement::Query(stmt) = &program.statements[0] else {
         panic!("expected query statement");
     };
-    let Query::Linear(LinearQuery::Ambient(query)) = &stmt.query else {
-        panic!("expected ambient linear query");
+    let Query::Linear(query) = &stmt.query else {
+        panic!("expected linear query");
     };
 
+    assert!(query.is_ambient(), "expected ambient query");
     query.clone()
 }
 
@@ -612,10 +613,14 @@ fn parse_select_from_match_list_contains_patterns() {
     let Statement::Query(stmt) = &program.statements[0] else {
         panic!("expected query statement");
     };
-    let Query::Linear(LinearQuery::Ambient(query)) = &stmt.query else {
-        panic!("expected ambient linear query");
+    let Query::Linear(linear_query) = &stmt.query else {
+        panic!("expected linear query");
     };
-    let Some(PrimitiveQueryStatement::Select(select)) = query.primitive_statements.first() else {
+    if linear_query.use_graph.is_some() {
+        panic!("expected ambient linear query");
+    }
+    let Some(PrimitiveQueryStatement::Select(select)) = linear_query.primitive_statements.first()
+    else {
         panic!("expected SELECT primitive statement");
     };
     let Some(SelectFromClause::GraphMatchList { matches }) = &select.from_clause else {

@@ -65,10 +65,7 @@ fn validate_linear_query_context(
     linear_query: &LinearQuery,
     diagnostics: &mut Vec<Diag>,
 ) {
-    let primitive_statements = match linear_query {
-        LinearQuery::Focused(focused) => &focused.primitive_statements,
-        LinearQuery::Ambient(ambient) => &ambient.primitive_statements,
-    };
+    let primitive_statements = &linear_query.primitive_statements;
 
     for statement in primitive_statements {
         match statement {

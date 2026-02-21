@@ -184,10 +184,7 @@ fn analyze_linear_query(
     }
     scope_metadata.statement_scopes[statement_id] = statement_scope_id;
 
-    let primitive_statements = match linear_query {
-        LinearQuery::Focused(focused) => &focused.primitive_statements,
-        LinearQuery::Ambient(ambient) => &ambient.primitive_statements,
-    };
+    let primitive_statements = &linear_query.primitive_statements;
 
     // Walk through primitive statements in order, using the old analyze method
     // We'll track expression contexts during variable validation instead
@@ -512,24 +509,14 @@ fn analyze_mutation(
     symbol_table: &mut SymbolTable,
     diagnostics: &mut Vec<Diag>,
 ) -> ScopeId {
-    use crate::ast::mutation::LinearDataModifyingStatement;
+    
 
     // Push a statement-local mutation scope.
     let statement_scope_id = symbol_table.push_scope(ScopeKind::Query);
 
-    match mutation {
-        LinearDataModifyingStatement::Focused(focused) => {
-            // Analyze all data accessing statements
-            for stmt in &focused.statements {
-                analyze_data_accessing_statement(validator, stmt, symbol_table, diagnostics);
-            }
-        }
-        LinearDataModifyingStatement::Ambient(ambient) => {
-            // Analyze all data accessing statements
-            for stmt in &ambient.statements {
-                analyze_data_accessing_statement(validator, stmt, symbol_table, diagnostics);
-            }
-        }
+    // Analyze all data accessing statements
+    for stmt in &mutation.statements {
+        analyze_data_accessing_statement(validator, stmt, symbol_table, diagnostics);
     }
 
     // Restore parent scope so sibling statements remain isolated.

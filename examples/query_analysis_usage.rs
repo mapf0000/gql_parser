@@ -42,10 +42,10 @@ fn main() {
     println!("define/use edges: {}", dependency_graph.edges.len());
 
     if let Statement::Query(query_statement) = statement
-        && let gql_parser::ast::Query::Linear(gql_parser::ast::LinearQuery::Ambient(ambient)) =
-            &query_statement.query
+        && let gql_parser::ast::Query::Linear(linear_query) = &query_statement.query
+        && linear_query.use_graph.is_none()
         && let Some(gql_parser::ast::PrimitiveQueryStatement::Match(match_statement)) =
-            ambient.primitive_statements.first()
+            linear_query.primitive_statements.first()
         && let gql_parser::ast::MatchStatement::Simple(simple) = match_statement
     {
         let pattern_info = PatternInfo::analyze(&simple.pattern);

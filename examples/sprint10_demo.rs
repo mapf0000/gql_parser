@@ -80,7 +80,8 @@ fn main() {
     println!("  - Statement span: {:?}", primitive.span());
 
     // Demonstrate ambient linear statement
-    let ambient = AmbientLinearDataModifyingStatement {
+    let ambient = LinearDataModifyingStatement {
+        use_graph_clause: None,
         statements: vec![SimpleDataAccessingStatement::Modifying(
             SimpleDataModifyingStatement::Primitive(PrimitiveDataModifyingStatement::Set(set)),
         )],
@@ -89,6 +90,7 @@ fn main() {
     };
     println!("\n✓ Ambient linear data modifying statement created");
     println!("  - Number of statements: {}", ambient.statements.len());
+    println!("  - Is ambient: {}", ambient.is_ambient());
 
     println!("\n=================================================");
     println!("Sprint 10 AST Implementation: ✅ COMPLETE");

@@ -16,39 +16,52 @@ use smol_str::SmolStr;
 // ============================================================================
 
 /// A linear data modifying statement.
+///
+/// Linear data modifying statements chain data-accessing operations (query and
+/// mutation statements) in sequence. The statement can be either focused (with
+/// explicit USE GRAPH clause) or ambient (using the session default graph),
+/// determined by the presence of `use_graph_clause`.
+///
+/// # Examples
+///
+/// ```text
+/// // Focused statement (use_graph_clause is Some)
+/// USE myGraph
+/// MATCH (n:Person)
+/// SET n.updated = true
+///
+/// // Ambient statement (use_graph_clause is None)
+/// MATCH (n:Person)
+/// DELETE n
+/// ```
 #[derive(Debug, Clone, PartialEq)]
-pub enum LinearDataModifyingStatement {
-    /// Focused statement with explicit `USE` clause.
-    Focused(FocusedLinearDataModifyingStatement),
-    /// Ambient statement using session graph context.
-    Ambient(AmbientLinearDataModifyingStatement),
+pub struct LinearDataModifyingStatement {
+    /// Optional USE GRAPH clause. When Some, this is a focused statement.
+    /// When None, this is an ambient statement using the session default graph.
+    pub use_graph_clause: Option<UseGraphClause>,
+    /// Sequential data-accessing statements (query and mutation operations).
+    pub statements: Vec<SimpleDataAccessingStatement>,
+    /// Optional result statement (RETURN/FINISH).
+    pub primitive_result_statement: Option<PrimitiveResultStatement>,
+    /// Source span.
+    pub span: Span,
 }
 
 impl LinearDataModifyingStatement {
+    /// Returns whether this is a focused statement (has explicit USE GRAPH clause).
+    pub fn is_focused(&self) -> bool {
+        self.use_graph_clause.is_some()
+    }
+
+    /// Returns whether this is an ambient statement (no USE GRAPH clause).
+    pub fn is_ambient(&self) -> bool {
+        self.use_graph_clause.is_none()
+    }
+
     /// Returns the span of this statement.
     pub fn span(&self) -> &Span {
-        match self {
-            LinearDataModifyingStatement::Focused(stmt) => &stmt.span,
-            LinearDataModifyingStatement::Ambient(stmt) => &stmt.span,
-        }
+        &self.span
     }
-}
-
-/// Focused linear data modifying statement body.
-#[derive(Debug, Clone, PartialEq)]
-pub struct FocusedLinearDataModifyingStatement {
-    pub use_graph_clause: UseGraphClause,
-    pub statements: Vec<SimpleDataAccessingStatement>,
-    pub primitive_result_statement: Option<PrimitiveResultStatement>,
-    pub span: Span,
-}
-
-/// Ambient linear data modifying statement body.
-#[derive(Debug, Clone, PartialEq)]
-pub struct AmbientLinearDataModifyingStatement {
-    pub statements: Vec<SimpleDataAccessingStatement>,
-    pub primitive_result_statement: Option<PrimitiveResultStatement>,
-    pub span: Span,
 }
 
 /// A simple data-accessing statement inside linear mutation flow.

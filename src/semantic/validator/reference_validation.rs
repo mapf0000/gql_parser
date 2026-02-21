@@ -52,10 +52,10 @@ fn validate_query_references(
     match query {
         Query::Linear(linear_query) => {
             // Check for USE GRAPH clause
-            if let crate::ast::query::LinearQuery::Focused(focused) = linear_query {
+            if let Some(use_graph) = &linear_query.use_graph {
                 // Extract graph name from USE GRAPH expression (if it's a simple reference)
                 if let crate::ast::expression::Expression::VariableReference(name, span) =
-                    &focused.use_graph.graph
+                    &use_graph.graph
                     && metadata.validate_graph_exists(name).is_err()
                 {
                     use crate::semantic::diag::SemanticDiagBuilder;
@@ -84,17 +84,17 @@ fn validate_mutation_references(
     metadata: &dyn crate::semantic::metadata_provider::MetadataProvider,
     diagnostics: &mut Vec<Diag>,
 ) {
-    use crate::ast::mutation::LinearDataModifyingStatement;
+    
 
     // Check for USE GRAPH clause in focused mutations
-    if let LinearDataModifyingStatement::Focused(focused) = mutation {
+    if let Some(use_graph_clause) = &mutation.use_graph_clause {
         // Extract graph name from USE GRAPH expression (if it's a simple reference)
         if let crate::ast::expression::Expression::VariableReference(name, span) =
-            &focused.use_graph_clause.graph
-            && metadata.validate_graph_exists(name).is_err()
+            &use_graph_clause.graph
+            && metadata.validate_graph_exists(name.as_str()).is_err()
         {
             use crate::semantic::diag::SemanticDiagBuilder;
-            let diag = SemanticDiagBuilder::unknown_reference("graph", name, span.clone())
+            let diag = SemanticDiagBuilder::unknown_reference("graph", name.as_str(), span.clone())
                 .with_note("Graph not found in metadata")
                 .build();
             diagnostics.push(diag);

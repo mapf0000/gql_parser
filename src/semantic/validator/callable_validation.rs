@@ -361,16 +361,12 @@ impl<'v, 'm> AstVisitor for CallableValidationVisitor<'v, 'm> {
     type Break = ();
 
     fn visit_linear_query(&mut self, query: &crate::ast::query::LinearQuery) -> VisitResult<()> {
-        use crate::ast::query::LinearQuery;
         eprintln!("DEBUG: visit_linear_query called");
-        match query {
-            LinearQuery::Focused(focused) => {
-                eprintln!("DEBUG: Focused query, primitive_statements count: {}", focused.primitive_statements.len());
-            }
-            LinearQuery::Ambient(ambient) => {
-                eprintln!("DEBUG: Ambient query, primitive_statements count: {}", ambient.primitive_statements.len());
-            }
-        }
+        eprintln!(
+            "DEBUG: Query type: {}, primitive_statements count: {}",
+            if query.use_graph.is_some() { "Focused" } else { "Ambient" },
+            query.primitive_statements.len()
+        );
         walk_linear_query(self, query)
     }
 

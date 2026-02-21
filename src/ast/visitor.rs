@@ -2,6 +2,29 @@
 //!
 //! These visitors intentionally focus on query syntax and expression trees,
 //! which are the primary downstream integration surface for compilers.
+//!
+//! ## Design Note
+//!
+//! This module contains separate immutable ([`AstVisitor`]) and mutable ([`AstVisitorMut`])
+//! visitor traits with corresponding walker functions. While this results in ~800 lines of
+//! duplication, it's the idiomatic Rust pattern for visitor APIs, used by major projects like:
+//! - `syn` (Rust's most popular parsing library)
+//! - `rustc_ast` (Rust compiler's AST)
+//! - `swc` (JavaScript/TypeScript compiler)
+//!
+//! **Why duplication is preferred:**
+//! 1. **Clarity**: `&T` vs `&mut T` are fundamentally different - explicit separation makes usage clear
+//! 2. **Error messages**: Direct trait methods produce better compiler errors than generic abstractions
+//! 3. **IDE support**: Autocompletion and go-to-definition work flawlessly
+//! 4. **Zero-cost**: No runtime overhead from generic dispatch or trait objects
+//! 5. **Maintainability**: Changes to immutable visitors don't affect mutable ones
+//!
+//! **Why alternatives aren't used:**
+//! - **GATs (Generic Associated Types)**: Adds significant complexity for marginal benefit
+//! - **Proc macros**: Makes debugging harder, increases compile times, obscures implementation
+//! - **Trait objects**: Runtime cost, loses type information
+//!
+//! In Rust, explicitness and zero-cost abstractions take precedence over DRY when there's a tradeoff.
 
 use std::ops::ControlFlow;
 
@@ -337,24 +360,14 @@ pub fn walk_linear_query<V: AstVisitor + ?Sized>(
     visitor: &mut V,
     query: &LinearQuery,
 ) -> VisitResult<V::Break> {
-    match query {
-        LinearQuery::Focused(focused) => {
-            try_visit!(visitor.visit_expression(&focused.use_graph.graph));
-            for statement in &focused.primitive_statements {
-                try_visit!(visitor.visit_primitive_query_statement(statement));
-            }
-            if let Some(result) = &focused.result_statement {
-                try_visit!(visitor.visit_primitive_result_statement(result));
-            }
-        }
-        LinearQuery::Ambient(ambient) => {
-            for statement in &ambient.primitive_statements {
-                try_visit!(visitor.visit_primitive_query_statement(statement));
-            }
-            if let Some(result) = &ambient.result_statement {
-                try_visit!(visitor.visit_primitive_result_statement(result));
-            }
-        }
+    if let Some(use_graph) = &query.use_graph {
+        try_visit!(visitor.visit_expression(&use_graph.graph));
+    }
+    for statement in &query.primitive_statements {
+        try_visit!(visitor.visit_primitive_query_statement(statement));
+    }
+    if let Some(result) = &query.result_statement {
+        try_visit!(visitor.visit_primitive_result_statement(result));
     }
 
     ControlFlow::Continue(())
@@ -986,24 +999,14 @@ pub fn walk_linear_query_mut<V: AstVisitorMut + ?Sized>(
     visitor: &mut V,
     query: &mut LinearQuery,
 ) -> VisitResult<V::Break> {
-    match query {
-        LinearQuery::Focused(focused) => {
-            try_visit!(visitor.visit_expression_mut(&mut focused.use_graph.graph));
-            for statement in &mut focused.primitive_statements {
-                try_visit!(visitor.visit_primitive_query_statement_mut(statement));
-            }
-            if let Some(result) = &mut focused.result_statement {
-                try_visit!(visitor.visit_primitive_result_statement_mut(result));
-            }
-        }
-        LinearQuery::Ambient(ambient) => {
-            for statement in &mut ambient.primitive_statements {
-                try_visit!(visitor.visit_primitive_query_statement_mut(statement));
-            }
-            if let Some(result) = &mut ambient.result_statement {
-                try_visit!(visitor.visit_primitive_result_statement_mut(result));
-            }
-        }
+    if let Some(use_graph) = &mut query.use_graph {
+        try_visit!(visitor.visit_expression_mut(&mut use_graph.graph));
+    }
+    for statement in &mut query.primitive_statements {
+        try_visit!(visitor.visit_primitive_query_statement_mut(statement));
+    }
+    if let Some(result) = &mut query.result_statement {
+        try_visit!(visitor.visit_primitive_result_statement_mut(result));
     }
 
     ControlFlow::Continue(())

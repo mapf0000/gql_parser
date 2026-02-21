@@ -70,11 +70,11 @@ pub struct CatalogStatement {
 mod tests {
     use super::*;
     use crate::ast::catalog::{CallCatalogModifyingProcedureStatement, CatalogStatementKind};
-    use crate::ast::mutation::{AmbientLinearDataModifyingStatement, LinearDataModifyingStatement};
+    use crate::ast::mutation::LinearDataModifyingStatement;
     use crate::ast::procedure::{
         CallProcedureStatement, NamedProcedureCall, ProcedureArgumentList, ProcedureCall,
     };
-    use crate::ast::query::{AmbientLinearQuery, LinearQuery, Query};
+    use crate::ast::query::{LinearQuery, Query};
     use crate::ast::references::ProcedureReference;
     use crate::ast::session::{SessionCloseCommand, SessionCommand};
     use crate::ast::transaction::{CommitCommand, TransactionCommand};
@@ -91,21 +91,23 @@ mod tests {
     #[test]
     fn test_statement_types() {
         let query = Statement::Query(Box::new(QueryStatement {
-            query: Query::Linear(LinearQuery::Ambient(AmbientLinearQuery {
+            query: Query::Linear(LinearQuery {
+                use_graph: None,
                 primitive_statements: vec![],
                 result_statement: None,
                 span: 0..5,
-            })),
+            }),
             span: 0..5,
         }));
         assert!(matches!(query, Statement::Query(_)));
 
         let mutation = Statement::Mutation(Box::new(MutationStatement {
-            statement: LinearDataModifyingStatement::Ambient(AmbientLinearDataModifyingStatement {
+            statement: LinearDataModifyingStatement {
+                use_graph_clause: None,
                 statements: vec![],
                 primitive_result_statement: None,
                 span: 0..5,
-            }),
+            },
             span: 0..5,
         }));
         assert!(matches!(mutation, Statement::Mutation(_)));

@@ -20,3 +20,5 @@ mod type_system_validation;
 mod set_operations_validation;
 mod case_expression_validation;
 mod predicate_validation;
+mod catalog_session_validation;
+mod edge_case_regression_validation;

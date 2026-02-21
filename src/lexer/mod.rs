@@ -785,4 +785,238 @@ mod tests {
             TokenKind::ByteStringLiteral("0A0b".into())
         );
     }
+
+    #[test]
+    fn unterminated_byte_string_reports_error() {
+        let result = tokenize("X'ABCD");
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(result.diagnostics[0].message.contains("unclosed byte string"));
+    }
+
+    #[test]
+    fn malformed_byte_string_odd_length() {
+        let result = tokenize("X'ABC'");
+        assert!(result.diagnostics.iter().any(|d| d.message.contains("malformed")));
+    }
+
+    #[test]
+    fn malformed_byte_string_non_hex() {
+        let result = tokenize("X'GHIJ'");
+        assert!(result.diagnostics.iter().any(|d| d.message.contains("malformed")));
+    }
+
+    #[test]
+    fn byte_string_empty() {
+        let result = tokenize("X''");
+        assert_eq!(result.tokens.len(), 2);
+        assert_eq!(result.tokens[0].kind, TokenKind::ByteStringLiteral("".into()));
+    }
+
+    #[test]
+    fn unterminated_delimited_identifier() {
+        let result = tokenize("`unclosed");
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(result.diagnostics[0].message.contains("unclosed delimited identifier"));
+    }
+
+    #[test]
+    fn double_quoted_string_literals() {
+        let result = tokenize("\"hello world\"");
+        assert_eq!(result.tokens.len(), 2);
+        assert_eq!(result.tokens[0].kind, TokenKind::StringLiteral("hello world".into()));
+    }
+
+    #[test]
+    fn unterminated_double_quoted_string() {
+        let result = tokenize("\"unclosed");
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(result.diagnostics[0].message.contains("unclosed string"));
+    }
+
+    #[test]
+    fn reference_parameters() {
+        let result = tokenize("$$graphName $$param1");
+        assert_eq!(result.tokens.len(), 3);
+        assert_eq!(result.tokens[0].kind, TokenKind::ReferenceParameter("graphName".into()));
+        assert_eq!(result.tokens[1].kind, TokenKind::ReferenceParameter("param1".into()));
+    }
+
+    #[test]
+    fn string_unicode_escape_valid() {
+        let result = tokenize("'\\u0041'");
+        assert_eq!(result.tokens[0].kind, TokenKind::StringLiteral("A".into()));
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn string_unicode_escape_invalid_hex() {
+        let result = tokenize("'\\u00GH'");
+        assert!(!result.diagnostics.is_empty());
+        assert!(result.diagnostics.iter().any(|d| d.message.contains("invalid unicode")));
+    }
+
+    #[test]
+    fn string_unicode_escape_incomplete() {
+        let result = tokenize("'\\u00'");
+        assert!(!result.diagnostics.is_empty());
+        assert!(result.diagnostics.iter().any(|d| d.message.contains("invalid unicode")));
+    }
+
+    #[test]
+    fn string_unicode_escape_invalid_codepoint() {
+        let result = tokenize("'\\uD800'");
+        assert!(!result.diagnostics.is_empty());
+        assert!(result.diagnostics.iter().any(|d| d.message.contains("invalid unicode")));
+    }
+
+    #[test]
+    fn string_all_escape_sequences() {
+        let result = tokenize("'\\n\\t\\r\\'\\\\\\u0020'");
+        assert_eq!(result.tokens[0].kind, TokenKind::StringLiteral("\n\t\r'\\ ".into()));
+    }
+
+    #[test]
+    fn double_quoted_string_escapes() {
+        let result = tokenize("\"\\n\\t\\\"\"");
+        assert_eq!(result.tokens[0].kind, TokenKind::StringLiteral("\n\t\"".into()));
+    }
+
+    #[test]
+    fn string_invalid_escape_sequence() {
+        let result = tokenize("'\\x'");
+        assert!(!result.diagnostics.is_empty());
+        assert!(result.diagnostics.iter().any(|d| d.message.contains("invalid escape")));
+    }
+
+    #[test]
+    fn delimited_identifier_escapes() {
+        let result = tokenize("`back\\`tick` `back\\\\slash`");
+        assert_eq!(result.tokens[0].kind, TokenKind::DelimitedIdentifier("back`tick".into()));
+        assert_eq!(result.tokens[1].kind, TokenKind::DelimitedIdentifier("back\\slash".into()));
+    }
+
+    #[test]
+    fn delimited_identifier_invalid_escape() {
+        let result = tokenize("`\\n`");
+        assert!(!result.diagnostics.is_empty());
+        assert!(result.diagnostics.iter().any(|d| d.message.contains("invalid escape")));
+    }
+
+    #[test]
+    fn numeric_hex_octal_binary() {
+        let result = tokenize("0x1A2B 0X1a2b 0o755 0O755 0b1010 0B1010");
+        assert_eq!(result.tokens.len(), 7);
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn numeric_with_underscores() {
+        let result = tokenize("1_000 3.14_159 0xFF_FF");
+        assert_eq!(result.tokens.len(), 4);
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn numeric_exponent_variants() {
+        let result = tokenize("1e10 1E10 1e+5 1e-3 3.14e2");
+        assert_eq!(result.tokens.len(), 6);
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn invalid_numeric_empty_exponent() {
+        let result = tokenize("1e");
+        // "1e" is tokenized as identifier "e" after integer "1", not a malformed number
+        // This is valid tokenization behavior
+        assert_eq!(result.tokens.len(), 3); // 1, e, EOF
+    }
+
+    #[test]
+    fn invalid_numeric_double_underscore() {
+        let result = tokenize("1__2");
+        assert!(result.diagnostics.iter().any(|d| d.message.contains("malformed")));
+    }
+
+    #[test]
+    fn invalid_numeric_trailing_underscore() {
+        let result = tokenize("1_");
+        assert!(result.diagnostics.iter().any(|d| d.message.contains("malformed")));
+    }
+
+    #[test]
+    fn invalid_numeric_exponent_trailing_underscore() {
+        let result = tokenize("1e1_");
+        assert!(result.diagnostics.iter().any(|d| d.message.contains("malformed")));
+    }
+
+    #[test]
+    fn invalid_hex_leading_underscore() {
+        let result = tokenize("0x_FF");
+        assert!(result.diagnostics.iter().any(|d| d.message.contains("malformed")));
+    }
+
+    #[test]
+    fn invalid_octal_double_underscore() {
+        let result = tokenize("0o7__7");
+        assert!(result.diagnostics.iter().any(|d| d.message.contains("malformed")));
+    }
+
+    #[test]
+    fn invalid_binary_trailing_underscore() {
+        let result = tokenize("0b101_");
+        assert!(result.diagnostics.iter().any(|d| d.message.contains("malformed")));
+    }
+
+    #[test]
+    fn all_multi_char_operators() {
+        let result = tokenize("-> <- <= >= <> != <~ ~> || :: ..");
+        // 11 operators + 1 EOF = 12
+        assert_eq!(result.tokens.len(), 12);
+    }
+
+    #[test]
+    fn all_single_char_operators() {
+        let result = tokenize("+ - * / % ? ! ^ = < > ~ | &");
+        // 13 operators + 1 EOF = 14, but let me count: +,-,*,/,%,?,!,^,=,<,>,~,|,& = 14 operators + EOF = 15
+        assert_eq!(result.tokens.len(), 15);
+    }
+
+    #[test]
+    fn all_punctuation() {
+        let result = tokenize("( ) [ ] { } , ; . :");
+        assert_eq!(result.tokens.len(), 11);
+    }
+
+    #[test]
+    fn float_literals() {
+        let result = tokenize("3.14 0.5 999.999");
+        assert_eq!(result.tokens.len(), 4);
+        assert_eq!(result.tokens[0].kind, TokenKind::FloatLiteral("3.14".into()));
+    }
+
+    #[test]
+    fn token_slice_method() {
+        let source = "MATCH (n)";
+        let result = tokenize(source);
+        assert_eq!(result.tokens[0].slice(source), "MATCH");
+    }
+
+    #[test]
+    fn invalid_exponent_with_sign_no_digits() {
+        let result = tokenize("1e+ 1e-");
+        // These tokenize as separate tokens, not malformed numbers
+        assert_eq!(result.tokens.len(), 7); // 1, e, +, 1, e, -, EOF
+    }
+
+    #[test]
+    fn string_trailing_backslash() {
+        let result = tokenize("'test\\");
+        assert_eq!(result.tokens.len(), 2);
+    }
+
+    #[test]
+    fn delimited_identifier_trailing_backslash() {
+        let result = tokenize("`test\\");
+        assert_eq!(result.tokens.len(), 2);
+    }
 }

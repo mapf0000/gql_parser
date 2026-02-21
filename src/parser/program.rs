@@ -2049,12 +2049,17 @@ mod tests {
             panic!("expected query statement");
         };
 
-        let Query::Linear(LinearQuery::Ambient(query)) = &stmt.query else {
+        let Query::Linear(linear_query) = &stmt.query else {
             panic!("expected ambient linear query");
         };
-        assert!(query.primitive_statements.is_empty());
+
+        if linear_query.use_graph.is_some() {
+            panic!("expected ambient linear query");
+        }
+
+        assert!(linear_query.primitive_statements.is_empty());
         assert!(matches!(
-            query.result_statement.as_deref(),
+            linear_query.result_statement.as_deref(),
             Some(PrimitiveResultStatement::Return(_))
         ));
     }
@@ -2073,11 +2078,16 @@ mod tests {
         let Statement::Query(stmt) = &program.statements[0] else {
             panic!("expected query statement");
         };
-        let Query::Linear(LinearQuery::Ambient(query)) = &stmt.query else {
+        let Query::Linear(linear_query) = &stmt.query else {
             panic!("expected ambient linear query");
         };
+
+        if linear_query.use_graph.is_some() {
+            panic!("expected ambient linear query");
+        }
+
         assert!(matches!(
-            query.primitive_statements.first(),
+            linear_query.primitive_statements.first(),
             Some(PrimitiveQueryStatement::Select(_))
         ));
     }
@@ -2315,11 +2325,16 @@ mod tests {
         let Statement::Query(stmt) = &program.statements[0] else {
             panic!("expected query statement");
         };
-        let Query::Linear(LinearQuery::Ambient(query)) = &stmt.query else {
+        let Query::Linear(linear_query) = &stmt.query else {
             panic!("expected ambient linear query");
         };
-        assert_eq!(query.primitive_statements.len(), 1);
-        let PrimitiveQueryStatement::Call(call) = &query.primitive_statements[0] else {
+
+        if linear_query.use_graph.is_some() {
+            panic!("expected ambient linear query");
+        }
+
+        assert_eq!(linear_query.primitive_statements.len(), 1);
+        let PrimitiveQueryStatement::Call(call) = &linear_query.primitive_statements[0] else {
             panic!("expected CALL primitive statement");
         };
         let crate::ast::ProcedureCall::Named(named_call) = &call.call else {

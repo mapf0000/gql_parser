@@ -56,35 +56,15 @@ pub(super) fn parse_linear_query_as_query(tokens: &[Token], pos: &mut usize) -> 
 /// Parses a linear query statement.
 fn parse_linear_query(tokens: &[Token], pos: &mut usize) -> ParseResult<LinearQuery> {
     let mut diags = Vec::new();
-
-    // Check for USE clause (focused query)
-    if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Use) {
-        let (focused_opt, mut focused_diags) = parse_focused_linear_query(tokens, pos);
-        diags.append(&mut focused_diags);
-        return (focused_opt.map(LinearQuery::Focused), diags);
-    }
-
-    // Otherwise, ambient query
-    let (ambient_opt, mut ambient_diags) = parse_ambient_linear_query(tokens, pos);
-    diags.append(&mut ambient_diags);
-    (ambient_opt.map(LinearQuery::Ambient), diags)
-}
-
-/// Parses a focused linear query (with USE clause).
-fn parse_focused_linear_query(
-    tokens: &[Token],
-    pos: &mut usize,
-) -> ParseResult<FocusedLinearQuery> {
-    let mut diags = Vec::new();
     let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
 
-    // Parse USE clause
-    let (use_graph_opt, mut use_diags) = parse_use_graph_clause(tokens, pos);
-    diags.append(&mut use_diags);
-
-    let use_graph = match use_graph_opt {
-        Some(ug) => ug,
-        None => return (None, diags),
+    // Check for optional USE clause
+    let use_graph = if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Use) {
+        let (use_graph_opt, mut use_diags) = parse_use_graph_clause(tokens, pos);
+        diags.append(&mut use_diags);
+        use_graph_opt
+    } else {
+        None
     };
 
     // Parse primitive statements and result statement
@@ -93,45 +73,13 @@ fn parse_focused_linear_query(
     diags.append(&mut stmt_diags);
 
     if !has_query_body {
+        let error_msg = if use_graph.is_some() {
+            "Expected query statement after USE clause"
+        } else {
+            "Expected query statement"
+        };
         diags.push(
-            Diag::error("Expected query statement after USE clause").with_primary_label(
-                tokens
-                    .get(*pos)
-                    .map(|t| t.span.clone())
-                    .unwrap_or(use_graph.span.clone()),
-                "expected query statement here",
-            ),
-        );
-        return (None, diags);
-    }
-
-    (
-        Some(FocusedLinearQuery {
-            use_graph,
-            primitive_statements,
-            result_statement,
-            span: start..end,
-        }),
-        diags,
-    )
-}
-
-/// Parses an ambient linear query (without USE clause).
-fn parse_ambient_linear_query(
-    tokens: &[Token],
-    pos: &mut usize,
-) -> ParseResult<AmbientLinearQuery> {
-    let mut diags = Vec::new();
-    let start = tokens.get(*pos).map(|t| t.span.start).unwrap_or(0);
-
-    // Parse primitive statements and result statement
-    let (primitive_statements, result_statement, has_query_body, mut stmt_diags, end) =
-        parse_query_statements(tokens, pos, start);
-    diags.append(&mut stmt_diags);
-
-    if !has_query_body {
-        diags.push(
-            Diag::error("Expected query statement").with_primary_label(
+            Diag::error(error_msg).with_primary_label(
                 tokens
                     .get(*pos)
                     .map(|t| t.span.clone())
@@ -143,7 +91,8 @@ fn parse_ambient_linear_query(
     }
 
     (
-        Some(AmbientLinearQuery {
+        Some(LinearQuery {
+            use_graph,
             primitive_statements,
             result_statement,
             span: start..end,
@@ -151,6 +100,7 @@ fn parse_ambient_linear_query(
         diags,
     )
 }
+
 
 /// Helper to parse query statements (primitive + optional result).
 fn parse_query_statements(

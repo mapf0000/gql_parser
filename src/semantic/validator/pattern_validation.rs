@@ -71,10 +71,7 @@ fn validate_linear_query_patterns(
     linear_query: &LinearQuery,
     diagnostics: &mut Vec<Diag>,
 ) {
-    let primitive_statements = match linear_query {
-        LinearQuery::Focused(focused) => &focused.primitive_statements,
-        LinearQuery::Ambient(ambient) => &ambient.primitive_statements,
-    };
+    let primitive_statements = &linear_query.primitive_statements;
 
     for statement in primitive_statements {
         if let PrimitiveQueryStatement::Match(match_stmt) = statement {
@@ -282,14 +279,11 @@ fn validate_mutation_patterns(
     diagnostics: &mut Vec<Diag>,
 ) {
     use crate::ast::mutation::{
-        LinearDataModifyingStatement, PrimitiveDataModifyingStatement,
+        PrimitiveDataModifyingStatement,
         SimpleDataAccessingStatement, SimpleDataModifyingStatement,
     };
 
-    let statements = match mutation {
-        LinearDataModifyingStatement::Focused(focused) => &focused.statements,
-        LinearDataModifyingStatement::Ambient(ambient) => &ambient.statements,
-    };
+    let statements = &mutation.statements;
 
     for statement in statements {
         match statement {

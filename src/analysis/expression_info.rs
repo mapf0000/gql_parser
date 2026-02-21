@@ -197,15 +197,20 @@ mod tests {
 
         let expression = match &program.statements[0] {
             crate::ast::Statement::Query(statement) => {
-                let crate::ast::query::Query::Linear(crate::ast::query::LinearQuery::Ambient(
-                    ambient,
-                )) = &statement.query
-                else {
-                    panic!("expected ambient query");
+                let crate::ast::query::Query::Linear(linear_query) = &statement.query else {
+                    panic!("expected linear query");
                 };
 
+                if linear_query.use_graph.is_some() {
+                    panic!("expected ambient query");
+                }
+
                 let crate::ast::query::PrimitiveResultStatement::Return(return_statement) =
-                    ambient.result_statement.as_ref().expect("expected return statement").as_ref()
+                    linear_query
+                        .result_statement
+                        .as_ref()
+                        .expect("expected return statement")
+                        .as_ref()
                 else {
                     panic!("expected RETURN");
                 };

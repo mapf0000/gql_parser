@@ -70,10 +70,7 @@ fn infer_linear_query_types(
     linear_query: &LinearQuery,
     type_table: &mut TypeTable,
 ) {
-    let primitive_statements = match linear_query {
-        LinearQuery::Focused(focused) => &focused.primitive_statements,
-        LinearQuery::Ambient(ambient) => &ambient.primitive_statements,
-    };
+    let primitive_statements = &linear_query.primitive_statements;
 
     // Walk primitive statements and infer types
     for statement in primitive_statements {
@@ -120,12 +117,9 @@ fn infer_mutation_types(
     mutation: &crate::ast::mutation::LinearDataModifyingStatement,
     type_table: &mut TypeTable,
 ) {
-    use crate::ast::mutation::LinearDataModifyingStatement;
+    
 
-    let statements = match mutation {
-        LinearDataModifyingStatement::Focused(focused) => &focused.statements,
-        LinearDataModifyingStatement::Ambient(ambient) => &ambient.statements,
-    };
+    let statements = &mutation.statements;
 
     for stmt in statements {
         use crate::ast::mutation::SimpleDataAccessingStatement;

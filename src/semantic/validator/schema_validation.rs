@@ -92,10 +92,7 @@ fn validate_linear_query_schema(
     snapshot: &dyn crate::semantic::schema_catalog::SchemaSnapshot,
     diagnostics: &mut Vec<Diag>,
 ) {
-    let primitive_statements = match linear_query {
-        LinearQuery::Focused(focused) => &focused.primitive_statements,
-        LinearQuery::Ambient(ambient) => &ambient.primitive_statements,
-    };
+    let primitive_statements = &linear_query.primitive_statements;
 
     for statement in primitive_statements {
         if let PrimitiveQueryStatement::Match(match_stmt) = statement {

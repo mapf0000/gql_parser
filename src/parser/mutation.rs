@@ -28,27 +28,16 @@ pub fn parse_linear_data_modifying_statement(
         return (None, vec![]);
     }
 
-    if matches!(tokens[*pos].kind, TokenKind::Use) {
-        let (focused, diags) = parse_focused_linear_data_modifying_statement(tokens, pos);
-        return (focused.map(LinearDataModifyingStatement::Focused), diags);
-    }
-
-    let (ambient, diags) = parse_ambient_linear_data_modifying_statement(tokens, pos);
-    (ambient.map(LinearDataModifyingStatement::Ambient), diags)
-}
-
-fn parse_focused_linear_data_modifying_statement(
-    tokens: &[Token],
-    pos: &mut usize,
-) -> ParseResult<FocusedLinearDataModifyingStatement> {
     let mut diags = Vec::new();
     let start = tokens.get(*pos).map_or(0, |token| token.span.start);
 
-    let (use_graph_clause_opt, mut use_diags) = parse_use_graph_clause(tokens, pos);
-    diags.append(&mut use_diags);
-
-    let Some(use_graph_clause) = use_graph_clause_opt else {
-        return (None, diags);
+    // Check for optional USE clause
+    let use_graph_clause = if matches!(tokens[*pos].kind, TokenKind::Use) {
+        let (use_graph_clause_opt, mut use_diags) = parse_use_graph_clause(tokens, pos);
+        diags.append(&mut use_diags);
+        use_graph_clause_opt
+    } else {
+        None
     };
 
     let (statements, primitive_result_statement, mut body_diags, end) =
@@ -56,44 +45,13 @@ fn parse_focused_linear_data_modifying_statement(
     diags.append(&mut body_diags);
 
     if statements.is_empty() {
+        let error_msg = if use_graph_clause.is_some() {
+            "Expected data-accessing statement after USE clause"
+        } else {
+            "Expected data-modifying statement"
+        };
         diags.push(
-            Diag::error("Expected data-accessing statement after USE clause")
-                .with_primary_label(
-                    tokens
-                        .get(*pos)
-                        .map_or(use_graph_clause.span.clone(), |token| token.span.clone()),
-                    "expected statement here",
-                )
-                .with_code("P_MUT"),
-        );
-        return (None, diags);
-    }
-
-    (
-        Some(FocusedLinearDataModifyingStatement {
-            use_graph_clause,
-            statements,
-            primitive_result_statement,
-            span: start..end,
-        }),
-        diags,
-    )
-}
-
-fn parse_ambient_linear_data_modifying_statement(
-    tokens: &[Token],
-    pos: &mut usize,
-) -> ParseResult<AmbientLinearDataModifyingStatement> {
-    let mut diags = Vec::new();
-    let start = tokens.get(*pos).map_or(0, |token| token.span.start);
-
-    let (statements, primitive_result_statement, mut body_diags, end) =
-        parse_linear_data_modifying_body(tokens, pos, start);
-    diags.append(&mut body_diags);
-
-    if statements.is_empty() {
-        diags.push(
-            Diag::error("Expected data-modifying statement")
+            Diag::error(error_msg)
                 .with_primary_label(
                     tokens
                         .get(*pos)
@@ -106,7 +64,8 @@ fn parse_ambient_linear_data_modifying_statement(
     }
 
     (
-        Some(AmbientLinearDataModifyingStatement {
+        Some(LinearDataModifyingStatement {
+            use_graph_clause,
             statements,
             primitive_result_statement,
             span: start..end,
@@ -114,6 +73,7 @@ fn parse_ambient_linear_data_modifying_statement(
         diags,
     )
 }
+
 
 fn parse_linear_data_modifying_body(
     tokens: &[Token],
@@ -1514,10 +1474,11 @@ mod tests {
             parse_source("INSERT (n:Person {name: 'Alice'}) SET n.age = 30 REMOVE n:Old DELETE n");
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 
-        let Some(LinearDataModifyingStatement::Ambient(stmt)) = statement_opt else {
-            panic!("expected ambient statement");
+        let Some(stmt) = statement_opt else {
+            panic!("expected statement");
         };
 
+        assert!(stmt.is_ambient(), "expected ambient statement");
         assert_eq!(stmt.statements.len(), 4);
     }
 
@@ -1526,10 +1487,11 @@ mod tests {
         let (statement_opt, diags) = parse_source("USE myGraph INSERT (n) RETURN n");
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 
-        let Some(LinearDataModifyingStatement::Focused(stmt)) = statement_opt else {
-            panic!("expected focused statement");
+        let Some(stmt) = statement_opt else {
+            panic!("expected statement");
         };
 
+        assert!(stmt.is_focused(), "expected focused statement");
         assert_eq!(stmt.statements.len(), 1);
         assert!(matches!(
             stmt.primitive_result_statement,
@@ -1542,9 +1504,11 @@ mod tests {
         let (statement_opt, diags) = parse_source("DELETE n, m.age, n.age + 1");
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 
-        let Some(LinearDataModifyingStatement::Ambient(stmt)) = statement_opt else {
-            panic!("expected ambient statement");
+        let Some(stmt) = statement_opt else {
+            panic!("expected statement");
         };
+
+        assert!(stmt.is_ambient(), "expected ambient statement");
 
         let Some(SimpleDataAccessingStatement::Modifying(SimpleDataModifyingStatement::Primitive(
             PrimitiveDataModifyingStatement::Delete(delete),
@@ -1561,9 +1525,11 @@ mod tests {
         let (statement_opt, diags) = parse_source("SET n = {} ");
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 
-        let Some(LinearDataModifyingStatement::Ambient(stmt)) = statement_opt else {
-            panic!("expected ambient statement");
+        let Some(stmt) = statement_opt else {
+            panic!("expected statement");
         };
+
+        assert!(stmt.is_ambient(), "expected ambient statement");
 
         let Some(SimpleDataAccessingStatement::Modifying(SimpleDataModifyingStatement::Primitive(
             PrimitiveDataModifyingStatement::Set(set_stmt),
@@ -1583,9 +1549,11 @@ mod tests {
         let (statement_opt, diags) = parse_source("OPTIONAL CALL myProc(1, 2) YIELD x");
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 
-        let Some(LinearDataModifyingStatement::Ambient(stmt)) = statement_opt else {
-            panic!("expected ambient statement");
+        let Some(stmt) = statement_opt else {
+            panic!("expected statement");
         };
+
+        assert!(stmt.is_ambient(), "expected ambient statement");
 
         let Some(SimpleDataAccessingStatement::Modifying(SimpleDataModifyingStatement::Call(call))) =
             stmt.statements.first()
@@ -1618,9 +1586,11 @@ mod tests {
         let (statement_opt, diags) = parse_source("INSERT (n) CALL { RETURN n }");
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 
-        let Some(LinearDataModifyingStatement::Ambient(stmt)) = statement_opt else {
-            panic!("expected ambient statement");
+        let Some(stmt) = statement_opt else {
+            panic!("expected statement");
         };
+
+        assert!(stmt.is_ambient(), "expected ambient statement");
 
         let Some(SimpleDataAccessingStatement::Modifying(SimpleDataModifyingStatement::Call(call))) =
             stmt.statements.get(1)
@@ -1640,9 +1610,11 @@ mod tests {
         let (statement_opt, diags) = parse_source("INSERT (n) CALL (n, m) { RETURN n }");
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 
-        let Some(LinearDataModifyingStatement::Ambient(stmt)) = statement_opt else {
-            panic!("expected ambient statement");
+        let Some(stmt) = statement_opt else {
+            panic!("expected statement");
         };
+
+        assert!(stmt.is_ambient(), "expected ambient statement");
 
         let Some(SimpleDataAccessingStatement::Modifying(SimpleDataModifyingStatement::Call(call))) =
             stmt.statements.get(1)

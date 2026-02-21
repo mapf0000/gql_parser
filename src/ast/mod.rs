@@ -75,7 +75,7 @@ pub use references::{
 
 // Re-export query types
 pub use query::{
-    AmbientLinearQuery, CommonTableExpression, CompositeQuery, FilterStatement, FocusedLinearQuery,
+    CommonTableExpression, CompositeQuery, FilterStatement,
     ForItem, ForOrdinalityOrOffset, ForStatement, GraphPattern, GroupByClause, GroupingElement,
     HavingClause, LetStatement, LetVariableDefinition, LimitClause, LinearQuery, MatchStatement,
     NullOrdering, OffsetClause, OptionalMatchStatement, OptionalOperand, OrderByAndPageStatement,
@@ -91,8 +91,8 @@ pub use visitors::{AstNode, CollectingVisitor, SpanCollector, VariableCollector}
 
 // Re-export mutation types
 pub use mutation::{
-    AmbientLinearDataModifyingStatement, CallDataModifyingProcedureStatement, DeleteItem,
-    DeleteItemList, DeleteStatement, DetachOption, FocusedLinearDataModifyingStatement,
+    CallDataModifyingProcedureStatement, DeleteItem,
+    DeleteItemList, DeleteStatement, DetachOption,
     InsertEdgePattern, InsertEdgePointingLeft, InsertEdgePointingRight, InsertEdgeUndirected,
     InsertElementPattern, InsertElementPatternFiller, InsertGraphPattern, InsertNodePattern,
     InsertPathPattern, InsertStatement, LinearDataModifyingStatement,

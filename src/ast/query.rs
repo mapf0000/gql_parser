@@ -52,7 +52,7 @@ impl Query {
     /// Returns the span of this query.
     pub fn span(&self) -> &Span {
         match self {
-            Query::Linear(q) => q.span(),
+            Query::Linear(q) => &q.span,
             Query::Composite(q) => &q.span,
             Query::Parenthesized(_, span) => span,
         }
@@ -120,62 +120,51 @@ pub enum SetQuantifier {
 /// Linear queries chain primitive operations (MATCH, FILTER, LET, FOR, etc.)
 /// in sequence, where each operation transforms the working table produced
 /// by the previous operation.
-#[derive(Debug, Clone, PartialEq)]
-pub enum LinearQuery {
-    /// Focused linear query with explicit USE GRAPH clause.
-    Focused(FocusedLinearQuery),
-    /// Ambient linear query using session default graph.
-    Ambient(AmbientLinearQuery),
-}
-
-impl LinearQuery {
-    /// Returns the span of this linear query.
-    pub fn span(&self) -> &Span {
-        match self {
-            LinearQuery::Focused(q) => &q.span,
-            LinearQuery::Ambient(q) => &q.span,
-        }
-    }
-}
-
-/// A focused linear query with explicit graph context.
 ///
-/// # Example
+/// The query can be either focused (with explicit USE GRAPH clause) or ambient
+/// (using the session default graph), determined by the presence of `use_graph`.
+///
+/// # Examples
 ///
 /// ```text
+/// // Focused query (use_graph is Some)
 /// USE myGraph
 /// MATCH (n:Person)
 /// RETURN n
-/// ```
-#[derive(Debug, Clone, PartialEq)]
-pub struct FocusedLinearQuery {
-    /// USE GRAPH clause specifying the graph context.
-    pub use_graph: UseGraphClause,
-    /// Sequential primitive query statements.
-    pub primitive_statements: Vec<PrimitiveQueryStatement>,
-    /// Optional result statement (RETURN/FINISH).
-    pub result_statement: Option<Box<PrimitiveResultStatement>>,
-    /// Source span.
-    pub span: Span,
-}
-
-/// An ambient linear query using the session default graph.
 ///
-/// # Example
-///
-/// ```text
+/// // Ambient query (use_graph is None)
 /// MATCH (n:Person)
 /// FILTER n.age > 18
 /// RETURN n.name
 /// ```
 #[derive(Debug, Clone, PartialEq)]
-pub struct AmbientLinearQuery {
+pub struct LinearQuery {
+    /// Optional USE GRAPH clause. When Some, this is a focused query.
+    /// When None, this is an ambient query using the session default graph.
+    pub use_graph: Option<UseGraphClause>,
     /// Sequential primitive query statements.
     pub primitive_statements: Vec<PrimitiveQueryStatement>,
     /// Optional result statement (RETURN/FINISH).
     pub result_statement: Option<Box<PrimitiveResultStatement>>,
     /// Source span.
     pub span: Span,
+}
+
+impl LinearQuery {
+    /// Returns whether this is a focused query (has explicit USE GRAPH clause).
+    pub fn is_focused(&self) -> bool {
+        self.use_graph.is_some()
+    }
+
+    /// Returns whether this is an ambient query (no USE GRAPH clause).
+    pub fn is_ambient(&self) -> bool {
+        self.use_graph.is_none()
+    }
+
+    /// Returns the span of this linear query.
+    pub fn span(&self) -> &Span {
+        &self.span
+    }
 }
 
 /// A primitive query statement (individual operation in query pipeline).

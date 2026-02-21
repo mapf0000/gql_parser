@@ -22,3 +22,8 @@ mod composite_queries;
 mod schema_advanced;
 mod session_transaction;
 mod procedures_advanced;
+
+// Targeted unit tests for untested parser areas
+mod graph_type_parsing;
+mod pagination_ordering;
+mod path_pattern_parsing;

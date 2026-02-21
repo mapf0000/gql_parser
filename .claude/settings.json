@@ -7,11 +7,18 @@
       "Bash(/tmp/test_insert_validation:*)",
       "Bash(cargo llvm-cov:*)",
       "Bash(/tmp/verify_test.sh:*)",
-      "Bash(bash /tmp/verify_test.sh)"
+      "Bash(bash /tmp/verify_test.sh)",
+      "Bash(/tmp/test_parse.sh:*)",
+      "Bash(/tmp/test_parse.sh)",
+      "Bash(/tmp/test_lex.rs:*)",
+      "Read(//Users/d072013/SAPDevelop/gql_parser/**)",
+      "Bash(cloc:*)"
     ],
     "additionalDirectories": [
       "/Users/d072013/SAPDevelop/gql_parser",
-      "/tmp"
+      "/tmp",
+      "/Users/d072013/SAPDevelop/gql_parser/tests/parser",
+      "/private/tmp"
     ]
   }
 }
